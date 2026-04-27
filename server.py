@@ -9,7 +9,7 @@
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
-import os, json, asyncio, datetime, threading, urllib.request
+import os, json, asyncio, datetime, threading, urllib.request, hmac, hashlib, subprocess
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 
@@ -360,6 +360,38 @@ def get_sectors():
 def index():
     """메인 페이지 - 정적 파일 서빙"""
     return send_from_directory(STATIC_DIR, 'index.html')
+
+
+# ════════════════════════════════════════════
+# GitHub 자동 배포 Webhook
+# ════════════════════════════════════════════
+DEPLOY_SECRET = "stockbot-deploy-2024"
+
+@app.route('/deploy', methods=['POST'])
+def deploy():
+    """GitHub push → 자동 git pull & 서버 재시작"""
+    sig = request.headers.get('X-Hub-Signature-256', '')
+    body = request.get_data()
+    expected = 'sha256=' + hmac.new(DEPLOY_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return jsonify({"error": "invalid signature"}), 403
+
+    def do_deploy():
+        import time
+        time.sleep(0.5)
+        try:
+            subprocess.run(['git', 'pull', 'origin', 'main'], cwd=BASE_DIR, timeout=30)
+        except Exception as e:
+            print(f"[deploy] git pull error: {e}")
+        # 2초 후 서버 재시작 (현재 response 전송 완료 후)
+        subprocess.Popen(
+            'sleep 2 && pkill -f "python3 server.py" ; sleep 1 && '
+            'cd /home/ubuntu/stock-bot && nohup python3 server.py >> output/server.log 2>&1 &',
+            shell=True
+        )
+
+    threading.Thread(target=do_deploy, daemon=True).start()
+    return jsonify({"status": "배포 시작됨", "message": "git pull 후 서버 재시작 중..."})
 
 
 if __name__ == '__main__':

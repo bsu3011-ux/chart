@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+output/
+output.log
+*.log
+.env
+signals_v4.json

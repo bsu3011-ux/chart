@@ -451,7 +451,7 @@ def deploy():
         # 2초 후 서버 재시작 (현재 response 전송 완료 후)
         subprocess.Popen(
             'sleep 2 && pkill -f "python3 server.py" ; sleep 1 && '
-            'cd /home/ubuntu/stock-bot && nohup python3 server.py >> output/server.log 2>&1 &',
+            'cd /home/ubuntu/stock-bot && nohup python3 server.py >> /home/ubuntu/stock-bot/server.log 2>&1 &',
             shell=True
         )
 

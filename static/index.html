@@ -722,9 +722,11 @@ function StockChip({name,change_pct}){
   );
 }
 
-function SectorCard({s,large}){
-  const col=s.change_pct>1?C.green:s.change_pct>0?"rgba(34,197,94,0.6)":s.change_pct>-1?"rgba(239,68,68,0.6)":C.red;
-  const bg=s.change_pct>1?C.greenBg:s.change_pct>0?"rgba(34,197,94,0.05)":s.change_pct>-1?"rgba(239,68,68,0.05)":C.redBg;
+function SectorCard({s,large,mode}){
+  const pct=mode==='kr'?s.kr_pct:s.change_pct;
+  const col=pct>1?C.green:pct>0?"rgba(34,197,94,0.6)":pct>-1?"rgba(239,68,68,0.6)":C.red;
+  const bg=pct>1?C.greenBg:pct>0?"rgba(34,197,94,0.05)":pct>-1?"rgba(239,68,68,0.05)":C.redBg;
+  const stocks=mode==='kr'?s.kr_stocks:s.us_stocks;
   return(
     <div style={{padding:large?"10px 8px":"7px 6px",borderRadius:8,background:bg,
       border:`1px solid ${col}33`,boxShadow:large?`0 0 12px ${col}22`:"none"}}>
@@ -733,46 +735,81 @@ function SectorCard({s,large}){
           <span style={{fontSize:large?16:13}}>{s.emoji}</span>
           <div>
             <div style={{color:C.dim,fontSize:large?10:9,fontWeight:700,lineHeight:1.2}}>{s.name}</div>
-            <div style={{color:C.muted,fontSize:7}}>{s.ticker}</div>
+            <div style={{color:C.muted,fontSize:7}}>{mode==='kr'?'KR 평균':s.ticker}</div>
           </div>
         </div>
         <span style={{color:col,fontSize:large?13:11,fontWeight:700}}>
-          {s.change_pct>=0?"+":""}{s.change_pct?.toFixed(2)}%
+          {pct>=0?"+":""}{pct?.toFixed(2)}%
         </span>
       </div>
-      {s.us_stocks?.length>0&&(
-        <div style={{marginBottom:3}}>
-          <div style={{color:C.muted,fontSize:6,fontWeight:700,marginBottom:1}}>🇺🇸 US</div>
-          <div style={{display:"flex",flexWrap:"wrap"}}>
-            {s.us_stocks.map(st=><StockChip key={st.ticker} name={st.name} change_pct={st.change_pct}/>)}
-          </div>
-        </div>
-      )}
-      {s.kr_stocks?.length>0&&(
-        <div>
-          <div style={{color:C.muted,fontSize:6,fontWeight:700,marginBottom:1}}>🇰🇷 KR</div>
-          <div style={{display:"flex",flexWrap:"wrap"}}>
-            {s.kr_stocks.map(st=><StockChip key={st.ticker} name={st.name} change_pct={st.change_pct}/>)}
-          </div>
+      {stocks?.length>0&&(
+        <div style={{display:"flex",flexWrap:"wrap"}}>
+          {stocks.map(st=><StockChip key={st.ticker} name={st.name} change_pct={st.change_pct}/>)}
         </div>
       )}
     </div>
   );
 }
 
+function SectorPanel({list,mode}){
+  const sorted=[...list].sort((a,b)=>(mode==='kr'?b.kr_pct-a.kr_pct:b.change_pct-a.change_pct));
+  const leaders=sorted.slice(0,3);
+  const laggards=[...sorted].reverse().slice(0,3);
+  return(
+    <>
+      <div style={{marginBottom:6,padding:"8px 10px",borderRadius:10,
+        background:`linear-gradient(135deg,rgba(34,197,94,0.07),rgba(6,182,212,0.07))`,
+        border:`1px solid ${C.green}33`}}>
+        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}>
+          <span style={{fontSize:12}}>🔥</span>
+          <span style={{color:C.green,fontSize:9,fontWeight:800}}>주도 섹터 TOP 3</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:4}}>
+          {leaders.map(s=><SectorCard key={s.ticker} s={s} large={true} mode={mode}/>)}
+        </div>
+      </div>
+      <div style={{marginBottom:6,padding:"8px 10px",borderRadius:10,
+        background:`linear-gradient(135deg,rgba(239,68,68,0.07),rgba(239,68,68,0.03))`,
+        border:`1px solid ${C.red}33`}}>
+        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}>
+          <span style={{fontSize:12}}>🧊</span>
+          <span style={{color:C.red,fontSize:9,fontWeight:800}}>약세 섹터 BOTTOM 3</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:4}}>
+          {laggards.map(s=><SectorCard key={s.ticker} s={s} large={true} mode={mode}/>)}
+        </div>
+      </div>
+      <div style={{color:C.muted,fontSize:8,fontWeight:700,marginBottom:4,paddingLeft:2}}>전체 섹터</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:4}}>
+        {list.map(s=><SectorCard key={s.ticker} s={s} large={false} mode={mode}/>)}
+      </div>
+    </>
+  );
+}
+
 function SectorHeatmap(){
   const [sectors,setSectors]=useState([]);
   const [open,setOpen]=useState(false);
+  const [tab,setTab]=useState('us');
   useEffect(()=>{
     if(!open) return;
     fetch(`${API_BASE}/api/sectors`)
       .then(r=>r.json()).then(d=>setSectors(d.sectors||[])).catch(()=>{});
   },[open]);
 
-  const sorted=[...sectors].sort((a,b)=>b.change_pct-a.change_pct);
-  const leaders=sorted.slice(0,3);
-  const laggards=sorted.slice(-3).reverse();
-  const rest=sectors;
+  const enriched=sectors.map(s=>{
+    const kr=s.kr_stocks||[];
+    const kr_pct=kr.length?parseFloat((kr.reduce((a,b)=>a+b.change_pct,0)/kr.length).toFixed(2)):null;
+    return {...s,kr_pct};
+  }).filter(s=>s.kr_pct!==null);
+
+  const tabStyle=(t)=>({
+    flex:1,padding:"6px 0",borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer",textAlign:"center",
+    background:tab===t?C.elevated:"transparent",
+    color:tab===t?C.text:C.muted,
+    border:tab===t?`1px solid ${C.border}`:"1px solid transparent",
+    transition:"all .15s"
+  });
 
   return(
     <div style={{marginBottom:10}}>
@@ -785,41 +822,17 @@ function SectorHeatmap(){
       </div>
       {open&&(
         <div style={{marginTop:6}}>
+          {/* 탭 */}
+          <div style={{display:"flex",gap:4,marginBottom:8,padding:"4px",
+            borderRadius:10,background:C.cardGradient,border:`1px solid ${C.border}`}}>
+            <div style={tabStyle('us')} onClick={()=>setTab('us')}>🇺🇸 미국 섹터</div>
+            <div style={tabStyle('kr')} onClick={()=>setTab('kr')}>🇰🇷 한국 섹터</div>
+          </div>
           {sectors.length===0
             ?<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:4}}>
                {[...Array(15)].map((_,i)=><div key={i} style={{height:90,borderRadius:8,background:C.cardGradient,animation:"pulse 2s infinite"}}/>)}
              </div>
-            :<>
-              {/* 시장 주도 섹터 */}
-              <div style={{marginBottom:6,padding:"8px 10px",borderRadius:10,
-                background:`linear-gradient(135deg,rgba(34,197,94,0.07),rgba(6,182,212,0.07))`,
-                border:`1px solid ${C.green}33`}}>
-                <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}>
-                  <span style={{fontSize:12}}>🔥</span>
-                  <span style={{color:C.green,fontSize:9,fontWeight:800,letterSpacing:"0.05em"}}>시장 주도 섹터 TOP 3</span>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:4}}>
-                  {leaders.map(s=><SectorCard key={s.ticker} s={s} large={true}/>)}
-                </div>
-              </div>
-              {/* 약세 섹터 */}
-              <div style={{marginBottom:6,padding:"8px 10px",borderRadius:10,
-                background:`linear-gradient(135deg,rgba(239,68,68,0.07),rgba(239,68,68,0.03))`,
-                border:`1px solid ${C.red}33`}}>
-                <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}>
-                  <span style={{fontSize:12}}>🧊</span>
-                  <span style={{color:C.red,fontSize:9,fontWeight:800,letterSpacing:"0.05em"}}>약세 섹터 BOTTOM 3</span>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:4}}>
-                  {laggards.map(s=><SectorCard key={s.ticker} s={s} large={true}/>)}
-                </div>
-              </div>
-              {/* 전체 섹터 */}
-              <div style={{color:C.muted,fontSize:8,fontWeight:700,marginBottom:4,paddingLeft:2}}>전체 섹터</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:4}}>
-                {rest.map(s=><SectorCard key={s.ticker} s={s} large={false}/>)}
-              </div>
-            </>
+            :<SectorPanel list={tab==='us'?sectors:enriched} mode={tab}/>
           }
         </div>
       )}

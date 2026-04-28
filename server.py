@@ -309,49 +309,114 @@ def get_calendar():
 
 @app.route('/api/sectors')
 def get_sectors():
-    """미국 섹터 ETF 히트맵"""
+    """섹터 ETF 히트맵 + 미국·한국 대장주"""
     import yfinance as yf
     import pandas as pd
 
+    # (ETF ticker, 섹터명, 이모지, [(US ticker, 종목명), ...], [(KR ticker, 종목명), ...])
     sector_map = [
-        ("XLK",  "기술",       "💻"),
-        ("XLF",  "금융",       "🏦"),
-        ("XLV",  "헬스케어",   "🏥"),
-        ("XLY",  "경기소비재", "🛍️"),
-        ("XLP",  "필수소비재", "🛒"),
-        ("XLE",  "에너지",     "⛽"),
-        ("XLI",  "산업재",     "🏭"),
-        ("XLB",  "소재",       "⚗️"),
-        ("XLRE", "리츠",       "🏢"),
-        ("XLC",  "통신",       "📡"),
-        ("XLU",  "유틸리티",   "⚡"),
+        ("XLK",  "기술",       "💻",
+         [("AAPL","애플"),("MSFT","MS"),("NVDA","엔비디아")],
+         [("005930.KS","삼성전자"),("000660.KS","SK하이닉스"),("035420.KS","네이버")]),
+        ("SOXX", "반도체",     "🔬",
+         [("NVDA","엔비디아"),("AMD","AMD"),("AVGO","브로드컴")],
+         [("005930.KS","삼성전자"),("000660.KS","SK하이닉스"),("042700.KS","한미반도체")]),
+        ("XLF",  "금융",       "🏦",
+         [("JPM","JP모건"),("BAC","뱅크오브아메리카"),("GS","골드만삭스")],
+         [("105560.KS","KB금융"),("055550.KS","신한지주"),("086790.KS","하나금융")]),
+        ("XLV",  "헬스케어",   "🏥",
+         [("UNH","유나이티드헬스"),("LLY","일라이릴리"),("JNJ","존슨앤존슨")],
+         [("207940.KS","삼성바이오"),("068270.KS","셀트리온"),("000100.KS","유한양행")]),
+        ("XBI",  "바이오",     "🧬",
+         [("MRNA","모더나"),("BIIB","바이오젠"),("REGN","리제네론")],
+         [("068270.KS","셀트리온"),("128940.KS","한미약품"),("302440.KS","SK바이오사이언스")]),
+        ("XLY",  "경기소비재", "🛍️",
+         [("AMZN","아마존"),("TSLA","테슬라"),("HD","홈디포")],
+         [("005380.KS","현대차"),("000270.KS","기아"),("271560.KS","오리온")]),
+        ("XLP",  "필수소비재", "🛒",
+         [("PG","P&G"),("KO","코카콜라"),("WMT","월마트")],
+         [("097950.KS","CJ제일제당"),("051900.KS","LG생활건강"),("004370.KS","농심")]),
+        ("XLE",  "에너지",     "⛽",
+         [("XOM","엑슨모빌"),("CVX","셰브론"),("COP","코노코")],
+         [("010950.KS","S-Oil"),("096770.KS","SK이노베이션"),("078930.KS","GS")]),
+        ("ICLN", "클린에너지", "🌱",
+         [("ENPH","인페이즈"),("FSLR","퍼스트솔라"),("RUN","선런")],
+         [("009830.KS","한화솔루션"),("373220.KS","LG에너지솔루션"),("006400.KS","삼성SDI")]),
+        ("XLI",  "산업재",     "🏭",
+         [("CAT","캐터필러"),("HON","허니웰"),("UPS","UPS")],
+         [("042660.KS","한화오션"),("009540.KS","HD한국조선해양"),("011200.KS","HMM")]),
+        ("ITA",  "방위산업",   "🛡️",
+         [("LMT","록히드마틴"),("RTX","RTX"),("NOC","노스럽그러먼")],
+         [("012450.KS","한화에어로스페이스"),("047810.KS","KAI"),("064350.KS","현대로템")]),
+        ("XLB",  "소재",       "⚗️",
+         [("LIN","린데"),("FCX","프리포트"),("NEM","뉴몬트")],
+         [("051910.KS","LG화학"),("006400.KS","삼성SDI"),("247540.KS","에코프로비엠")]),
+        ("XLRE", "리츠",       "🏢",
+         [("AMT","아메리칸타워"),("PLD","프롤로지스"),("EQIX","에퀴닉스")],
+         [("088260.KS","이리츠코크렙"),("395400.KS","SK리츠"),("293940.KS","신한알파리츠")]),
+        ("XLC",  "통신",       "📡",
+         [("META","메타"),("GOOGL","구글"),("NFLX","넷플릭스")],
+         [("017670.KS","SK텔레콤"),("030200.KS","KT"),("032640.KS","LG유플러스")]),
+        ("XLU",  "유틸리티",   "⚡",
+         [("NEE","넥스트에라"),("DUK","듀크에너지"),("SO","서던컴퍼니")],
+         [("015760.KS","한국전력"),("036460.KS","한국가스공사"),("267260.KS","현대일렉트릭")]),
     ]
-    tickers = [s[0] for s in sector_map]
-    results = []
-    try:
-        df = yf.download(tickers, period="5d", interval="1d",
-                         auto_adjust=True, progress=False, threads=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            close_df = df['Close']
-        else:
-            close_df = df[['Close']]
 
-        for ticker, name, emoji in sector_map:
+    # 모든 티커 수집 (중복 제거)
+    etf_tickers  = [s[0] for s in sector_map]
+    us_tickers   = list({t for s in sector_map for t, _ in s[3]})
+    kr_tickers   = list({t for s in sector_map for t, _ in s[4]})
+    all_tickers  = etf_tickers + us_tickers + kr_tickers
+
+    price_data = {}
+    try:
+        df = yf.download(all_tickers, period="5d", interval="1d",
+                         auto_adjust=True, progress=False, threads=False)
+        close_df = df['Close'] if isinstance(df.columns, pd.MultiIndex) else df[['Close']]
+
+        for ticker in all_tickers:
             try:
-                col = close_df[ticker].dropna() if ticker in close_df.columns else pd.Series()
-                if len(col) < 2: continue
+                if ticker not in close_df.columns:
+                    continue
+                col = close_df[ticker].dropna()
+                if len(col) < 2:
+                    continue
                 cur  = float(col.iloc[-1])
                 prev = float(col.iloc[-2])
-                chg  = (cur - prev) / prev * 100
-                results.append({
-                    "ticker": ticker, "name": name, "emoji": emoji,
+                price_data[ticker] = {
                     "price": round(cur, 2),
-                    "change_pct": round(chg, 2),
-                })
+                    "change_pct": round((cur - prev) / prev * 100, 2),
+                }
             except Exception:
                 pass
     except Exception:
         pass
+
+    def build_stocks(stock_list):
+        result = []
+        for sticker, sname in stock_list:
+            if sticker in price_data:
+                result.append({
+                    "ticker": sticker,
+                    "name": sname,
+                    "price": price_data[sticker]["price"],
+                    "change_pct": price_data[sticker]["change_pct"],
+                })
+        return result
+
+    results = []
+    for ticker, name, emoji, us_stocks, kr_stocks in sector_map:
+        if ticker not in price_data:
+            continue
+        results.append({
+            "ticker": ticker,
+            "name": name,
+            "emoji": emoji,
+            "price": price_data[ticker]["price"],
+            "change_pct": price_data[ticker]["change_pct"],
+            "us_stocks": build_stocks(us_stocks),
+            "kr_stocks": build_stocks(kr_stocks),
+        })
 
     return jsonify({"sectors": results, "generated_at": datetime.datetime.now().isoformat()})
 

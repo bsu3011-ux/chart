@@ -708,6 +708,20 @@ function ForexBoard(){
 // ════════════════════════════════════════════
 // 섹터 히트맵
 // ════════════════════════════════════════════
+function StockChip({name,change_pct}){
+  const pos=change_pct>=0;
+  const col=pos?C.green:C.red;
+  return(
+    <span style={{display:"inline-flex",alignItems:"center",gap:2,
+      padding:"1px 4px",borderRadius:4,marginRight:2,marginBottom:2,
+      background:pos?"rgba(34,197,94,0.08)":"rgba(239,68,68,0.08)",
+      border:`1px solid ${col}33`}}>
+      <span style={{color:C.dim,fontSize:7}}>{name}</span>
+      <span style={{color:col,fontSize:7,fontWeight:700}}>{pos?"+":""}{change_pct?.toFixed(1)}%</span>
+    </span>
+  );
+}
+
 function SectorHeatmap(){
   const [sectors,setSectors]=useState([]);
   const [open,setOpen]=useState(false);
@@ -722,24 +736,47 @@ function SectorHeatmap(){
         display:"flex",justifyContent:"space-between",alignItems:"center",
         padding:"10px 12px",borderRadius:12,background:C.cardGradient,
         border:`1px solid ${C.border}`,cursor:"pointer"}}>
-        <span style={{color:C.dim,fontSize:10,fontWeight:700}}>🗺️ 미국 섹터 히트맵</span>
+        <span style={{color:C.dim,fontSize:10,fontWeight:700}}>🗺️ 섹터 히트맵 · 미국·한국 대장주</span>
         <span style={{color:C.muted,fontSize:12}}>{open?"▲":"▼"}</span>
       </div>
       {open&&(
-        <div style={{marginTop:6,display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
+        <div style={{marginTop:6,display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:4}}>
           {sectors.length===0
-            ?[...Array(11)].map((_,i)=><div key={i} style={{height:52,borderRadius:8,background:C.cardGradient,animation:"pulse 2s infinite"}}/>)
+            ?[...Array(15)].map((_,i)=><div key={i} style={{height:90,borderRadius:8,background:C.cardGradient,animation:"pulse 2s infinite"}}/>)
             :sectors.map(s=>{
               const col=s.change_pct>1?C.green:s.change_pct>0?"rgba(34,197,94,0.6)":s.change_pct>-1?"rgba(239,68,68,0.6)":C.red;
               const bg=s.change_pct>1?C.greenBg:s.change_pct>0?"rgba(34,197,94,0.05)":s.change_pct>-1?"rgba(239,68,68,0.05)":C.redBg;
               return(
-                <div key={s.ticker} style={{padding:"6px 4px",borderRadius:8,background:bg,
-                  border:`1px solid ${col}33`,textAlign:"center"}}>
-                  <div style={{fontSize:14}}>{s.emoji}</div>
-                  <div style={{color:C.dim,fontSize:8,marginTop:1}}>{s.name}</div>
-                  <div style={{color:col,fontSize:10,fontWeight:700}}>
-                    {s.change_pct>=0?"+":""}{s.change_pct?.toFixed(2)}%
+                <div key={s.ticker} style={{padding:"7px 6px",borderRadius:8,background:bg,
+                  border:`1px solid ${col}33`}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{fontSize:13}}>{s.emoji}</span>
+                      <div>
+                        <div style={{color:C.dim,fontSize:9,fontWeight:700,lineHeight:1.2}}>{s.name}</div>
+                        <div style={{color:C.muted,fontSize:7}}>{s.ticker}</div>
+                      </div>
+                    </div>
+                    <span style={{color:col,fontSize:11,fontWeight:700}}>
+                      {s.change_pct>=0?"+":""}{s.change_pct?.toFixed(2)}%
+                    </span>
                   </div>
+                  {s.us_stocks?.length>0&&(
+                    <div style={{marginBottom:3}}>
+                      <div style={{color:C.muted,fontSize:6,fontWeight:700,marginBottom:1}}>🇺🇸 US</div>
+                      <div style={{display:"flex",flexWrap:"wrap"}}>
+                        {s.us_stocks.map(st=><StockChip key={st.ticker} name={st.name} change_pct={st.change_pct}/>)}
+                      </div>
+                    </div>
+                  )}
+                  {s.kr_stocks?.length>0&&(
+                    <div>
+                      <div style={{color:C.muted,fontSize:6,fontWeight:700,marginBottom:1}}>🇰🇷 KR</div>
+                      <div style={{display:"flex",flexWrap:"wrap"}}>
+                        {s.kr_stocks.map(st=><StockChip key={st.ticker} name={st.name} change_pct={st.change_pct}/>)}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })

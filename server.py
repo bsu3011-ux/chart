@@ -448,10 +448,9 @@ def deploy():
             subprocess.run(['git', 'pull', 'origin', 'main'], cwd=BASE_DIR, timeout=30)
         except Exception as e:
             print(f"[deploy] git pull error: {e}")
-        # start_new_session=True 로 부모 프로세스가 죽어도 재시작 명령이 살아남음
+        # run.sh 루프가 서버를 감시하므로 pkill만 하면 자동 재시작됨
         subprocess.Popen(
-            'sleep 2 && pkill -f "python3 server.py" ; sleep 2 && '
-            'cd /home/ubuntu/stock-bot && nohup python3 server.py >> /home/ubuntu/stock-bot/server.log 2>&1',
+            'sleep 2 && pkill -f "python3 server.py"',
             shell=True,
             start_new_session=True
         )

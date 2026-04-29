@@ -446,8 +446,13 @@ def get_sectors():
 
 @app.route('/')
 def index():
-    """메인 페이지 - 정적 파일 서빙"""
-    return send_from_directory(STATIC_DIR, 'index.html')
+    """메인 페이지 - 정적 파일 서빙 (캐시 방지)"""
+    from flask import make_response
+    resp = make_response(send_from_directory(STATIC_DIR, 'index.html'))
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 
 # ════════════════════════════════════════════

@@ -708,8 +708,9 @@ function ForexBoard(){
 // ════════════════════════════════════════════
 // 섹터 히트맵
 // ════════════════════════════════════════════
-function StockChip({name,change_pct}){
-  const pos=change_pct>=0;
+function StockChip({name,pct}){
+  if(pct==null) return null;
+  const pos=pct>=0;
   const col=pos?C.green:C.red;
   return(
     <span style={{display:"inline-flex",alignItems:"center",gap:2,
@@ -717,45 +718,65 @@ function StockChip({name,change_pct}){
       background:pos?"rgba(34,197,94,0.08)":"rgba(239,68,68,0.08)",
       border:`1px solid ${col}33`}}>
       <span style={{color:C.dim,fontSize:7}}>{name}</span>
-      <span style={{color:col,fontSize:7,fontWeight:700}}>{pos?"+":""}{change_pct?.toFixed(1)}%</span>
+      <span style={{color:col,fontSize:7,fontWeight:700}}>{pos?"+":""}{pct?.toFixed(1)}%</span>
     </span>
   );
 }
 
-function SectorCard({s,large}){
-  const pct=s.change_pct;
-  const col=pct>1?C.green:pct>0?"rgba(34,197,94,0.6)":pct>-1?"rgba(239,68,68,0.6)":C.red;
-  const bg=pct>1?C.greenBg:pct>0?"rgba(34,197,94,0.05)":pct>-1?"rgba(239,68,68,0.05)":C.redBg;
-  const key=s.ticker||s.name;
+function SectorCard({s,large,period}){
+  const pctKey={d:"pct_1d",w:"pct_1w",m:"pct_1m"}[period]||"pct_1m";
+  const pct=s[pctKey];
+  if(pct==null) return null;
+  const col=pct>2?C.green:pct>0?"rgba(34,197,94,0.6)":pct>-2?"rgba(239,68,68,0.6)":C.red;
+  const bg=pct>2?C.greenBg:pct>0?"rgba(34,197,94,0.05)":pct>-2?"rgba(239,68,68,0.05)":C.redBg;
   return(
     <div style={{padding:large?"10px 8px":"7px 6px",borderRadius:8,background:bg,
       border:`1px solid ${col}33`,boxShadow:large?`0 0 12px ${col}22`:"none"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3}}>
         <div style={{display:"flex",alignItems:"center",gap:4}}>
-          <span style={{fontSize:large?16:13}}>{s.emoji}</span>
+          <span style={{fontSize:large?15:12}}>{s.emoji}</span>
           <div>
-            <div style={{color:C.dim,fontSize:large?10:9,fontWeight:700,lineHeight:1.2}}>{s.name}</div>
-            {s.ticker&&<div style={{color:C.muted,fontSize:7}}>{s.ticker}</div>}
+            <div style={{color:C.dim,fontSize:large?10:8,fontWeight:700,lineHeight:1.2}}>{s.name}</div>
+            {s.ticker&&<div style={{color:C.muted,fontSize:6}}>{s.ticker}</div>}
           </div>
         </div>
         <span style={{color:col,fontSize:large?13:11,fontWeight:700}}>
           {pct>=0?"+":""}{pct?.toFixed(2)}%
         </span>
       </div>
+      {/* 1D/1W/1M 미니 뱃지 */}
+      <div style={{display:"flex",gap:3,marginBottom:3}}>
+        {[["1D","pct_1d"],["1W","pct_1w"],["1M","pct_1m"]].map(([label,key])=>{
+          const v=s[key]; if(v==null) return null;
+          const c=v>=0?C.green:C.red;
+          const active=key===pctKey;
+          return(
+            <span key={key} style={{fontSize:6,padding:"1px 3px",borderRadius:3,fontWeight:700,
+              color:active?c:C.muted,
+              background:active?(v>=0?"rgba(34,197,94,0.12)":"rgba(239,68,68,0.12)"):"transparent",
+              border:active?`1px solid ${c}33`:"1px solid transparent"}}>
+              {label} {v>=0?"+":""}{v?.toFixed(1)}%
+            </span>
+          );
+        })}
+      </div>
       {s.stocks?.length>0&&(
         <div style={{display:"flex",flexWrap:"wrap"}}>
-          {s.stocks.map(st=><StockChip key={st.ticker} name={st.name} change_pct={st.change_pct}/>)}
+          {s.stocks.map(st=><StockChip key={st.ticker} name={st.name} pct={st[pctKey]}/>)}
         </div>
       )}
     </div>
   );
 }
 
-function SectorPanel({list}){
-  const sorted=[...list].sort((a,b)=>b.change_pct-a.change_pct);
+function SectorPanel({list,period}){
+  const pctKey={d:"pct_1d",w:"pct_1w",m:"pct_1m"}[period]||"pct_1m";
+  const valid=list.filter(s=>s[pctKey]!=null);
+  const sorted=[...valid].sort((a,b)=>b[pctKey]-a[pctKey]);
   const leaders=sorted.slice(0,3);
   const laggards=[...sorted].reverse().slice(0,3);
   const cardKey=s=>s.ticker||s.name;
+  const periodLabel={d:"1일",w:"1주",m:"1개월"}[period]||"1개월";
   return(
     <>
       <div style={{marginBottom:6,padding:"8px 10px",borderRadius:10,
@@ -764,9 +785,10 @@ function SectorPanel({list}){
         <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}>
           <span style={{fontSize:12}}>🔥</span>
           <span style={{color:C.green,fontSize:9,fontWeight:800}}>주도 섹터 TOP 3</span>
+          <span style={{color:C.muted,fontSize:8}}>({periodLabel} 기준)</span>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:4}}>
-          {leaders.map(s=><SectorCard key={cardKey(s)} s={s} large={true}/>)}
+          {leaders.map(s=><SectorCard key={cardKey(s)} s={s} large={true} period={period}/>)}
         </div>
       </div>
       <div style={{marginBottom:6,padding:"8px 10px",borderRadius:10,
@@ -775,14 +797,15 @@ function SectorPanel({list}){
         <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}>
           <span style={{fontSize:12}}>🧊</span>
           <span style={{color:C.red,fontSize:9,fontWeight:800}}>약세 섹터 BOTTOM 3</span>
+          <span style={{color:C.muted,fontSize:8}}>({periodLabel} 기준)</span>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:4}}>
-          {laggards.map(s=><SectorCard key={cardKey(s)} s={s} large={true}/>)}
+          {laggards.map(s=><SectorCard key={cardKey(s)} s={s} large={true} period={period}/>)}
         </div>
       </div>
       <div style={{color:C.muted,fontSize:8,fontWeight:700,marginBottom:4,paddingLeft:2}}>전체 섹터</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:4}}>
-        {list.map(s=><SectorCard key={cardKey(s)} s={s} large={false}/>)}
+        {list.map(s=><SectorCard key={cardKey(s)} s={s} large={false} period={period}/>)}
       </div>
     </>
   );
@@ -792,6 +815,7 @@ function SectorHeatmap(){
   const [data,setData]=useState({us_sectors:[],kr_sectors:[]});
   const [open,setOpen]=useState(false);
   const [tab,setTab]=useState('us');
+  const [period,setPeriod]=useState('m'); // d=1일, w=1주, m=1개월
   useEffect(()=>{
     if(!open) return;
     fetch(`${API_BASE}/api/sectors`)
@@ -800,6 +824,13 @@ function SectorHeatmap(){
   const list=tab==='us'?data.us_sectors:data.kr_sectors;
   const loading=list.length===0;
 
+  const btnStyle=(v,active)=>({
+    padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",
+    background:active?C.cyan+"22":"transparent",
+    color:active?C.cyan:C.muted,
+    border:active?`1px solid ${C.cyan}44`:"1px solid transparent",
+    transition:"all .15s"
+  });
   const tabStyle=(t)=>({
     flex:1,padding:"6px 0",borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer",textAlign:"center",
     background:tab===t?C.elevated:"transparent",
@@ -819,17 +850,24 @@ function SectorHeatmap(){
       </div>
       {open&&(
         <div style={{marginTop:6}}>
-          {/* 탭 */}
-          <div style={{display:"flex",gap:4,marginBottom:8,padding:"4px",
+          {/* 시장 탭 */}
+          <div style={{display:"flex",gap:4,marginBottom:6,padding:"4px",
             borderRadius:10,background:C.cardGradient,border:`1px solid ${C.border}`}}>
             <div style={tabStyle('us')} onClick={()=>setTab('us')}>🇺🇸 미국 섹터</div>
             <div style={tabStyle('kr')} onClick={()=>setTab('kr')}>🇰🇷 한국 섹터</div>
           </div>
+          {/* 기간 선택 */}
+          <div style={{display:"flex",gap:4,marginBottom:8,justifyContent:"flex-end"}}>
+            <span style={{color:C.muted,fontSize:9,alignSelf:"center"}}>기준 기간</span>
+            {[["d","1일"],["w","1주"],["m","1개월"]].map(([v,label])=>(
+              <div key={v} style={btnStyle(v,period===v)} onClick={()=>setPeriod(v)}>{label}</div>
+            ))}
+          </div>
           {loading
             ?<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:4}}>
-               {[...Array(15)].map((_,i)=><div key={i} style={{height:90,borderRadius:8,background:C.cardGradient,animation:"pulse 2s infinite"}}/>)}
+               {[...Array(15)].map((_,i)=><div key={i} style={{height:100,borderRadius:8,background:C.cardGradient,animation:"pulse 2s infinite"}}/>)}
              </div>
-            :<SectorPanel list={list}/>
+            :<SectorPanel list={list} period={period}/>
           }
         </div>
       )}

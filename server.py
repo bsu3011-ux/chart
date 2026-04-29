@@ -359,7 +359,8 @@ def get_sectors():
 
     price_data = {}
     try:
-        df = yf.download(all_tickers, period="5d", interval="1d",
+        # 1개월 데이터로 1D/1W/1M 수익률 모두 계산
+        df = yf.download(all_tickers, period="2mo", interval="1d",
                          auto_adjust=True, progress=False, threads=False)
         close_df = df['Close'] if isinstance(df.columns, pd.MultiIndex) else df[['Close']]
         for ticker in all_tickers:
@@ -369,11 +370,17 @@ def get_sectors():
                 col = close_df[ticker].dropna()
                 if len(col) < 2:
                     continue
-                cur  = float(col.iloc[-1])
-                prev = float(col.iloc[-2])
+                cur = float(col.iloc[-1])
+                def pct(n):
+                    if len(col) <= n:
+                        return None
+                    base = float(col.iloc[-1 - n])
+                    return round((cur - base) / base * 100, 2) if base else None
                 price_data[ticker] = {
                     "price": round(cur, 2),
-                    "change_pct": round((cur - prev) / prev * 100, 2),
+                    "pct_1d":  pct(1),
+                    "pct_1w":  pct(5),
+                    "pct_1m":  pct(20),
                 }
             except Exception:
                 pass
@@ -384,35 +391,49 @@ def get_sectors():
         result = []
         for sticker, sname in stock_list:
             if sticker in price_data:
+                d = price_data[sticker]
                 result.append({
                     "ticker": sticker, "name": sname,
-                    "price": price_data[sticker]["price"],
-                    "change_pct": price_data[sticker]["change_pct"],
+                    "price":   d["price"],
+                    "pct_1d":  d["pct_1d"],
+                    "pct_1w":  d["pct_1w"],
+                    "pct_1m":  d["pct_1m"],
                 })
         return result
+
+    def sector_pcts(ticker):
+        d = price_data.get(ticker, {})
+        return d.get("pct_1d"), d.get("pct_1w"), d.get("pct_1m")
+
+    def avg_pcts(stocks):
+        def avg(key):
+            vals = [s[key] for s in stocks if s.get(key) is not None]
+            return round(sum(vals) / len(vals), 2) if vals else None
+        return avg("pct_1d"), avg("pct_1w"), avg("pct_1m")
 
     # 미국 섹터 결과
     us_results = []
     for ticker, name, emoji, us_stocks in us_sector_map:
         if ticker not in price_data:
             continue
+        p1d, p1w, p1m = sector_pcts(ticker)
         us_results.append({
             "ticker": ticker, "name": name, "emoji": emoji,
-            "price": price_data[ticker]["price"],
-            "change_pct": price_data[ticker]["change_pct"],
+            "price":  price_data[ticker]["price"],
+            "pct_1d": p1d, "pct_1w": p1w, "pct_1m": p1m,
             "stocks": build_stocks(us_stocks),
         })
 
-    # 한국 섹터 결과 (종목 평균으로 섹터 등락률 계산)
+    # 한국 섹터 결과 (종목 평균으로 섹터 수익률 계산)
     kr_results = []
     for name, emoji, kr_stocks in kr_sector_map:
         stocks = build_stocks(kr_stocks)
         if not stocks:
             continue
-        avg_chg = round(sum(s["change_pct"] for s in stocks) / len(stocks), 2)
+        p1d, p1w, p1m = avg_pcts(stocks)
         kr_results.append({
             "name": name, "emoji": emoji,
-            "change_pct": avg_chg,
+            "pct_1d": p1d, "pct_1w": p1w, "pct_1m": p1m,
             "stocks": stocks,
         })
 

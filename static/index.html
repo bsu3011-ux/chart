@@ -706,6 +706,182 @@ function ForexBoard(){
 }
 
 // ════════════════════════════════════════════
+// 세계지도 글로벌 마켓
+// ════════════════════════════════════════════
+const GEO_POS={
+  "^GSPC": {x:175,y:118,label:"S&P500"},
+  "^IXIC": {x:162,y:130,label:"NASDAQ"},
+  "^DJI":  {x:190,y:125,label:"다우"},
+  "^KS11": {x:690,y:112,label:"KOSPI"},
+  "^KQ11": {x:690,y:126,label:"KOSDAQ"},
+  "^N225": {x:720,y:108,label:"닛케이"},
+  "^HSI":  {x:665,y:152,label:"항셍"},
+  "000001.SS":{x:672,y:132,label:"상해"},
+  "399001.SZ":{x:668,y:144,label:"심천"},
+  "^NSEI": {x:574,y:157,label:"NIFTY"},
+  "^BSESN":{x:570,y:170,label:"Sensex"},
+  "^TWII": {x:678,y:145,label:"대만"},
+  "^STI":  {x:638,y:200,label:"싱가폴"},
+  "^GDAXI":{x:424,y:88,label:"DAX"},
+  "^FCHI": {x:410,y:96,label:"CAC"},
+  "^FTSE": {x:395,y:88,label:"FTSE"},
+  "^AXJO": {x:740,y:278,label:"ASX"},
+  "^BVSP": {x:300,y:252,label:"BOVESPA"},
+};
+
+function WorldMap({markets}){
+  const W=800,H=400;
+  const gnd="#162030", ocn="#0a1520", brd="#1e3a50";
+
+  const markers=markets
+    .filter(m=>GEO_POS[m.ticker])
+    .map(m=>({...GEO_POS[m.ticker],pct:m.change_pct,name:m.name,ticker:m.ticker}));
+
+  return(
+    <div style={{marginBottom:10,borderRadius:12,overflow:"hidden",border:`1px solid ${C.border}`,background:C.card}}>
+      <div style={{padding:"10px 12px 4px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{color:C.dim,fontSize:10,fontWeight:700}}>🌍 글로벌 마켓 지도</span>
+        <span style={{color:C.muted,fontSize:9}}>실시간 등락률</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",display:"block"}}>
+        <rect width={W} height={H} fill={ocn}/>
+        {/* 북아메리카 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.6"
+          d="M30,108 L68,80 L112,65 L178,60 L248,62 L298,75 L328,95 L328,140 L308,165 L292,175 L275,185 L262,200 L255,215 L245,215 L232,210 L222,205 L208,205 L198,215 L182,220 L168,205 L150,185 L128,165 L98,145 L62,135 L38,135 Z"/>
+        {/* 그린란드 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.5"
+          d="M308,38 L338,24 L368,28 L382,45 L372,62 L348,68 L320,65 Z"/>
+        {/* 남아메리카 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.6"
+          d="M245,215 L262,210 L282,215 L312,220 L338,238 L358,265 L365,300 L365,335 L350,365 L326,390 L302,398 L282,392 L262,376 L248,350 L235,310 L232,270 L238,240 Z"/>
+        {/* 유럽 본토 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.6"
+          d="M436,95 L458,75 L488,68 L518,72 L542,82 L548,96 L542,110 L526,116 L508,119 L486,123 L468,129 L452,122 L438,110 Z"/>
+        {/* 스칸디나비아 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.5"
+          d="M488,50 L506,36 L522,40 L536,56 L532,72 L518,72 L504,64 Z"/>
+        {/* 영국 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.5"
+          d="M426,76 L438,62 L452,66 L453,82 L445,91 L432,88 Z"/>
+        {/* 아프리카 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.6"
+          d="M442,138 L472,128 L508,124 L538,132 L556,150 L558,186 L556,225 L545,265 L532,294 L515,318 L497,330 L478,328 L460,313 L446,288 L440,256 L436,220 L438,182 L436,158 Z"/>
+        {/* 아시아 본토 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.6"
+          d="M546,60 L598,44 L658,37 L718,41 L772,54 L798,72 L798,100 L772,118 L748,128 L718,130 L698,140 L688,160 L672,175 L648,185 L622,200 L602,210 L588,204 L572,194 L558,176 L548,156 L542,128 L540,104 L543,80 Z"/>
+        {/* 인도 반도 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.5"
+          d="M568,155 L588,150 L605,156 L610,178 L598,200 L582,208 L569,197 L562,178 Z"/>
+        {/* 동남아시아 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.5"
+          d="M648,185 L668,180 L690,188 L698,205 L688,218 L668,215 L648,205 Z"/>
+        {/* 일본 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.5"
+          d="M714,100 L725,92 L738,97 L736,114 L724,120 L712,114 Z"/>
+        {/* 호주 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.6"
+          d="M652,275 L698,261 L745,264 L788,280 L798,310 L790,342 L768,362 L740,368 L712,354 L692,332 L676,308 Z"/>
+        {/* 뉴질랜드 */}
+        <path fill={gnd} stroke={brd} strokeWidth="0.5"
+          d="M798,328 L806,314 L816,320 L813,340 L804,344 Z"/>
+
+        {/* 마켓 버블 */}
+        {markers.map(m=>{
+          const pos=m.pct>=0;
+          const col=pos?C.green:C.red;
+          const r=Math.max(15,Math.min(26,15+Math.abs(m.pct||0)*2));
+          return(
+            <g key={m.ticker}>
+              <circle cx={m.x} cy={m.y} r={r+5} fill={`${col}08`}/>
+              <circle cx={m.x} cy={m.y} r={r} fill={`${col}22`} stroke={col} strokeWidth="1.2"/>
+              <text x={m.x} y={m.y-3} textAnchor="middle"
+                fill="rgba(255,255,255,0.9)" fontSize="8.5" fontWeight="700" fontFamily="sans-serif">
+                {m.label}
+              </text>
+              <text x={m.x} y={m.y+9} textAnchor="middle"
+                fill={col} fontSize="8.5" fontWeight="700" fontFamily="sans-serif">
+                {pos?"+":""}{m.pct?.toFixed(1)}%
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// 섹터 히트맵 (트리맵)
+// ════════════════════════════════════════════
+const US_SECTOR_WEIGHT={XLK:30,XLF:13,XLV:13,XLY:10,XLC:9,XLI:8,XLP:6,XLE:5,SOXX:6,XBI:4,ITA:3,XLB:3,XLRE:2,XLU:3,ICLN:1};
+const KR_SECTOR_WEIGHT={"반도체":25,"이차전지":15,"바이오/헬스":12,"금융":10,"자동차":10,"조선":6,"인터넷/플랫폼":7,"방위산업":4,"엔터/콘텐츠":4,"화학/소재":3,"클린에너지":2,"에너지":3,"통신":4,"유통/소비재":3,"건설/인프라":2};
+
+function splitTreemap(items,x,y,w,h){
+  if(!items.length) return [];
+  if(items.length===1) return [{...items[0],x,y,w,h}];
+  const total=items.reduce((s,it)=>s+it.w,0);
+  let acc=0,si=1;
+  for(let i=0;i<items.length;i++){
+    acc+=items[i].w;
+    if(acc>=total/2){si=i+1;break;}
+  }
+  const L=items.slice(0,si),R=items.slice(si);
+  const ratio=L.reduce((s,i)=>s+i.w,0)/total;
+  if(w>=h){
+    return[...splitTreemap(L,x,y,w*ratio,h),...splitTreemap(R,x+w*ratio,y,w*(1-ratio),h)];
+  }else{
+    return[...splitTreemap(L,x,y,w,h*ratio),...splitTreemap(R,x,y+h*ratio,w,h*(1-ratio))];
+  }
+}
+
+function SectorTreemap({list,period}){
+  const pctKey={d:"pct_1d",w:"pct_1w",m:"pct_1m"}[period]||"pct_1m";
+  const TW=440,TH=310;
+  const items=list
+    .filter(s=>s[pctKey]!=null)
+    .map(s=>({...s,w:US_SECTOR_WEIGHT[s.ticker]||KR_SECTOR_WEIGHT[s.name]||5}))
+    .sort((a,b)=>b.w-a.w);
+  const cells=splitTreemap(items,0,0,TW,TH);
+  return(
+    <svg viewBox={`0 0 ${TW} ${TH}`} style={{width:"100%",display:"block",borderRadius:8,overflow:"hidden"}}>
+      {cells.map((cell)=>{
+        const pct=cell[pctKey];
+        const pos=pct>=0;
+        const intensity=Math.min(1,Math.abs(pct)/5);
+        const fillAlpha=0.18+intensity*0.62;
+        const fill=pos?`rgba(34,197,94,${fillAlpha})`:`rgba(239,68,68,${fillAlpha})`;
+        const strokeCol=pos?"rgba(34,197,94,0.35)":"rgba(239,68,68,0.35)";
+        const textCol=pos?C.green:C.red;
+        const pad=2;
+        const cw=cell.w-pad*2,ch=cell.h-pad*2;
+        const fs=Math.min(13,Math.max(7,Math.sqrt(cw*ch)/8));
+        const showName=cw>35&&ch>24;
+        const showPct=cw>35&&ch>38;
+        const cx=cell.x+cell.w/2,cy=cell.y+cell.h/2;
+        return(
+          <g key={cell.ticker||cell.name}>
+            <rect x={cell.x+pad} y={cell.y+pad} width={cw} height={ch}
+              fill={fill} rx="3" stroke={strokeCol} strokeWidth="0.8"/>
+            {showName&&(
+              <text x={cx} y={cy-(showPct?fs*0.7:0)} textAnchor="middle" dominantBaseline="middle"
+                fill="rgba(255,255,255,0.92)" fontSize={fs} fontWeight="700" fontFamily="sans-serif">
+                {cell.emoji}{cell.emoji?" ":""}{cell.name||cell.ticker}
+              </text>
+            )}
+            {showPct&&(
+              <text x={cx} y={cy+fs*1.1} textAnchor="middle" dominantBaseline="middle"
+                fill={textCol} fontSize={fs*0.88} fontWeight="700" fontFamily="sans-serif">
+                {pos?"+":""}{pct?.toFixed(1)}%
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ════════════════════════════════════════════
 // 섹터 히트맵
 // ════════════════════════════════════════════
 function StockChip({name,pct}){
@@ -815,7 +991,8 @@ function SectorHeatmap(){
   const [data,setData]=useState({us_sectors:[],kr_sectors:[]});
   const [open,setOpen]=useState(false);
   const [tab,setTab]=useState('us');
-  const [period,setPeriod]=useState('m'); // d=1일, w=1주, m=1개월
+  const [period,setPeriod]=useState('m');
+  const [viewMode,setViewMode]=useState('tree'); // 'tree' | 'card'
   useEffect(()=>{
     if(!open) return;
     fetch(`${API_BASE}/api/sectors`)
@@ -825,7 +1002,7 @@ function SectorHeatmap(){
   const loading=list.length===0;
 
   const btnStyle=(v,active)=>({
-    padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",
+    padding:"4px 9px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",
     background:active?C.cyan+"22":"transparent",
     color:active?C.cyan:C.muted,
     border:active?`1px solid ${C.cyan}44`:"1px solid transparent",
@@ -849,25 +1026,35 @@ function SectorHeatmap(){
         <span style={{color:C.muted,fontSize:12}}>{open?"▲":"▼"}</span>
       </div>
       {open&&(
-        <div style={{marginTop:6}}>
-          {/* 시장 탭 */}
+        <div style={{marginTop:6,borderRadius:12,padding:"8px",background:C.cardGradient,border:`1px solid ${C.border}`}}>
+          {/* 시장 탭 + 뷰 전환 */}
           <div style={{display:"flex",gap:4,marginBottom:6,padding:"4px",
-            borderRadius:10,background:C.cardGradient,border:`1px solid ${C.border}`}}>
-            <div style={tabStyle('us')} onClick={()=>setTab('us')}>🇺🇸 미국 섹터</div>
-            <div style={tabStyle('kr')} onClick={()=>setTab('kr')}>🇰🇷 한국 섹터</div>
+            borderRadius:10,background:C.surface,border:`1px solid ${C.border}`}}>
+            <div style={tabStyle('us')} onClick={()=>setTab('us')}>🇺🇸 미국</div>
+            <div style={tabStyle('kr')} onClick={()=>setTab('kr')}>🇰🇷 한국</div>
           </div>
-          {/* 기간 선택 */}
-          <div style={{display:"flex",gap:4,marginBottom:8,justifyContent:"flex-end"}}>
-            <span style={{color:C.muted,fontSize:9,alignSelf:"center"}}>기준 기간</span>
-            {[["d","1일"],["w","1주"],["m","1개월"]].map(([v,label])=>(
-              <div key={v} style={btnStyle(v,period===v)} onClick={()=>setPeriod(v)}>{label}</div>
-            ))}
+          {/* 기간 + 뷰모드 */}
+          <div style={{display:"flex",gap:4,marginBottom:8,justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{display:"flex",gap:3}}>
+              <span style={{color:C.muted,fontSize:9,alignSelf:"center"}}>기간</span>
+              {[["d","1일"],["w","1주"],["m","1개월"]].map(([v,label])=>(
+                <div key={v} style={btnStyle(v,period===v)} onClick={()=>setPeriod(v)}>{label}</div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:3}}>
+              {[["tree","트리맵"],["card","카드"]].map(([v,label])=>(
+                <div key={v} style={btnStyle(v,viewMode===v)} onClick={()=>setViewMode(v)}>{label}</div>
+              ))}
+            </div>
           </div>
           {loading
-            ?<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:4}}>
-               {[...Array(15)].map((_,i)=><div key={i} style={{height:100,borderRadius:8,background:C.cardGradient,animation:"pulse 2s infinite"}}/>)}
+            ?<div style={{height:200,borderRadius:8,background:C.surface,animation:"pulse 2s infinite",
+                display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:10}}>
+               데이터 로딩 중...
              </div>
-            :<SectorPanel list={list} period={period}/>
+            :viewMode==='tree'
+              ?<SectorTreemap list={list} period={period}/>
+              :<SectorPanel list={list} period={period}/>
           }
         </div>
       )}
@@ -1573,6 +1760,9 @@ function MarketTab({markets,onChart,data,fetchSignals,runAnalysis,loading,apiCon
 
       {/* 환율 보드 */}
       <ForexBoard/>
+
+      {/* 글로벌 마켓 세계지도 */}
+      <WorldMap markets={markets}/>
 
       {/* 섹터 히트맵 */}
       <SectorHeatmap/>

@@ -184,6 +184,62 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "1y",
     },
+    # ── 유로 스탁스 50 ──
+    "^STOXX50E": {
+        "name": "Euro Stoxx 50", "symbol": "SX5E", "flag": "🇪🇺",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    # ── 스위스 SMI ──
+    "^SSMI": {
+        "name": "Swiss SMI", "symbol": "SMI", "flag": "🇨🇭",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    # ── 멕시코 IPC ──
+    "^MXX": {
+        "name": "Mexico IPC", "symbol": "IPC", "flag": "🇲🇽",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    # ── 인도네시아 JKSE ──
+    "^JKSE": {
+        "name": "Jakarta Comp", "symbol": "JKSE", "flag": "🇮🇩",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    # ── 말레이시아 KLCI ──
+    "^KLSE": {
+        "name": "FTSE KLCI", "symbol": "KLCI", "flag": "🇲🇾",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    # ── 뉴질랜드 NZX50 ──
+    "^NZ50": {
+        "name": "NZX 50", "symbol": "NZ50", "flag": "🇳🇿",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    # ── 이스라엘 TA-125 ──
+    "^TA125.TA": {
+        "name": "Tel Aviv 125", "symbol": "TA125", "flag": "🇮🇱",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    # ── 사우디 Tadawul ──
+    "^TASI.SR": {
+        "name": "Saudi Tadawul", "symbol": "TASI", "flag": "🇸🇦",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -236,6 +292,31 @@ POPULAR_STOCKS = {
     "128940.KS": {"name": "한미약품",      "name_en": "Hanmi Pharm",          "sector": "제약",      "flag": "🇰🇷"},
     "373220.KS": {"name": "LG에너지솔루션","name_en": "LG Energy Solution",   "sector": "배터리",    "flag": "🇰🇷"},
     "247540.KS": {"name": "에코프로비엠",  "name_en": "EcoPro BM",            "sector": "소재",      "flag": "🇰🇷"},
+    # ════ 전선/전력 테마 ════
+    "008260.KS": {"name": "LS",            "name_en": "LS Corp",              "sector": "전선/지주",  "flag": "🇰🇷"},
+    "010120.KS": {"name": "LS일렉트릭",   "name_en": "LS Electric",          "sector": "전기/전선",  "flag": "🇰🇷"},
+    "001440.KS": {"name": "대한전선",      "name_en": "Taihan Electric Wire", "sector": "전선",       "flag": "🇰🇷"},
+    "000500.KS": {"name": "가온전선",      "name_en": "Gaon Cable",           "sector": "전선",       "flag": "🇰🇷"},
+    "229640.KS": {"name": "LS에코에너지", "name_en": "LS Eco Energy",        "sector": "전선",       "flag": "🇰🇷"},
+    "267260.KS": {"name": "HD현대일렉트릭","name_en": "HD Hyundai Electric",  "sector": "전력기기",   "flag": "🇰🇷"},
+    "298040.KS": {"name": "효성중공업",   "name_en": "Hyosung Heavy Ind.",   "sector": "전력기기",   "flag": "🇰🇷"},
+    "103140.KS": {"name": "풍산",          "name_en": "Poongsan",             "sector": "비철금속",   "flag": "🇰🇷"},
+    "052690.KS": {"name": "한국전력기술", "name_en": "Korea Power Eng.",     "sector": "전력",       "flag": "🇰🇷"},
+    "047810.KS": {"name": "한국항공우주", "name_en": "KAI",                  "sector": "방산",       "flag": "🇰🇷"},
+    "064350.KS": {"name": "현대로템",      "name_en": "Hyundai Rotem",        "sector": "방산",       "flag": "🇰🇷"},
+    "042660.KS": {"name": "한화오션",      "name_en": "Hanwha Ocean",         "sector": "조선",       "flag": "🇰🇷"},
+    "010620.KS": {"name": "HD현대미포",   "name_en": "HD Hyundai Mipo",      "sector": "조선",       "flag": "🇰🇷"},
+    "042700.KS": {"name": "한미반도체",   "name_en": "Hanmi Semiconductor",  "sector": "반도체장비", "flag": "🇰🇷"},
+    "000720.KS": {"name": "현대건설",      "name_en": "Hyundai E&C",          "sector": "건설",       "flag": "🇰🇷"},
+    "047040.KS": {"name": "대우건설",      "name_en": "Daewoo E&C",           "sector": "건설",       "flag": "🇰🇷"},
+    "316140.KS": {"name": "우리금융지주", "name_en": "Woori Financial",      "sector": "금융",       "flag": "🇰🇷"},
+    "032640.KS": {"name": "LG유플러스",   "name_en": "LG Uplus",             "sector": "통신",       "flag": "🇰🇷"},
+    "069960.KS": {"name": "현대백화점",   "name_en": "Hyundai Department",   "sector": "유통",       "flag": "🇰🇷"},
+    "023530.KS": {"name": "롯데쇼핑",      "name_en": "Lotte Shopping",       "sector": "유통",       "flag": "🇰🇷"},
+    "139480.KS": {"name": "이마트",        "name_en": "E-mart",               "sector": "유통",       "flag": "🇰🇷"},
+    "078930.KS": {"name": "GS",            "name_en": "GS Holdings",          "sector": "에너지/유통","flag": "🇰🇷"},
+    "004170.KS": {"name": "신세계",        "name_en": "Shinsegae",            "sector": "유통",       "flag": "🇰🇷"},
+    "241560.KS": {"name": "두산밥캣",      "name_en": "Doosan Bobcat",        "sector": "기계",       "flag": "🇰🇷"},
     # ════════════ 한국 KOSDAQ ════════════
     "086520.KQ": {"name": "에코프로",      "name_en": "EcoPro",               "sector": "소재",      "flag": "🇰🇷"},
     "293490.KQ": {"name": "카카오게임즈",  "name_en": "Kakao Games",          "sector": "게임",      "flag": "🇰🇷"},
@@ -252,6 +333,13 @@ POPULAR_STOCKS = {
     "131290.KQ": {"name": "티씨케이",      "name_en": "TCI Inc",              "sector": "반도체소재","flag": "🇰🇷"},
     "078340.KQ": {"name": "컴투스",        "name_en": "Com2uS",               "sector": "게임",      "flag": "🇰🇷"},
     "112040.KQ": {"name": "위메이드",      "name_en": "Wemade",               "sector": "게임",      "flag": "🇰🇷"},
+    "122870.KQ": {"name": "YG엔터테인먼트","name_en": "YG Entertainment",   "sector": "엔터",      "flag": "🇰🇷"},
+    "035900.KQ": {"name": "JYP엔터",      "name_en": "JYP Entertainment",    "sector": "엔터",      "flag": "🇰🇷"},
+    "277810.KQ": {"name": "레인보우로보틱스","name_en":"Rainbow Robotics",   "sector": "로봇",      "flag": "🇰🇷"},
+    "328130.KQ": {"name": "루닛",          "name_en": "Lunit",               "sector": "AI의료",    "flag": "🇰🇷"},
+    "950130.KQ": {"name": "엑스플러스",   "name_en": "Xplus",               "sector": "반도체장비","flag": "🇰🇷"},
+    "000990.KS": {"name": "DB하이텍",     "name_en": "DB HiTek",            "sector": "반도체",    "flag": "🇰🇷"},
+    "068290.KQ": {"name": "제일전기공업", "name_en": "Jeil Electric",       "sector": "전기기기",  "flag": "🇰🇷"},
     # ════════════ 미국 빅테크 ════════════
     "AAPL":  {"name": "애플",           "name_en": "Apple",              "sector": "Technology",     "flag": "🇺🇸"},
     "MSFT":  {"name": "마이크로소프트", "name_en": "Microsoft",          "sector": "Technology",     "flag": "🇺🇸"},

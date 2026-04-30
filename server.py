@@ -444,6 +444,12 @@ def get_sectors():
     })
 
 
+@app.route('/countries-110m.json')
+def world_map():
+    """세계지도 TopoJSON 데이터"""
+    return send_from_directory(STATIC_DIR, 'countries-110m.json')
+
+
 @app.route('/')
 def index():
     """메인 페이지 - 정적 파일 서빙 (캐시 방지)"""

@@ -15,6 +15,8 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+  <script src="https://unpkg.com/topojson-client@3/dist/topojson-client.min.js"></script>
 </head>
 <body>
 <div id="root"><div class="ld">⟳ 로딩 중...</div></div>
@@ -724,61 +726,86 @@ function ForexBoard(){
 // ════════════════════════════════════════════
 // 세계지도 글로벌 마켓
 // ════════════════════════════════════════════
-// 좌표 계산: x=(lon+180)/360*800, y=(90-lat)/180*420
-const GEO_POS={
-  // 미국 (3개 지수 삼각형 배치)
-  "^GSPC": {x:152,y:122,label:"S&P500"},
-  "^IXIC": {x:172,y:108,label:"NASDAQ"},
-  "^DJI":  {x:172,y:136,label:"DOW"},
-  // 한국 (세로 배치)
-  "^KS11": {x:703,y:107,label:"KOSPI"},
-  "^KQ11": {x:703,y:125,label:"KOSDAQ"},
-  // 일본 (한국 우측)
-  "^N225": {x:734,y:116,label:"닛케이"},
-  // 중국 (상해만, 심천 제거)
-  "000001.SS":{x:660,y:124,label:"상해"},
-  // 홍콩
-  "^HSI":  {x:672,y:148,label:"항셍"},
-  // 대만
-  "^TWII": {x:687,y:150,label:"대만"},
-  // 인도 (세로 배치)
-  "^NSEI": {x:575,y:156,label:"NIFTY"},
-  "^BSESN":{x:575,y:174,label:"BSE"},
-  // 싱가포르
-  "^STI":  {x:647,y:203,label:"STI"},
-  // 유럽
-  "^GDAXI":{x:432,y:82,label:"DAX"},
-  "^FCHI": {x:412,y:94,label:"CAC"},
-  "^FTSE": {x:392,y:78,label:"FTSE"},
-  // 호주
-  "^AXJO": {x:744,y:282,label:"ASX"},
-  // 브라질
-  "^BVSP": {x:290,y:258,label:"BOVESPA"},
+// 위도/경도 기반 좌표 (D3 geoNaturalEarth1 프로젝션)
+const GEO_COORDS={
+  "^GSPC":      {lon:-97,  lat:39,    label:"S&P500"},
+  "^IXIC":      {lon:-84,  lat:47,    label:"NASDAQ"},
+  "^DJI":       {lon:-84,  lat:31,    label:"DOW"},
+  "^KS11":      {lon:127,  lat:37.5,  label:"KOSPI"},
+  "^KQ11":      {lon:133,  lat:34,    label:"KOSDAQ"},
+  "^N225":      {lon:140,  lat:36,    label:"닛케이"},
+  "^HSI":       {lon:114,  lat:22.5,  label:"항셍"},
+  "000001.SS":  {lon:119,  lat:31,    label:"상해"},
+  "^NSEI":      {lon:78,   lat:20,    label:"NIFTY"},
+  "^BSESN":     {lon:70,   lat:13,    label:"BSE"},
+  "^TWII":      {lon:121,  lat:24,    label:"대만"},
+  "^STI":       {lon:104,  lat:1.5,   label:"STI"},
+  "^GDAXI":     {lon:10,   lat:51,    label:"DAX"},
+  "^FCHI":      {lon:2,    lat:46,    label:"CAC"},
+  "^FTSE":      {lon:-2,   lat:54,    label:"FTSE"},
+  "^AXJO":      {lon:148,  lat:-33,   label:"ASX"},
+  "^BVSP":      {lon:-46,  lat:-22,   label:"BOVESPA"},
+  "^STOXX50E":  {lon:8,    lat:48,    label:"STOXX50"},
+  "^SSMI":      {lon:7,    lat:47,    label:"SMI"},
+  "^MXX":       {lon:-99,  lat:22,    label:"IPC"},
+  "^JKSE":      {lon:107,  lat:-6,    label:"Jakarta"},
+  "^KLSE":      {lon:102,  lat:3,     label:"KLCI"},
+  "^NZ50":      {lon:172,  lat:-41,   label:"NZX50"},
+  "^TA125.TA":  {lon:35,   lat:31.5,  label:"TA125"},
+  "^TASI.SR":   {lon:45,   lat:24,    label:"Tadawul"},
 };
 
 function WorldMap({markets}){
-  const W=800,H=420;
-  const gnd="#152638", brd="#1d3d58", ocn="#091420";
+  const W=960, H=500;
+  const [cPaths, setCPaths] = useState([]);
+  const [mesh, setMesh]     = useState("");
+  const projRef = useRef(null);
+  const [ready, setReady]   = useState(false);
 
-  const markers=markets
-    .filter(m=>GEO_POS[m.ticker])
-    .map(m=>({...GEO_POS[m.ticker],pct:m.change_pct,ticker:m.ticker}));
+  useEffect(()=>{
+    const d3=window.d3, topo=window.topojson;
+    if(!d3||!topo) return;
+    const proj=d3.geoNaturalEarth1().scale(153).translate([W/2, H/2]);
+    const pg=d3.geoPath().projection(proj);
+    projRef.current=proj;
+    fetch('/countries-110m.json')
+      .then(r=>r.json())
+      .then(world=>{
+        const feats=topo.feature(world,world.objects.countries).features;
+        const borders=topo.mesh(world,world.objects.countries,(a,b)=>a!==b);
+        setCPaths(feats.map(f=>({d:pg(f),id:f.id})));
+        setMesh(pg(borders));
+        setReady(true);
+      })
+      .catch(()=>setReady(true));
+  },[]);
+
+  const markers=useMemo(()=>{
+    if(!projRef.current||!ready) return [];
+    return markets
+      .filter(m=>GEO_COORDS[m.ticker])
+      .map(m=>{
+        const c=GEO_COORDS[m.ticker];
+        const pt=projRef.current([c.lon,c.lat]);
+        if(!pt||isNaN(pt[0])) return null;
+        return {...c,x:pt[0],y:pt[1],pct:m.change_pct,ticker:m.ticker};
+      }).filter(Boolean);
+  },[markets,ready]);
 
   return(
-    <div style={{marginBottom:10,borderRadius:12,border:`1px solid ${C.border}`,background:C.card}}>
+    <div style={{marginBottom:10,borderRadius:12,border:`1px solid ${C.border}`,background:"#0d1117"}}>
       <div style={{padding:"10px 12px 6px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span style={{color:C.dim,fontSize:10,fontWeight:700}}>🌍 글로벌 마켓 지도</span>
         <span style={{color:C.muted,fontSize:9}}>실시간 등락률</span>
       </div>
-      <div style={{position:"relative",height:0,paddingBottom:"52.5%",overflow:"hidden",borderRadius:"0 0 12px 12px"}}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{position:"absolute",top:0,left:0,width:"100%",height:"100%"}}>
-        <defs>
-          <radialGradient id="wocn" cx="50%" cy="35%" r="65%">
-            <stop offset="0%" stopColor="#0e1f30"/>
-            <stop offset="100%" stopColor="#060e18"/>
-          </radialGradient>
-        </defs>
-        <rect width={W} height={H} fill="url(#wocn)"/>
+      <div style={{position:"relative",height:0,paddingBottom:"52%",overflow:"hidden",borderRadius:"0 0 12px 12px"}}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",background:"#0d1117"}}>
+        {/* 국가 면 */}
+        {cPaths.map(p=>p.d&&<path key={p.id} d={p.d} fill="#1c2b3a" stroke="none"/>)}
+        {/* 국경선 */}
+        {mesh&&<path d={mesh} fill="none" stroke="#2e4a68" strokeWidth="0.45"/>}
+        {/* 해안선 */}
+        {cPaths.map(p=>p.d&&<path key={`s${p.id}`} d={p.d} fill="none" stroke="#3a5a7a" strokeWidth="0.55"/>)}
 
         {/* ── 북아메리카 ── */}
         <path fill={gnd} stroke={brd} strokeWidth="0.8" d="
@@ -892,33 +919,25 @@ function WorldMap({markets}){
           M732,390 C736,386 742,387 744,392 C746,397 742,402 737,402
           C732,402 730,396 732,390 Z"/>
 
-        {/* ════ 마켓 버블 ════ */}
+        {/* ════ 마켓 버블 (스크린샷 스타일) ════ */}
         {markers.map(m=>{
-          const pos=m.pct>=0;
-          const col=pos?C.green:C.red;
+          const pos=m.pct==null||m.pct>=0;
+          const col=pos?"#22c55e":"#ef4444";
+          const bg=pos?"rgba(20,90,50,0.92)":"rgba(120,20,20,0.92)";
           const abs=Math.abs(m.pct||0);
-          const r=Math.max(11,Math.min(20,11+abs*1.6));
-          const pctStr=(pos?"+":"")+m.pct?.toFixed(1)+"%";
-          const lw=Math.max(m.label.length*6.5+10, pctStr.length*5.5+8);
-          const pillH=12, pillY=m.y-r-2-pillH;
+          const r=Math.max(22,Math.min(36,22+abs*2));
+          const pctStr=(m.pct==null?"N/A":(pos?"+":"")+m.pct.toFixed(2)+"%");
           return(
             <g key={m.ticker}>
-              {/* 글로우 */}
-              <circle cx={m.x} cy={m.y} r={r+7} fill={`${col}0d`}/>
-              {/* 버블 */}
-              <circle cx={m.x} cy={m.y} r={r} fill={`${col}25`} stroke={col} strokeWidth="1.4"/>
-              {/* 퍼센트 (버블 안) */}
-              <text x={m.x} y={m.y+1} textAnchor="middle" dominantBaseline="middle"
-                fill={col} fontSize="7.5" fontWeight="800" fontFamily="sans-serif"
-                style={{letterSpacing:"-0.3px"}}>
-                {pctStr}
-              </text>
-              {/* 라벨 필 (버블 위) */}
-              <rect x={m.x-lw/2} y={pillY} width={lw} height={pillH}
-                rx="3" fill="rgba(5,8,16,0.88)" stroke={`${col}55`} strokeWidth="0.7"/>
-              <text x={m.x} y={pillY+pillH/2} textAnchor="middle" dominantBaseline="middle"
-                fill="rgba(230,238,255,0.95)" fontSize="7" fontWeight="700" fontFamily="sans-serif">
+              <circle cx={m.x} cy={m.y} r={r+6} fill={pos?"rgba(34,197,94,0.1)":"rgba(239,68,68,0.1)"}/>
+              <circle cx={m.x} cy={m.y} r={r} fill={bg} stroke={col} strokeWidth="1.5"/>
+              <text x={m.x} y={m.y-5} textAnchor="middle" dominantBaseline="middle"
+                fill="rgba(255,255,255,0.95)" fontSize="9.5" fontWeight="700" fontFamily="sans-serif">
                 {m.label}
+              </text>
+              <text x={m.x} y={m.y+8} textAnchor="middle" dominantBaseline="middle"
+                fill={col} fontSize="9" fontWeight="800" fontFamily="sans-serif">
+                {pctStr}
               </text>
             </g>
           );
@@ -1855,16 +1874,17 @@ function MarketTab({markets,onChart,data,fetchSignals,runAnalysis,loading,apiCon
   const toggle=(t)=>setOpenMap(p=>({...p,[t]:!p[t]}));
 
   const cats=useMemo(()=>({
-    "🪙 크립토":    markets.filter(m=>m.ticker?.includes("USD")),
-    "🇰🇷 한국":     markets.filter(m=>m.ticker?.includes("KS")||m.ticker?.includes("KQ")),
-    "🇺🇸 미국":     markets.filter(m=>["^GSPC","^IXIC","^DJI"].includes(m.ticker)),
-    "🌏 일본/홍콩": markets.filter(m=>["^N225","^HSI"].includes(m.ticker)),
-    "🇨🇳 중국":     markets.filter(m=>m.ticker?.includes(".SS")||m.ticker?.includes(".SZ")),
-    "🇮🇳 인도":     markets.filter(m=>["^NSEI","^BSESN"].includes(m.ticker)),
-    "🌏 아시아기타":markets.filter(m=>["^TWII","^STI"].includes(m.ticker)),
-    "🇪🇺 유럽":     markets.filter(m=>["^GDAXI","^FTSE","^FCHI"].includes(m.ticker)),
-    "🌎 기타":      markets.filter(m=>["^AXJO","^BVSP"].includes(m.ticker)),
-    "📊 변동성":    markets.filter(m=>m.ticker==="^VIX"),
+    "🪙 크립토":      markets.filter(m=>m.ticker?.includes("USD")),
+    "🇰🇷 한국":       markets.filter(m=>m.ticker?.includes("KS")||m.ticker?.includes("KQ")),
+    "🇺🇸 미국":       markets.filter(m=>["^GSPC","^IXIC","^DJI"].includes(m.ticker)),
+    "🌏 일본/홍콩":   markets.filter(m=>["^N225","^HSI"].includes(m.ticker)),
+    "🇨🇳 중국/대만":  markets.filter(m=>m.ticker?.includes(".SS")||m.ticker?.includes(".SZ")||["^TWII"].includes(m.ticker)),
+    "🇮🇳 인도":       markets.filter(m=>["^NSEI","^BSESN"].includes(m.ticker)),
+    "🌏 동남아":      markets.filter(m=>["^STI","^JKSE","^KLSE"].includes(m.ticker)),
+    "🇪🇺 유럽":       markets.filter(m=>["^GDAXI","^FTSE","^FCHI","^STOXX50E","^SSMI"].includes(m.ticker)),
+    "🌎 아메리카":    markets.filter(m=>["^AXJO","^BVSP","^MXX","^NZ50"].includes(m.ticker)),
+    "🌍 중동/기타":   markets.filter(m=>["^TA125.TA","^TASI.SR"].includes(m.ticker)),
+    "📊 변동성":      markets.filter(m=>m.ticker==="^VIX"),
   }),[markets]);
 
   const buys=markets.filter(m=>["BUY","LEVERAGE_2X","INVESTED","STRONG_BUY"].includes(m.signal_type)).length;
@@ -1967,7 +1987,7 @@ function MarketTab({markets,onChart,data,fetchSignals,runAnalysis,loading,apiCon
         ))}
       </div>
 
-      {/* 카테고리별 카드 */}
+      {/* 카테고리별 카드 (데스크탑: 2열 그리드) */}
       {sigFilter==="all"
         ?Object.entries(cats).map(([cat,ms])=>ms.length===0?null:(
           <div key={cat} style={{marginBottom:14}}>
@@ -1976,12 +1996,16 @@ function MarketTab({markets,onChart,data,fetchSignals,runAnalysis,loading,apiCon
               {cat}
               <span style={{color:C.muted,fontSize:9}}>({ms.length})</span>
             </div>
-            {ms.map(m=><Card key={m.ticker} m={m} open={!!openMap[m.ticker]}
-              onToggle={()=>toggle(m.ticker)} onChart={onChart}/>)}
+            <div className="desktop-grid">
+              {ms.map(m=><Card key={m.ticker} m={m} open={!!openMap[m.ticker]}
+                onToggle={()=>toggle(m.ticker)} onChart={onChart}/>)}
+            </div>
           </div>
         ))
-        :filtered.map(m=><Card key={m.ticker} m={m} open={!!openMap[m.ticker]}
-            onToggle={()=>toggle(m.ticker)} onChart={onChart}/>)
+        :<div className="desktop-grid">
+          {filtered.map(m=><Card key={m.ticker} m={m} open={!!openMap[m.ticker]}
+            onToggle={()=>toggle(m.ticker)} onChart={onChart}/>)}
+        </div>
       }
 
       {/* 전략 가이드 */}

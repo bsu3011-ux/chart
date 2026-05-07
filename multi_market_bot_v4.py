@@ -972,7 +972,8 @@ def _generate_analysis_text(ticker, price, chg, rsi, macd_hist, bb_pct_b,
     elif bb_pct_b < 0.2:
         lines.append("볼린저밴드 하단 근처에 위치하여 단기 과매도 반등 가능성이 있습니다.")
     else:
-        lines.append(f"52주 최고가 대비 {abs(from_high):.1f}% 위치에 있으며 추세를 지속 모니터링할 필요가 있습니다.")
+        fh_str = f"{abs(from_high):.1f}%" if from_high == from_high else "N/A"
+        lines.append(f"52주 최고가 대비 {fh_str} 위치에 있으며 추세를 지속 모니터링할 필요가 있습니다.")
     return " ".join(lines)
 
 def _generate_forecasts(price, signal_type, rsi, ma50_slope, macd_hist, bb_bw, from_high):
@@ -1039,6 +1040,7 @@ def analyze_stock(ticker: str) -> dict:
     ticker: 'AAPL', '005930.KS' 형식
     """
     df = load_data(ticker, period="1y")
+    df = df.dropna(subset=['Close', 'High', 'Low', 'Open', 'Volume'])
     if df.empty or len(df) < 30:
         raise ValueError(f"데이터를 불러올 수 없습니다: {ticker}")
 

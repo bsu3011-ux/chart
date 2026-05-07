@@ -9,9 +9,19 @@
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
-import os, json, asyncio, datetime, threading, urllib.request, hmac, hashlib, subprocess
+import os, json, math, asyncio, datetime, threading, urllib.request, hmac, hashlib, subprocess
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
+
+def _clean(obj):
+    """NaN/Infinity → None (JSON 직렬화 안전)"""
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _clean(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_clean(v) for v in obj]
+    return obj
 
 # ── 봇 임포트 ──
 from multi_market_bot_v4 import (
@@ -96,7 +106,7 @@ def get_stock_analysis():
 
     try:
         result = analyze_stock(ticker)
-        return jsonify(result)
+        return jsonify(_clean(result))
     except ValueError:
         # yfinance 실패 → POPULAR_STOCKS 기본 정보 폴백
         basic = POPULAR_STOCKS.get(ticker, {})

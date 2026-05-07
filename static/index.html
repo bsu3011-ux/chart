@@ -1239,6 +1239,7 @@ function StockResultCard({data:d,onChart,onClose}){
         </div>
         <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:`${C.cyan}08`,border:`1px solid ${C.cyan}22`}}>
           <div style={{color:C.cyan,fontSize:9,fontWeight:700,marginBottom:3}}>🤖 AI 분석</div>
+          {d.data_unavailable&&<div style={{color:C.yellow,fontSize:10,marginBottom:4}}>⚠️ 실시간 시세 조회 불가 — 기본 정보만 표시</div>}
           <div style={{color:C.dim,fontSize:11,lineHeight:1.6}}>{d.analysis_text}</div>
         </div>
         <button onClick={()=>onChart({ticker:d.ticker,name:d.name,flag:d.flag,strategy_name:d.signal_text})}

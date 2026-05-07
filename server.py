@@ -97,8 +97,39 @@ def get_stock_analysis():
     try:
         result = analyze_stock(ticker)
         return jsonify(result)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+    except ValueError:
+        # yfinance 실패 → POPULAR_STOCKS 기본 정보 폴백
+        basic = POPULAR_STOCKS.get(ticker, {})
+        if not basic:
+            # 대소문자 변형 탐색
+            key = next((k for k in POPULAR_STOCKS if k.upper() == ticker), None)
+            basic = POPULAR_STOCKS.get(key, {}) if key else {}
+        if basic:
+            return jsonify({
+                "ticker": ticker,
+                "name": basic.get("name", ticker),
+                "name_en": basic.get("name_en", ""),
+                "sector": basic.get("sector", ""),
+                "flag": basic.get("flag", ""),
+                "price": None,
+                "change_pct": 0,
+                "change_abs": 0,
+                "signal_type": "NEUTRAL",
+                "signal_text": "관망",
+                "analysis_text": "실시간 데이터를 불러올 수 없습니다. 서버 네트워크 상태를 확인해주세요.",
+                "rsi": None,
+                "ma20": None,
+                "ma50": None,
+                "ma200": None,
+                "bb_upper": None,
+                "bb_lower": None,
+                "support": None,
+                "resistance": None,
+                "vol_ratio": None,
+                "price_history": [],
+                "data_unavailable": True,
+            })
+        return jsonify({"error": f"종목 정보를 찾을 수 없습니다: {ticker}"}), 404
     except Exception as e:
         return jsonify({"error": f"분석 실패: {str(e)}"}), 500
 

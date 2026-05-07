@@ -485,6 +485,10 @@ def get_sectors():
     })
 
 
+@app.route('/guide')
+def guide():
+    return send_from_directory(STATIC_DIR, 'guide.html')
+
 @app.route('/countries-110m.json')
 def world_map():
     """세계지도 TopoJSON 데이터"""

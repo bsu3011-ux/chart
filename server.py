@@ -545,4 +545,5 @@ if __name__ == '__main__':
     print(f"  /api/signals — 시그널 조회")
     print(f"  /api/run     — 수동 분석 실행")
     print(f"  /api/status  — 서버 상태\n")
-    app.run(host='0.0.0.0', port=port, debug=False)
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    app.run(host='0.0.0.0', port=port, debug=debug)

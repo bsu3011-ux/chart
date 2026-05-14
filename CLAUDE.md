@@ -19,11 +19,53 @@ Flask 기반 주식/지수 시그널 분석 웹앱. 단일 HTML 파일(React 18 
 ├── server.py               ← Flask API 서버
 ├── multi_market_bot_v4.py  ← 시그널 분석 로직, MARKETS, POPULAR_STOCKS
 ├── crypto_data.py          ← 크립토 데이터 유틸
-├── run.sh                  ← 서버 자동재시작 루프
+├── run.sh                  ← 서버 자동재시작 루프 (프로덕션)
+├── dev.sh                  ← 로컬 개발 서버 루프
+├── setup.sh                ← 로컬 최초 설치
+├── claude-apply.sh         ← Claude 수정 후 즉시 반영 스크립트
 ├── output/
 │   └── signals_v4.json     ← 분석 결과 캐시
 └── CLAUDE.md               ← 이 파일
 ```
+
+---
+
+## 로컬 설치 & 실행
+
+```bash
+# 1. 저장소 클론
+git clone https://github.com/bsu3011-ux/chart.git
+cd chart
+
+# 2. 최초 설치 (패키지 + 디렉토리)
+bash setup.sh
+
+# 3. 개발 서버 시작 (터미널 하나 차지)
+bash dev.sh
+```
+
+브라우저에서 `http://localhost:5000` 접속.
+
+---
+
+## Claude 자동 반영 루프 (핵심)
+
+사용자가 변경을 요청하면 Claude 는 아래 순서를 자율적으로 실행한다:
+
+```
+1. 파일 Read → 위치 파악
+2. Edit 도구로 최소 diff 적용
+3. bash claude-apply.sh 실행
+   ├─ Python 구문 검사 (실패 시 중단)
+   ├─ 기존 서버 종료 (fuser -k 5000/tcp)
+   ├─ 새 서버 백그라운드 기동
+   └─ HTTP 헬스체크 (10회, 1초 간격)
+4. "✅ 반영 완료" 확인 후 사용자 보고
+```
+
+> **HTML 수정은 서버 재시작 불필요.**
+> `index.html` 변경 후 브라우저 `Ctrl+Shift+R` 만 하면 된다.
+> (server.py 가 `Cache-Control: no-cache` 헤더를 내려줌)
 
 ---
 
@@ -41,14 +83,19 @@ Edit /home/user/chart/server.py
 Edit /home/user/chart/multi_market_bot_v4.py
 ```
 
-### 2단계: 커밋 & 푸시
+### 2단계: 즉시 반영 (로컬)
+```bash
+bash claude-apply.sh
+```
+
+### 3단계: 커밋 & 푸시 (사용자 명시 요청 시)
 ```bash
 git add static/index.html server.py multi_market_bot_v4.py
 git commit -m "변경 내용 요약"
 git push -u origin main
 ```
 
-### 3단계: 서버 재시작
+### 4단계: 서버 재시작 (수동 필요 시)
 ```bash
 fuser -k 5000/tcp 2>/dev/null; sleep 1; python3 server.py &
 ```

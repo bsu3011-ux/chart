@@ -1071,7 +1071,10 @@ def analyze_stock(ticker: str) -> dict:
     ticker: 'AAPL', '005930.KS' 형식
     """
     df = load_data(ticker, period="1y")
-    df = df.dropna(subset=['Close', 'High', 'Low', 'Open', 'Volume'])
+    required = ['Close', 'High', 'Low', 'Open', 'Volume']
+    if df.empty or not all(c in df.columns for c in required):
+        raise ValueError(f"데이터를 불러올 수 없습니다: {ticker}")
+    df = df.dropna(subset=required)
     if df.empty or len(df) < 30:
         raise ValueError(f"데이터를 불러올 수 없습니다: {ticker}")
 

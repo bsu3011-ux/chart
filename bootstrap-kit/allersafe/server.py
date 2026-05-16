@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  allersafe — Flask API 서버 (포트 5001)
+  allersafe — Flask API 서버 (포트 8000)
   ─────────────────────────────────────────
   - 정적 파일 서빙 (static/index.html, no-cache)
   - /api/health 헬스체크
@@ -37,7 +37,7 @@ def health():
     return jsonify({
         "status": "running",
         "app": "allersafe",
-        "port": int(os.environ.get("PORT", 5001)),
+        "port": int(os.environ.get("PORT", 8000)),
         "time": datetime.datetime.now().isoformat(),
     })
 
@@ -63,7 +63,7 @@ def deploy():
             print(f"[deploy] git pull error: {e}")
         # run.sh 가 감시하므로 pkill 만 하면 자동 재기동
         subprocess.Popen(
-            f'sleep 2 && fuser -k {os.environ.get("PORT", 5001)}/tcp',
+            f'sleep 2 && fuser -k {os.environ.get("PORT", 8000)}/tcp',
             shell=True, start_new_session=True
         )
 
@@ -72,7 +72,7 @@ def deploy():
 
 
 if __name__ == '__main__':
-    port  = int(os.environ.get("PORT", 5001))
+    port  = int(os.environ.get("PORT", 8000))
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
     print(f"\n  🚀 allersafe 서버 시작 — http://localhost:{port}")
     print(f"  /api/health  — 헬스체크")

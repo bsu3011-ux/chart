@@ -5,9 +5,9 @@
 
 ## 핵심 사실 (먼저 알아두기)
 
-- **포트**: 5001 (chart 가 5000 을 쓰므로 충돌 회피)
+- **포트**: 8000 (이미 운영 중. chart 는 5000)
 - **호스트**: Oracle VM `163.192.35.70` (chart 와 동일 VM)
-- **자동배포 경로**: 로컬 Edit → `git push origin main` → GitHub webhook → `http://163.192.35.70:5001/deploy` → 서버에서 `git pull` + `fuser -k` → `run.sh` 가 재기동
+- **자동배포 경로**: 로컬 Edit → `git push origin main` → GitHub webhook → `http://163.192.35.70:8000/deploy` → 서버에서 `git pull` + `fuser -k` → `run.sh` 가 재기동
 - **Oracle SSH 불필요**: 위 webhook 만 동작하면 push 만으로 운영 반영됨
 - **DEPLOY_SECRET**: 환경변수 `DEPLOY_SECRET` 으로 주입 (Oracle `~/.bashrc` 또는 `.env` 에서 export)
 
@@ -33,7 +33,7 @@ allersafe/
 2. Edit 으로 최소 diff 적용
 3. bash claude-apply.sh 실행
    ├─ Python 구문 검사
-   ├─ fuser -k 5001/tcp (기존 종료)
+   ├─ fuser -k 8000/tcp (기존 종료)
    ├─ python3 server.py & (백그라운드 기동)
    └─ /api/health 헬스체크 (10회, 1초 간격)
 4. 사용자 명시적 요청 시에만 git add/commit/push
@@ -61,16 +61,16 @@ git push -u origin main
 
 ```bash
 # 헬스체크
-curl http://localhost:5001/api/health
+curl http://localhost:8000/api/health
 
 # 운영 서버
-curl http://163.192.35.70:5001/api/health
+curl http://163.192.35.70:8000/api/health
 
 # 서버 로그
 tail -50 server.log
 
 # 강제 재기동 (로컬)
-fuser -k 5001/tcp; nohup python3 server.py &
+fuser -k 8000/tcp; nohup python3 server.py &
 ```
 
 ## Oracle 운영 환경 위치
@@ -78,7 +78,7 @@ fuser -k 5001/tcp; nohup python3 server.py &
 | 항목 | 경로/값 |
 |---|---|
 | 서버 IP | `163.192.35.70` |
-| 포트 | `5001` |
+| 포트 | `8000` |
 | 설치 경로 | `/home/<user>/allersafe` (Oracle VM 안) |
 | 프로세스 관리 | `run.sh` 가 `while true` 루프로 감시 |
 | 자동배포 | GitHub webhook → `POST /deploy` (HMAC) |
@@ -86,6 +86,6 @@ fuser -k 5001/tcp; nohup python3 server.py &
 ## 주의
 
 - **DEPLOY_SECRET 을 코드에 박지 말 것**: 환경변수만 사용
-- **포트 5001 이 OCI Security List 에서 열려 있어야** webhook 도착함
+- **포트 8000 이 OCI Security List 에서 열려 있어야** webhook 도착함
 - **`POPULAR_STOCKS` 같은 외부 데이터**는 별도 추가. 이 스켈레톤엔 없음
 - chart 와 같은 Oracle VM 이므로 **포트만 다르고 동일 호스트** — DNS/도메인 분리하려면 nginx 별도 설정 필요

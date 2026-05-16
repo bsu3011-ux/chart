@@ -8,19 +8,41 @@
 
 ---
 
+## 시작 전 체크 — 어느 단계부터인가
+
+allersafe 가 **이미 Oracle 8000 에서 돌고 있는 상태**라면 §A 와 §1~3 은 이미 완료된 상황이다.
+다음 명령으로 현재 상태부터 점검:
+
+```bash
+ss -tlnp | grep :8000              # 무엇이 8000에 떠 있는가
+curl -s http://localhost:8000/      # 응답이 정상인가
+ps -ef | grep python | grep -v grep # 어떤 프로세스인가
+ls ~/allersafe 2>/dev/null && cd ~/allersafe && git remote -v
+```
+
+결과에 따라 진입점이 다르다:
+
+| 상태 | 진입점 |
+|---|---|
+| 8000 에 allersafe Flask 가 떠 있고 git 디렉토리도 있음 | **§4 (DEPLOY_SECRET) 부터** 시작 |
+| 8000 에 떠 있지만 git 이 아니거나 다른 위치 | §1 부터 (기존 프로세스 정리 후) |
+| 아무것도 없음 | §A 부터 전체 진행 |
+
+---
+
 ## 사전 준비 (Oracle Cloud 웹 콘솔에서 1회)
 
-### A. OCI Security List 에서 포트 5001 열기
+### A. OCI Security List 에서 포트 8000 열기
 
 1. Oracle Cloud Console 로그인 → Networking → Virtual Cloud Networks
 2. 해당 VCN → Security Lists → Default Security List
 3. **Ingress Rules → Add Ingress Rules**
    - Source CIDR: `0.0.0.0/0`
    - IP Protocol: `TCP`
-   - Destination Port Range: `5001`
+   - Destination Port Range: `8000`
 4. 저장
 
-> chart 가 이미 5000 으로 동작 중이라면 5001 도 같은 방식으로 추가.
+> chart 가 이미 5000 으로 동작 중이라면 8000 도 같은 방식으로 추가.
 
 ---
 
@@ -45,14 +67,14 @@ bash setup.sh
 ### 3. 호스트 방화벽(iptables) 열기 — Ubuntu/Oracle Linux 공통
 
 ```bash
-sudo iptables -I INPUT -p tcp --dport 5001 -j ACCEPT
+sudo iptables -I INPUT -p tcp --dport 8000 -j ACCEPT
 sudo netfilter-persistent save 2>/dev/null || \
   sudo iptables-save | sudo tee /etc/iptables/rules.v4
 ```
 
 > firewalld 쓰는 시스템이면:
 > ```bash
-> sudo firewall-cmd --permanent --add-port=5001/tcp
+> sudo firewall-cmd --permanent --add-port=8000/tcp
 > sudo firewall-cmd --reload
 > ```
 
@@ -74,17 +96,17 @@ cd ~/allersafe
 nohup bash run.sh > run.log 2>&1 &
 disown
 sleep 3
-curl -s http://localhost:5001/api/health
+curl -s http://localhost:8000/api/health
 ```
 
 다음과 같이 나오면 성공:
 ```json
-{"app":"allersafe","port":5001,"status":"running","time":"..."}
+{"app":"allersafe","port":8000,"status":"running","time":"..."}
 ```
 
 외부에서도 확인:
 ```bash
-curl -s http://163.192.35.70:5001/api/health
+curl -s http://163.192.35.70:8000/api/health
 ```
 
 ### 6. systemd 등록 (선택 — 재부팅 시 자동 시작)
@@ -119,7 +141,7 @@ sudo systemctl status allersafe
 
 기존 `nohup` 으로 돌고 있다면:
 ```bash
-fuser -k 5001/tcp     # 기존 종료
+fuser -k 8000/tcp     # 기존 종료
 sudo systemctl start allersafe
 ```
 
@@ -134,7 +156,7 @@ sudo systemctl start allersafe
 
 | 필드 | 값 |
 |---|---|
-| Payload URL | `http://163.192.35.70:5001/deploy` |
+| Payload URL | `http://163.192.35.70:8000/deploy` |
 | Content type | `application/json` |
 | Secret | §4 에서 생성한 `$SECRET` 값 |
 | SSL verification | Disable (HTTP 라서) |
@@ -161,7 +183,7 @@ git push origin main
 
 5초 후:
 ```bash
-curl -s http://163.192.35.70:5001/ | grep "deploy test"
+curl -s http://163.192.35.70:8000/ | grep "deploy test"
 ```
 
 검색되면 성공. **이제부터는 사용자/Claude 누구든 `git push` 만으로 운영 반영됨.**
@@ -182,7 +204,7 @@ curl -s http://163.192.35.70:5001/ | grep "deploy test"
 | 증상 | 원인 | 해결 |
 |---|---|---|
 | GitHub Webhook 에서 `timeout` | OCI Security List 미개방 | §A 다시 확인 |
-| GitHub Webhook 에서 `connection refused` | 서버가 5001 에 안 떠있음 | `curl localhost:5001/api/health` 로 확인. 안 뜨면 `tail -50 run.log` |
+| GitHub Webhook 에서 `connection refused` | 서버가 8000 에 안 떠있음 | `curl localhost:8000/api/health` 로 확인. 안 뜨면 `tail -50 run.log` |
 | GitHub Webhook 에서 `403 invalid signature` | 시크릿 불일치 | `echo $DEPLOY_SECRET` vs GitHub Webhook Secret 비교 |
 | `git pull` 실패 | 권한 문제 또는 충돌 | `cd ~/allersafe && git status && git pull origin main` 수동 실행해서 에러 메시지 확인 |
 | 외부에서 접속 안됨 | iptables 닫혀있음 | §3 다시 실행 |

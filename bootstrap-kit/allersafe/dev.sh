@@ -1,12 +1,12 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-#  allersafe 로컬 개발 서버 (포트 5001)
+#  allersafe 로컬 개발 서버 (포트 8000)
 # ─────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 mkdir -p output
 
-export PORT="${PORT:-5001}"
+export PORT="${PORT:-8000}"
 export FLASK_DEBUG="${FLASK_DEBUG:-0}"
 
 echo "🚀 allersafe 개발 서버 — http://localhost:$PORT"

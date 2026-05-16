@@ -3,12 +3,12 @@
 #  Claude 자동 반영 스크립트 (allersafe)
 #  Claude 가 파일을 수정한 직후 호출.
 #  사용법:
-#    bash claude-apply.sh            # 기본 포트 5001
+#    bash claude-apply.sh            # 기본 포트 8000
 #    bash claude-apply.sh 5002       # 포트 지정
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PORT="${1:-${PORT:-5001}}"
+PORT="${1:-${PORT:-8000}}"
 cd "$SCRIPT_DIR"
 
 # ── 1. Python 구문 검사 ──────────────────────────────────────

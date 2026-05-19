@@ -170,7 +170,7 @@ def search_stocks():
 def get_chart_data():
     """캔들스틱 차트 데이터 (일봉/주봉/월봉)
     GET /api/chart?ticker=^KS11&interval=1d
-    interval: 1d (일봉/1년), 1wk (주봉/3년), 1mo (월봉/5년)
+    interval: 1d (일봉/2년), 1wk (주봉/5년), 1mo (월봉/전체)
     """
     import yfinance as yf
     import pandas as pd
@@ -180,7 +180,7 @@ def get_chart_data():
     if not ticker:
         return jsonify({"error": "ticker 파라미터 필요"}), 400
 
-    period_map = {'1d': '1y', '1wk': '3y', '1mo': '5y'}
+    period_map = {'1d': '2y', '1wk': '5y', '1mo': 'max'}
     if interval not in period_map:
         interval = '1d'
     period = period_map[interval]

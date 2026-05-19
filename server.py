@@ -697,6 +697,7 @@ def deploy():
         except Exception as e:
             print(f"[deploy] git pull error: {e}")
         # run.sh 루프가 서버를 감시하므로 pkill만 하면 자동 재시작됨
+        # (재시작 후 서버가 뜨면서 _run_bot_background가 자동 실행됨)
         subprocess.Popen(
             'sleep 2 && pkill -f "python3 server.py"',
             shell=True,

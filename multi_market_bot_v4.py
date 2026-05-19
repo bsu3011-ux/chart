@@ -565,6 +565,113 @@ def calc_volume_analysis(df):
     return round(ratio, 2), spike, trend
 
 
+def detect_rsi_divergence(close, rsi_series, lookback=20):
+    """RSI 다이버전스 감지
+    Bullish: 가격은 새 저점이지만 RSI는 더 높은 저점 (반등 신호)
+    Bearish: 가격은 새 고점이지만 RSI는 더 낮은 고점 (반전 신호)
+    반환: 'bullish', 'bearish', or None
+    """
+    if len(close) < lookback * 2:
+        return None
+    recent_price = close.iloc[-lookback:]
+    recent_rsi   = rsi_series.iloc[-lookback:].dropna()
+    prev_price   = close.iloc[-lookback*2:-lookback]
+    prev_rsi     = rsi_series.iloc[-lookback*2:-lookback].dropna()
+    if recent_rsi.empty or prev_rsi.empty:
+        return None
+    # 가격 신저점인데 RSI는 더 높은 저점
+    if recent_price.min() < prev_price.min() and recent_rsi.min() > prev_rsi.min() + 2:
+        return "bullish"
+    # 가격 신고점인데 RSI는 더 낮은 고점
+    if recent_price.max() > prev_price.max() and recent_rsi.max() < prev_rsi.max() - 2:
+        return "bearish"
+    return None
+
+
+def detect_candle_pattern(df):
+    """최근 1~2봉 주요 캔들 패턴 감지. 반환: 패턴명 or None"""
+    if len(df) < 3: return None
+    o1, h1, l1, c1 = float(df['Open'].iloc[-1]), float(df['High'].iloc[-1]), float(df['Low'].iloc[-1]), float(df['Close'].iloc[-1])
+    o2, h2, l2, c2 = float(df['Open'].iloc[-2]), float(df['High'].iloc[-2]), float(df['Low'].iloc[-2]), float(df['Close'].iloc[-2])
+    body1, range1 = abs(c1 - o1), max(h1 - l1, 1e-9)
+    body2, range2 = abs(c2 - o2), max(h2 - l2, 1e-9)
+    upper_wick1 = h1 - max(c1, o1)
+    lower_wick1 = min(c1, o1) - l1
+
+    # 강세형 장악 (Bullish Engulfing)
+    if c2 < o2 and c1 > o1 and c1 >= o2 and o1 <= c2 and body1 > body2 * 0.8:
+        return "강세 장악형"
+    # 약세형 장악 (Bearish Engulfing)
+    if c2 > o2 and c1 < o1 and o1 >= c2 and c1 <= o2 and body1 > body2 * 0.8:
+        return "약세 장악형"
+    # 해머 (Hammer) — 하락추세 끝에서 반전 신호
+    if lower_wick1 > body1 * 2 and upper_wick1 < body1 * 0.3 and body1 / range1 < 0.4:
+        return "해머 (저점 반전)"
+    # 슈팅스타 (Shooting Star)
+    if upper_wick1 > body1 * 2 and lower_wick1 < body1 * 0.3 and body1 / range1 < 0.4:
+        return "슈팅스타 (고점 반전)"
+    # 도지 (Doji) — 매수·매도 균형
+    if body1 / range1 < 0.1:
+        return "도지 (방향 결정 임박)"
+    return None
+
+
+def calc_position_targets(price, atr_val, support, resistance, signal_type):
+    """손절가·목표가·R:R 계산 (변동성 기반)
+    - 손절: ATR×2 또는 직전 지지선 중 가까운 쪽
+    - 목표: ATR×4 또는 직전 저항선 중 먼 쪽 (R:R ≥ 2 목표)
+    """
+    if not atr_val or atr_val <= 0:
+        return None
+    is_long = signal_type in ("STRONG_BUY", "BUY", "LEVERAGE_2X", "HOLD_1X", "INVESTED")
+    if is_long:
+        stop_atr = price - atr_val * 2
+        stop = max(stop_atr, support) if support and support < price else stop_atr
+        risk = price - stop
+        if risk <= 0: return None
+        target_atr = price + atr_val * 4
+        target = max(target_atr, resistance) if resistance and resistance > price else target_atr
+        reward = target - price
+    else:
+        stop_atr = price + atr_val * 2
+        stop = min(stop_atr, resistance) if resistance and resistance > price else stop_atr
+        risk = stop - price
+        if risk <= 0: return None
+        target_atr = price - atr_val * 4
+        target = min(target_atr, support) if support and support < price else target_atr
+        reward = price - target
+    rr = round(reward / risk, 2) if risk > 0 else 0
+    return {
+        "stop":   round(stop, 2),
+        "target": round(target, 2),
+        "rr":     rr,
+        "risk_pct":   round(abs(risk) / price * 100, 2),
+        "reward_pct": round(abs(reward) / price * 100, 2),
+    }
+
+
+def calc_position_size(price, stop, account_size=10_000_000, risk_pct=1.0):
+    """1% 룰 기반 포지션 사이즈 계산
+    risk_pct: 계좌 대비 손실 허용 % (기본 1%)
+    반환: 권장 매수 수량, 투자금액"""
+    if not stop or price <= 0:
+        return None
+    risk_per_share = abs(price - stop)
+    if risk_per_share <= 0:
+        return None
+    max_loss = account_size * (risk_pct / 100)
+    shares = int(max_loss / risk_per_share)
+    invest = shares * price
+    return {
+        "shares":      shares,
+        "invest":      int(invest),
+        "invest_pct":  round(invest / account_size * 100, 1),
+        "max_loss":    int(max_loss),
+        "account":     account_size,
+        "risk_pct":    risk_pct,
+    }
+
+
 def calc_adx(df, period=14):
     """ADX 추세강도 지표 (0-100, >25=강한 추세, <20=횡보)"""
     h, l, c = df['High'], df['Low'], df['Close']
@@ -1317,21 +1424,58 @@ def _slope(series, n=5):
     v_prev = float(s.iloc[-(n + 1)])
     return (v_now - v_prev) / v_prev * 100 if v_prev != 0 else 0.0
 
-def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio):
-    """7개 조건 기반 복합 신호"""
-    score = 0
-    if price > ma20:                  score += 1
-    if price > ma50:                  score += 1
-    if ma200 and price > ma200:       score += 1
-    if 50 < rsi < 70:                 score += 1
-    if macd_hist > 0:                 score += 1
-    if bb_pct_b > 0.5:                score += 1
-    if vol_ratio > 1.2:               score += 1
-    if score >= 6: return "STRONG_BUY",  "🟢 강력 매수"
-    if score >= 4: return "BUY",         "🟢 매수"
-    if score <= 1: return "STRONG_SELL", "🔴 강력 매도"
-    if score <= 3: return "SELL",        "🔴 매도"
-    return "NEUTRAL", "⚪ 중립"
+def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
+                       divergence=None, candle_pattern=None, ma50_slope=0):
+    """가중치 기반 신호 생성 (0~100점)
+    - MA200/MA50 추세: 35점 (장기 가장 중요)
+    - 모멘텀 (RSI/MACD): 25점
+    - 단기 추세 (MA20·기울기): 15점
+    - 변동성/거래량 (BB/Vol): 15점
+    - 다이버전스·캔들 보정: ±10점
+    """
+    score = 50  # 중립 시작점
+
+    # 장기 추세 (35점)
+    if ma200 and price > ma200: score += 20
+    elif ma200:                  score -= 20
+    if price > ma50:             score += 10
+    else:                        score -= 10
+    if ma50_slope > 0.5:         score += 5
+    elif ma50_slope < -0.5:      score -= 5
+
+    # 모멘텀 (25점)
+    if   50 < rsi < 70:          score += 10
+    elif rsi >= 70:              score -= 5   # 과매수 경계
+    elif rsi <= 30:              score += 5   # 과매도 반등 가능
+    else:                        score -= 5
+    if macd_hist > 0:            score += 8
+    else:                        score -= 8
+
+    # 단기 추세 (15점)
+    if price > ma20:             score += 8
+    else:                        score -= 8
+
+    # 변동성/거래량 (15점)
+    if 0.3 < bb_pct_b < 0.7:     score += 5   # 중심부 = 안정
+    elif bb_pct_b > 0.9:         score -= 3   # 상단 이탈 = 단기 조정 위험
+    elif bb_pct_b < 0.1:         score += 3   # 하단 = 단기 반등 가능
+    if vol_ratio > 1.5:          score += 5   # 거래량 동반 추세
+    elif vol_ratio < 0.7:        score -= 3   # 거래량 위축 = 모멘텀 약화
+
+    # 다이버전스 보정 (±10점)
+    if divergence == "bullish":  score += 10
+    elif divergence == "bearish": score -= 10
+
+    # 캔들 패턴 보정 (±5점)
+    if candle_pattern in ("강세 장악형", "해머 (저점 반전)"):     score += 5
+    elif candle_pattern in ("약세 장악형", "슈팅스타 (고점 반전)"): score -= 5
+
+    score = max(0, min(100, score))
+    if score >= 75: return "STRONG_BUY",  "🟢 강력 매수", score
+    if score >= 60: return "BUY",         "🟢 매수",     score
+    if score <= 25: return "STRONG_SELL", "🔴 강력 매도", score
+    if score <= 40: return "SELL",        "🔴 매도",     score
+    return "NEUTRAL", "⚪ 중립", score
 
 def _generate_analysis_text(ticker, price, chg, rsi, macd_hist, bb_pct_b,
                               ma20, ma50, ma200, signal_type, vol_spike, from_high):
@@ -1431,17 +1575,25 @@ def analyze_stock(ticker: str) -> dict:
     if df.empty or len(df) < 30:
         raise ValueError(f"데이터를 불러올 수 없습니다: {ticker}")
 
-    # 펀더멘털 (PER, 시총)
-    pe_ratio = None
-    market_cap = None
+    # 펀더멘털 (PER, 시총, 배당, 베타, ROE, EPS성장)
+    pe_ratio = None;  market_cap = None;  dividend_yield = None
+    beta = None;      roe = None;         eps_growth = None
     try:
         t_obj = yf.Ticker(ticker)
         fi = t_obj.fast_info
         market_cap = getattr(fi, 'market_cap', None)
-        full_info = t_obj.info
-        pe_ratio = full_info.get('trailingPE') or full_info.get('forwardPE')
-        if pe_ratio and (pe_ratio < 0 or pe_ratio > 1000):
-            pe_ratio = None
+        full_info  = t_obj.info or {}
+        pe_ratio   = full_info.get('trailingPE') or full_info.get('forwardPE')
+        if pe_ratio and (pe_ratio < 0 or pe_ratio > 1000): pe_ratio = None
+        dy = full_info.get('dividendYield')
+        if dy and 0 < dy < 1:  dividend_yield = round(dy * 100, 2)  # 비율 → %
+        elif dy and dy >= 1:   dividend_yield = round(dy, 2)        # 이미 % 형식
+        beta = full_info.get('beta')
+        if beta is not None: beta = round(float(beta), 2)
+        roe_raw = full_info.get('returnOnEquity')
+        if roe_raw: roe = round(float(roe_raw) * 100, 2)
+        eg = full_info.get('earningsGrowth')
+        if eg is not None: eps_growth = round(float(eg) * 100, 1)
     except Exception:
         pass
 
@@ -1487,16 +1639,43 @@ def analyze_stock(ticker: str) -> dict:
     low_52w   = float(low.min())
     from_high = (current - high_52w) / high_52w * 100
 
-    # 신호 생성
-    signal_type, signal_text = _generate_signal(
-        current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio
+    # ATR (변동성, 손절가 산정)
+    atr_series = calc_atr(df, p=14)
+    atr_val    = float(atr_series.iloc[-1]) if not pd.isna(atr_series.iloc[-1]) else None
+
+    # RSI 다이버전스
+    rsi_series = calc_rsi(close)
+    divergence = detect_rsi_divergence(close, rsi_series, lookback=20)
+
+    # 캔들 패턴
+    candle_pattern = detect_candle_pattern(df)
+
+    # 신호 생성 (가중치 + 다이버전스 + 캔들)
+    signal_type, signal_text, confidence = _generate_signal(
+        current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
+        divergence=divergence, candle_pattern=candle_pattern, ma50_slope=ma50_slope
     )
+
+    # 손절/목표/R:R
+    targets = calc_position_targets(current, atr_val, support, resistance, signal_type)
+    # 포지션 사이즈 (계좌 1천만원, 1% 리스크 가정 기본값)
+    position = calc_position_size(current, targets["stop"], 10_000_000, 1.0) if targets else None
 
     # 분석 텍스트
     analysis_text = _generate_analysis_text(
         ticker, current, change_pct, rsi, macd_hist, bb_pct_b,
         ma20, ma50, ma200, signal_type, vol_spike, from_high
     )
+    # 보조 텍스트 추가 (다이버전스·캔들)
+    extras = []
+    if divergence == "bullish":
+        extras.append("⚡ RSI 상승 다이버전스 — 단기 반등 가능성")
+    elif divergence == "bearish":
+        extras.append("⚠️ RSI 하락 다이버전스 — 단기 조정 가능성")
+    if candle_pattern:
+        extras.append(f"🕯️ 직전봉: {candle_pattern}")
+    if extras:
+        analysis_text = analysis_text + " " + " ".join(extras)
 
     # 전망
     forecasts = _generate_forecasts(
@@ -1549,12 +1728,25 @@ def analyze_stock(ticker: str) -> dict:
         "resistance": round(resistance, 2),
         "signal_type": signal_type,
         "signal_text": signal_text,
+        "confidence": confidence,
         "analysis_text": analysis_text,
         "forecasts": forecasts,
         "risk": risk,
         "price_history": price_history,
+        # ── 펀더멘털 ──
         "pe_ratio": round(pe_ratio, 1) if pe_ratio else None,
         "market_cap": int(market_cap) if market_cap else None,
+        "dividend_yield": dividend_yield,
+        "beta": beta,
+        "roe": roe,
+        "eps_growth": eps_growth,
+        # ── 진입/출구 전략 ──
+        "atr": round(atr_val, 2) if atr_val else None,
+        "targets": targets,
+        "position": position,
+        # ── 신호 보조 ──
+        "divergence": divergence,
+        "candle_pattern": candle_pattern,
         "generated_at": datetime.datetime.now().isoformat(),
     }
 

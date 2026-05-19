@@ -1233,9 +1233,15 @@ function StockResultCard({data:d,onChart,onClose}){
         </div>
         <Spark data={d.price_history} color={s.c} h={40}/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginTop:10}}>
-          <Met label="RSI" value={d.rsi?.toFixed(1)} color={d.rsi>70?C.red:d.rsi<30?C.green:C.cyan}/>
+          <Met label="RSI(14)" value={d.rsi?.toFixed(1)} color={d.rsi>72?C.red:d.rsi<28?C.green:C.cyan}/>
           <Met label="MA50" value={fp(d.ma50,d.ticker)} color={d.price>d.ma50?C.green:C.red}/>
           <Met label="MA200" value={d.ma200?fp(d.ma200,d.ticker):"N/A"} color={d.ma200?(d.price>d.ma200?C.green:C.red):C.muted}/>
+          <Met label="StochRSI K" value={d.stoch_rsi_k!=null?d.stoch_rsi_k?.toFixed(1):"N/A"}
+            color={d.stoch_rsi_k>85?C.red:d.stoch_rsi_k<15?C.green:C.cyan}/>
+          <Met label="StochRSI D" value={d.stoch_rsi_d!=null?d.stoch_rsi_d?.toFixed(1):"N/A"}
+            color={d.stoch_rsi_d>85?C.red:d.stoch_rsi_d<15?C.green:C.cyan}/>
+          <Met label="MACD" value={d.macd_hist!=null?(d.macd_hist>=0?"+":"")+d.macd_hist?.toFixed(4):"N/A"}
+            color={d.macd_hist>=0?C.green:C.red}/>
         </div>
         <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:`${C.cyan}08`,border:`1px solid ${C.cyan}22`}}>
           <div style={{color:C.cyan,fontSize:9,fontWeight:700,marginBottom:3}}>🤖 AI 분석</div>

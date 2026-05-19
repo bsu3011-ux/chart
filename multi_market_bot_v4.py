@@ -531,6 +531,19 @@ def calc_volume_analysis(df):
     trend  = "증가" if avg20 > avg60 else "감소"
     return round(ratio, 2), spike, trend
 
+def calc_stoch_rsi(close, rsi_period=14, stoch_period=14, smooth_k=3, smooth_d=3):
+    """Stochastic RSI (K%, D%) 반환 — 일반 RSI보다 민감한 과매수/과매도 감지"""
+    rsi_s   = calc_rsi(close, rsi_period)
+    rsi_min = rsi_s.rolling(stoch_period).min()
+    rsi_max = rsi_s.rolling(stoch_period).max()
+    denom   = (rsi_max - rsi_min).replace(0, float('nan'))
+    stoch_k = 100 * (rsi_s - rsi_min) / denom
+    k = stoch_k.rolling(smooth_k).mean()
+    d = k.rolling(smooth_d).mean()
+    k_val = float(k.iloc[-1]) if not pd.isna(k.iloc[-1]) else 50.0
+    d_val = float(d.iloc[-1]) if not pd.isna(d.iloc[-1]) else 50.0
+    return round(k_val, 1), round(d_val, 1)
+
 
 # ════════════════════════════════════════════════════════════════
 # 데이터 로드
@@ -622,6 +635,7 @@ def analyze_leverage(df, params):
     rsi = calc_rsi(close)
     vol20 = close.pct_change().rolling(20).std()
     vol60 = close.pct_change().rolling(60).std()
+    macd_l, macd_s, macd_h = calc_macd(close)
 
     i = len(df) - 1
     current = float(close.iloc[-1])
@@ -632,11 +646,13 @@ def analyze_leverage(df, params):
     _v20 = float(vol20.iloc[-1]) if not pd.isna(vol20.iloc[-1]) else 0.01
     _v60 = float(vol60.iloc[-1]) if not pd.isna(vol60.iloc[-1]) else 0.01
 
+    # 10일 윈도우 기울기 (5일 대비 노이즈 감소)
     slope50 = 0
-    if i >= 5 and not pd.isna(ma50.iloc[i-5]):
-        slope50 = (float(ma50.iloc[i]) - float(ma50.iloc[i-5])) / float(ma50.iloc[i-5]) * 100
+    if i >= 10 and not pd.isna(ma50.iloc[i-10]):
+        slope50 = (float(ma50.iloc[i]) - float(ma50.iloc[i-10])) / float(ma50.iloc[i-10]) * 100
 
     vol_spike = _v20 > _v60 * 1.5 if _v60 > 0 else False
+    macd_bullish = macd_h > 0
 
     # 골든크로스 / 데드크로스 감지
     cross_signal = "none"
@@ -644,19 +660,24 @@ def analyze_leverage(df, params):
         prev_ma50  = float(ma50.iloc[-2])
         prev_ma200 = float(ma200.iloc[-2])
         if prev_ma50 < prev_ma200 and _ma50 >= _ma200:
-            cross_signal = "golden"   # 골든크로스 발생!
+            cross_signal = "golden"
         elif prev_ma50 > prev_ma200 and _ma50 <= _ma200:
-            cross_signal = "dead"     # 데드크로스 발생!
+            cross_signal = "dead"
         elif _ma50 > _ma200:
-            cross_signal = "bull"     # 골든크로스 유지
+            cross_signal = "bull"
         else:
-            cross_signal = "bear"     # 데드크로스 유지
+            cross_signal = "bear"
 
-    # 레버리지 결정
-    if current > _ma50 and slope50 > 0 and _rsi > 50 and not vol_spike:
+    # 레버리지 결정 — MACD 확인 포함
+    if current > _ma50 and slope50 > 0 and _rsi > 50 and not vol_spike and macd_bullish:
         lev = 2.0
         signal = "🟢 2x 레버리지"
         signal_type = "LEVERAGE_2X"
+    elif current > _ma50 and slope50 > 0 and _rsi > 45 and not vol_spike:
+        # MA50 상회 + 상승 추세지만 MACD 미확인 → 1x 보수적 유지
+        lev = 1.0
+        signal = "🔵 1x 원물 (MACD 대기)"
+        signal_type = "HOLD_1X"
     elif current > _ma200:
         lev = 1.0
         signal = "🔵 1x 원물"
@@ -681,9 +702,10 @@ def analyze_leverage(df, params):
         "price": current, "change_pct": (current-prev)/prev*100,
         "ma50": _ma50, "ma200": _ma200, "ma50_slope": slope50,
         "rsi": _rsi, "vol_spike": vol_spike,
+        "macd_hist": round(macd_h, 4), "macd_bullish": macd_bullish,
         "cross_signal": cross_signal,
         "strategy_name": "레버리지 스위칭",
-        "strategy_label": f"2x/1x/0x (MA50/200)",
+        "strategy_label": f"2x/1x/0x (MA50/200 + MACD)",
     }
 
 
@@ -695,21 +717,37 @@ def analyze_dual_filter(df, params):
     current = float(close.iloc[-1])
     prev = float(close.iloc[-2]) if len(close) > 1 else current
     rsi_val = float(calc_rsi(close).iloc[-1])
+    _, _, macd_h = calc_macd(close)
 
-    mom_3m = (current / float(close.iloc[-63]) - 1) * 100 if len(close) >= 63 else 0
+    mom_3m  = (current / float(close.iloc[-63])  - 1) * 100 if len(close) >= 63  else 0
     mom_10m = (current / float(close.iloc[-210]) - 1) * 100 if len(close) >= 210 else 0
 
     both_neg = mom_3m < 0 and mom_10m < 0
-    any_pos = mom_3m > 0 or mom_10m > 0
+    any_pos  = mom_3m > 0 or mom_10m > 0
+    # RSI 극단값: 과매수(>80)이면 수익실현 주의, 과매도(<20)이면 반등 주의
+    rsi_overbought  = rsi_val > 80
+    rsi_oversold    = rsi_val < 20
 
     if both_neg:
         signal = "🔴 현금 (3m & 10m 모두 음)"
         signal_type = "CASH"
         action = "현금 전환"
-    elif any_pos:
-        signal = "🟢 투자 유지"
+    elif any_pos and rsi_overbought:
+        signal = "🟡 주의 (RSI 과매수 — 수익실현 고려)"
+        signal_type = "CAUTION"
+        action = "비중 축소 검토"
+    elif any_pos and macd_h > 0:
+        signal = "🟢 투자 유지 (MACD 확인)"
         signal_type = "INVESTED"
         action = "투자 유지"
+    elif any_pos:
+        signal = "🔵 투자 유지 (모멘텀 양호)"
+        signal_type = "INVESTED"
+        action = "투자 유지"
+    elif rsi_oversold:
+        signal = "🟡 주의 (RSI 과매도 — 반등 가능)"
+        signal_type = "CAUTION"
+        action = "관망 (반등 확인 후 진입)"
     else:
         signal = "⚪ 관망"
         signal_type = "NEUTRAL"
@@ -720,6 +758,7 @@ def analyze_dual_filter(df, params):
         "price": current, "change_pct": (current-prev)/prev*100,
         "mom_3m": round(mom_3m, 2), "mom_10m": round(mom_10m, 2),
         "rsi": rsi_val,
+        "macd_hist": round(macd_h, 4),
         "action": action,
         "strategy_name": "이중필터 모멘텀",
         "strategy_label": f"3m({mom_3m:+.1f}%) + 10m({mom_10m:+.1f}%)",
@@ -734,10 +773,10 @@ def analyze_risk_defense(df, params):
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
     rsi = calc_rsi(close)
-    # 크립토는 365일 기준, 주식은 252일 기준 연환산
     ann_factor = np.sqrt(365) if params.get('is_crypto') else np.sqrt(252)
     vol20 = close.pct_change().rolling(20).std() * ann_factor * 100
     vol60 = close.pct_change().rolling(60).std() * ann_factor * 100
+    macd_l, macd_s, macd_h = calc_macd(close)
 
     i = len(df) - 1
     current = float(close.iloc[-1])
@@ -749,17 +788,26 @@ def analyze_risk_defense(df, params):
     _v60 = float(vol60.iloc[-1]) if not pd.isna(vol60.iloc[-1]) else 20
     r20 = (current / float(close.iloc[i-20]) - 1) * 100 if i >= 20 else 0
 
-    # 크립토는 변동성이 크므로 20일 하락 임계값을 -10%로 (주식은 -5%)
+    # 거래량 추세 (가격 하락 + 거래량 증가 = 매도 압력 확인)
+    vol_series = df['Volume']
+    avg_vol_20 = float(vol_series.rolling(20).mean().iloc[-1])
+    avg_vol_60 = float(vol_series.rolling(60).mean().iloc[-1])
+    vol_expanding = avg_vol_20 > avg_vol_60 * 1.1
+
     drop_threshold = -10 if params.get('is_crypto') else -5
 
     risk_score = 0
     risk_details = []
-    if current < _ma200:  risk_score += 30; risk_details.append("MA200↓")
-    if current < _ma50:   risk_score += 15; risk_details.append("MA50↓")
-    if _ma50 < _ma200:    risk_score += 15; risk_details.append("데드크로스")
-    if _rsi < 40:         risk_score += 10; risk_details.append(f"RSI{_rsi:.0f}")
-    if r20 < drop_threshold: risk_score += 15; risk_details.append(f"20일{r20:.1f}%")
-    if _v20 > _v60 * 1.5: risk_score += 15; risk_details.append("변동성↑")
+    if current < _ma200:          risk_score += 30; risk_details.append("MA200↓")
+    if current < _ma50:           risk_score += 15; risk_details.append("MA50↓")
+    if _ma50 < _ma200:            risk_score += 15; risk_details.append("데드크로스")
+    if _rsi < 40:                 risk_score += 10; risk_details.append(f"RSI{_rsi:.0f}")
+    if r20 < drop_threshold:      risk_score += 15; risk_details.append(f"20일{r20:.1f}%")
+    if _v20 > _v60 * 1.5:         risk_score += 15; risk_details.append("변동성↑")
+    # MACD 음전환 추가
+    if macd_h < 0 and macd_l < 0: risk_score += 10; risk_details.append("MACD↓")
+    # 하락 중 거래량 증가 = 추가 매도 압력
+    if r20 < 0 and vol_expanding:  risk_score += 5;  risk_details.append("거래량↑하락")
 
     if risk_score >= 70:
         signal = f"🔴 현금 전환 (위험 {risk_score}점)"
@@ -767,18 +815,19 @@ def analyze_risk_defense(df, params):
     elif risk_score >= 50:
         signal = f"🟡 주의 (위험 {risk_score}점)"
         signal_type = "CAUTION"
-    elif risk_score <= 30:
-        signal = f"🟢 투자 유지 (위험 {risk_score}점)"
-        signal_type = "INVESTED"
-    else:
+    elif risk_score >= 35:
         signal = f"⚪ 관망 (위험 {risk_score}점)"
         signal_type = "NEUTRAL"
+    else:
+        signal = f"🟢 투자 유지 (위험 {risk_score}점)"
+        signal_type = "INVESTED"
 
     return {
         "signal": signal, "signal_type": signal_type,
         "risk_score": risk_score, "risk_details": risk_details,
         "price": current, "change_pct": (current-prev)/prev*100,
         "rsi": _rsi,
+        "macd_hist": round(macd_h, 4),
         "strategy_name": "위기방어형",
         "strategy_label": f"위험스코어 {risk_score}/100",
     }
@@ -870,11 +919,12 @@ def build_message(r):
         elif lev == 0:
             if '^KS' in r['ticker']: etf_guide = "현금 or KODEX 인버스 (114800)"
             elif '^KQ' in r['ticker']: etf_guide = "현금 or KODEX 코스닥150 인버스 (251340)"
+        macd_status = "✅ MACD 확인" if r.get('macd_bullish') else "⏳ MACD 미확인"
         detail = (
             f"  ⚡ 레버리지: `{lev}x` {'🟢강세' if lev==2 else ('🔵보통' if lev==1 else '🔴현금')}\n"
             f"  📊 MA50 `{r.get('ma50',0):,.0f}` | MA200 `{r.get('ma200',0):,.0f}`\n"
-            f"  📈 MA50기울기 `{r.get('ma50_slope',0):+.2f}%` | RSI `{r['rsi']:.0f}`\n"
-            f"  {'⚠️ 변동성 급등!' if r.get('vol_spike') else ''}\n"
+            f"  📈 MA50기울기(10일) `{r.get('ma50_slope',0):+.2f}%` | RSI `{r['rsi']:.0f}`\n"
+            f"  {macd_status} | {'⚠️ 변동성 급등!' if r.get('vol_spike') else '변동성 정상'}\n"
             f"{f'  💼 추천ETF: `{etf_guide}`' if etf_guide else ''}\n"
         )
     elif r['strategy'] == 'dual_filter':
@@ -951,20 +1001,25 @@ def _slope(series, n=5):
     return (v_now - v_prev) / v_prev * 100 if v_prev != 0 else 0.0
 
 def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio):
-    """7개 조건 기반 복합 신호"""
+    """7개 조건 기반 복합 신호 (5단계: STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL)
+
+    기존 버그 수정: 점수 2-3이 모두 SELL로 분류되고 NEUTRAL 리턴 불가했던 문제 해결.
+    조건 완화: RSI 범위 확대(40-75), BB %B 임계값 하향(0.45), 거래량 임계값 하향(1.1)
+    """
     score = 0
     if price > ma20:                  score += 1
     if price > ma50:                  score += 1
     if ma200 and price > ma200:       score += 1
-    if 50 < rsi < 70:                 score += 1
+    if 40 < rsi < 75:                 score += 1  # 원래 50-70 → 40-75 (과매도/과매수 제외)
     if macd_hist > 0:                 score += 1
-    if bb_pct_b > 0.5:                score += 1
-    if vol_ratio > 1.2:               score += 1
+    if bb_pct_b > 0.45:               score += 1  # 원래 0.5 → 0.45 (BB 중간선 근처 포함)
+    if vol_ratio > 1.1:               score += 1  # 원래 1.2 → 1.1 (10% 이상 거래량 증가)
+    # 5단계 분류 (원래 NEUTRAL 도달 불가 버그 수정)
     if score >= 6: return "STRONG_BUY",  "🟢 강력 매수"
-    if score >= 4: return "BUY",         "🟢 매수"
-    if score <= 1: return "STRONG_SELL", "🔴 강력 매도"
-    if score <= 3: return "SELL",        "🔴 매도"
-    return "NEUTRAL", "⚪ 중립"
+    if score >= 5: return "BUY",         "🟢 매수"
+    if score >= 3: return "NEUTRAL",     "⚪ 중립"
+    if score >= 2: return "SELL",        "🔴 매도"
+    return "STRONG_SELL", "🔴 강력 매도"
 
 def _generate_analysis_text(ticker, price, chg, rsi, macd_hist, bb_pct_b,
                               ma20, ma50, ma200, signal_type, vol_spike, from_high):
@@ -1030,16 +1085,22 @@ def _generate_forecasts(price, signal_type, rsi, ma50_slope, macd_hist, bb_bw, f
                  "text": "장기 추세 판단을 위한 추가 데이터 필요"}
     return [short, mid, long_]
 
-def _assess_risk(price, ma20, ma50, ma200, rsi, bb_pct_b, vol_spike, from_high):
-    """위험도 평가: score, level, color, factors"""
+def _assess_risk(price, ma20, ma50, ma200, rsi, bb_pct_b, vol_spike, from_high,
+                  macd_hist=0, stoch_k=50):
+    """위험도 평가: score, level, color, factors (Stochastic RSI + MACD 포함)"""
     factors, score = [], 0
     if ma200 and price < ma200: score += 25; factors.append("MA200 하회")
     if price < ma50:            score += 15; factors.append("MA50 하회")
-    if rsi > 75:                score += 15; factors.append(f"RSI 과매수({rsi:.0f})")
-    if rsi < 25:                score += 10; factors.append(f"RSI 과매도({rsi:.0f})")
+    if rsi > 72:                score += 12; factors.append(f"RSI 과매수({rsi:.0f})")
+    if rsi < 28:                score += 10; factors.append(f"RSI 과매도({rsi:.0f})")
     if vol_spike:               score += 10; factors.append("거래량 급증")
     if bb_pct_b > 0.9:          score += 10; factors.append("BB 상단 이탈")
     if from_high < -25:         score += 15; factors.append(f"고점대비 {from_high:.0f}%")
+    # Stochastic RSI 극단값
+    if stoch_k > 85:            score += 8;  factors.append(f"StochRSI 과매수({stoch_k:.0f})")
+    if stoch_k < 15:            score += 6;  factors.append(f"StochRSI 과매도({stoch_k:.0f})")
+    # MACD 음전환
+    if macd_hist < 0:           score += 5;  factors.append("MACD 음전환")
     level = "높음" if score >= 50 else "중간" if score >= 25 else "낮음"
     color = "red"   if score >= 50 else "yellow" if score >= 25 else "green"
     return {"score": score, "level": level, "color": color, "factors": factors}
@@ -1097,14 +1158,17 @@ def analyze_stock(ticker: str) -> dict:
     current_vol = int(df['Volume'].iloc[-1])
     avg_vol     = int(df['Volume'].rolling(20).mean().iloc[-1]) if not pd.isna(df['Volume'].rolling(20).mean().iloc[-1]) else 0
 
-    # 지지/저항
-    support    = float(low.rolling(20).min().iloc[-1])
-    resistance = float(high.rolling(20).max().iloc[-1])
+    # 지지/저항 — 60일 롤링 (원래 20일 → 더 의미있는 중기 레벨)
+    support    = float(low.rolling(60).min().iloc[-1])
+    resistance = float(high.rolling(60).max().iloc[-1])
 
     # 52주 범위
     high_52w  = float(high.max())
     low_52w   = float(low.min())
     from_high = (current - high_52w) / high_52w * 100
+
+    # Stochastic RSI
+    stoch_k, stoch_d = calc_stoch_rsi(close)
 
     # 신호 생성
     signal_type, signal_text = _generate_signal(
@@ -1122,8 +1186,9 @@ def analyze_stock(ticker: str) -> dict:
         current, signal_type, rsi, ma50_slope, macd_hist, bb_bw, from_high
     )
 
-    # 위험도
-    risk = _assess_risk(current, ma20, ma50, ma200, rsi, bb_pct_b, vol_spike, from_high)
+    # 위험도 (Stochastic RSI + MACD 포함)
+    risk = _assess_risk(current, ma20, ma50, ma200, rsi, bb_pct_b, vol_spike, from_high,
+                        macd_hist=macd_hist, stoch_k=stoch_k)
 
     # 스파크라인
     price_history = _build_price_history(df, n=20)
@@ -1153,6 +1218,8 @@ def analyze_stock(ticker: str) -> dict:
         "ma20_slope": round(ma20_slope, 2),
         "ma50_slope": round(ma50_slope, 2),
         "rsi": round(rsi, 1),
+        "stoch_rsi_k": stoch_k,
+        "stoch_rsi_d": stoch_d,
         "macd_line": round(macd_line, 4),
         "macd_signal": round(macd_sig, 4),
         "macd_hist": round(macd_hist, 4),

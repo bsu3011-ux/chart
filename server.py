@@ -42,6 +42,18 @@ os.makedirs(OUTPUT_DIR,   exist_ok=True)
 os.makedirs(STATIC_DIR,   exist_ok=True)
 
 
+def _run_bot_background():
+    """백그라운드에서 봇 분석 실행"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(run_bot())
+        loop.close()
+        print("[bot] 분석 완료 → signals_v4.json 갱신")
+    except Exception as e:
+        print(f"[bot] 분석 오류: {e}")
+
+
 @app.route('/api/signals')
 def get_signals():
     """현재 시그널 JSON 반환"""
@@ -528,6 +540,7 @@ def deploy():
         except Exception as e:
             print(f"[deploy] git pull error: {e}")
         # run.sh 루프가 서버를 감시하므로 pkill만 하면 자동 재시작됨
+        # (재시작 후 서버가 뜨면서 _run_bot_background가 자동 실행됨)
         subprocess.Popen(
             'sleep 2 && pkill -f "python3 server.py"',
             shell=True,
@@ -545,4 +558,6 @@ if __name__ == '__main__':
     print(f"  /api/signals — 시그널 조회")
     print(f"  /api/run     — 수동 분석 실행")
     print(f"  /api/status  — 서버 상태\n")
+    # 서버 시작 시 자동 분석 실행
+    threading.Thread(target=_run_bot_background, daemon=True).start()
     app.run(host='0.0.0.0', port=port, debug=False)

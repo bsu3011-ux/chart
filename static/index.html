@@ -379,6 +379,13 @@ function Card({m,open,onToggle,onChart}){
                   🌐 {m.country_name||"국가"} 투자 성향
                 </div>
                 <div style={{color:C.dim,fontSize:11,lineHeight:1.55}}>{m.country_tendency}</div>
+                {(m.signal_type==="CASH"||m.signal_type==="CASH_VOL"||m.signal_type==="SELL"||m.signal_type==="STRONG_SELL")&&(
+                  <div style={{marginTop:5,padding:"3px 6px",borderRadius:5,
+                    background:"rgba(239,68,68,0.10)",border:"1px solid rgba(239,68,68,0.25)",
+                    color:C.red,fontSize:10,fontWeight:700}}>
+                    ⚠️ 현재 추세 이탈 — 시그널 우선 적용
+                  </div>
+                )}
               </div>
             )}
 

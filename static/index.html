@@ -370,18 +370,79 @@ function Card({m,open,onToggle,onChart}){
         {open&&(
           <div onClick={e=>e.stopPropagation()} style={{marginTop:10}}>
             <div style={{color:C.muted,fontSize:11,marginBottom:8,lineHeight:1.6}}>{m.signal}</div>
+
+            {/* 국가 투자 성향 */}
+            {m.country_tendency&&(
+              <div style={{marginBottom:8,padding:"8px 10px",borderRadius:8,
+                background:`${C.cyan}08`,border:`1px solid ${C.cyan}22`}}>
+                <div style={{color:C.cyan,fontSize:9,fontWeight:700,marginBottom:3,letterSpacing:"0.05em"}}>
+                  🌐 {m.country_name||"국가"} 투자 성향
+                </div>
+                <div style={{color:C.dim,fontSize:11,lineHeight:1.55}}>{m.country_tendency}</div>
+              </div>
+            )}
+
+            {/* 시그널 신뢰도 */}
+            {typeof m.confidence==="number"&&(
+              <div style={{marginBottom:8,display:"flex",alignItems:"center",gap:8}}>
+                <span style={{color:C.muted,fontSize:10,minWidth:46}}>신뢰도</span>
+                <div style={{flex:1,height:6,background:C.border,borderRadius:3,overflow:"hidden"}}>
+                  <div style={{width:`${m.confidence}%`,height:"100%",
+                    background:m.confidence>=70?C.green:m.confidence>=50?C.cyan:m.confidence>=30?C.yellow:C.red,
+                    transition:"width .3s ease"}}></div>
+                </div>
+                <span style={{color:m.confidence>=70?C.green:m.confidence>=50?C.cyan:m.confidence>=30?C.yellow:C.red,
+                  fontSize:11,fontWeight:700,minWidth:28,textAlign:"right"}}>{m.confidence}</span>
+              </div>
+            )}
+
+            {/* 전략별 지표 그리드 */}
             {m.strategy==="leverage"&&(
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}>
-                <Met label="MA50" value={fp(m.ma50,m.ticker)} color={m.price>m.ma50?C.green:C.red}/>
-                <Met label="MA200" value={fp(m.ma200,m.ticker)} color={m.price>m.ma200?C.green:C.red}/>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                <Met label="MA중기" value={fp(m.ma50,m.ticker)} color={m.price>m.ma50?C.green:C.red} small/>
+                <Met label="MA장기" value={fp(m.ma200,m.ticker)} color={m.price>m.ma200?C.green:C.red} small/>
+                <Met label="ADX" value={m.adx?.toFixed(0)} sub={m.trend_strong?"강한추세":"약한추세"}
+                  color={m.adx>=25?C.green:m.adx>=20?C.cyan:C.muted} small/>
+              </div>
+            )}
+            {m.strategy==="dual_filter"&&(
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                <Met label={`${m.mom_windows?.[0]||21}일`} value={`${m.mom_short>=0?"+":""}${m.mom_short?.toFixed(1)}%`}
+                  color={m.mom_short>=0?C.green:C.red} small/>
+                <Met label={`${m.mom_windows?.[1]||63}일`} value={`${m.mom_mid>=0?"+":""}${m.mom_mid?.toFixed(1)}%`}
+                  color={m.mom_mid>=0?C.green:C.red} small/>
+                <Met label={`${m.mom_windows?.[2]||210}일`} value={`${m.mom_long>=0?"+":""}${m.mom_long?.toFixed(1)}%`}
+                  color={m.mom_long>=0?C.green:C.red} small/>
               </div>
             )}
             {m.strategy==="risk_defense"&&(
-              <div style={{marginBottom:8,padding:"8px 10px",borderRadius:8,
-                background:m.risk_score>=50?C.redBg:m.risk_score>=30?C.yellowBg:C.greenBg,
-                border:`1px solid ${m.risk_score>=50?C.red:m.risk_score>=30?C.yellow:C.green}22`}}>
-                <span style={{color:C.dim,fontSize:10}}>위험스코어 </span>
-                <span style={{color:m.risk_score>=50?C.red:m.risk_score>=30?C.yellow:C.green,fontWeight:700,fontSize:13}}>{m.risk_score}/100</span>
+              <>
+                <div style={{marginBottom:8,padding:"8px 10px",borderRadius:8,
+                  background:m.risk_score>=50?C.redBg:m.risk_score>=30?C.yellowBg:C.greenBg,
+                  border:`1px solid ${m.risk_score>=50?C.red:m.risk_score>=30?C.yellow:C.green}22`}}>
+                  <span style={{color:C.dim,fontSize:10}}>위험스코어 </span>
+                  <span style={{color:m.risk_score>=50?C.red:m.risk_score>=30?C.yellow:C.green,fontWeight:700,fontSize:13}}>{m.risk_score}/100</span>
+                  {m.risk_details?.length>0&&(
+                    <div style={{marginTop:4,color:C.dim,fontSize:10,lineHeight:1.5}}>
+                      {m.risk_details.join(" · ")}
+                    </div>
+                  )}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                  <Met label="ADX" value={m.adx?.toFixed(0)}
+                    color={m.adx>=25?C.cyan:C.muted} small/>
+                  <Met label="MFI" value={m.mfi?.toFixed(0)}
+                    color={m.mfi<30?C.red:m.mfi>70?C.yellow:C.cyan} small/>
+                  <Met label="20일" value={`${m.r20>=0?"+":""}${m.r20?.toFixed(1)}%`}
+                    color={m.r20>=0?C.green:C.red} small/>
+                </div>
+              </>
+            )}
+            {m.strategy==="minervini"&&(
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                <Met label="목표" value={fp(m.target,m.ticker)} sub={`+${m.target_pct?.toFixed(1)}%`} color={C.green} small/>
+                <Met label="손절" value={fp(m.stoploss,m.ticker)} sub={`-${m.stop_pct?.toFixed(1)}%`} color={C.red} small/>
+                <Met label="R:R" value={`${m.rr_ratio?.toFixed(1)}:1`} color={m.rr_ratio>=2?C.green:C.yellow} small/>
               </div>
             )}
             <button onClick={()=>onChart(m)} style={{

@@ -128,18 +128,18 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 인도: Sensex (이중필터 모멘텀) ──
+    # ── 인도: Sensex (레버리지 — 강한 성장 시장, NIFTY와 동일) ──
     "^BSESN": {
         "name": "Sensex", "symbol": "BSE", "flag": "🇮🇳",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 대만: 가권지수 (이중필터 모멘텀) ──
+    # ── 대만: 가권지수 (레버리지 — TSMC/AI 반도체 사이클, NASDAQ과 동조) ──
     "^TWII": {
         "name": "대만 가권", "symbol": "TWI", "flag": "🇹🇼",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
     # ── 호주: ASX 200 (위기방어형) ──
@@ -532,6 +532,222 @@ def calc_volume_analysis(df):
     return round(ratio, 2), spike, trend
 
 
+def calc_adx(df, period=14):
+    """ADX 추세강도 지표 (0-100, >25=강한 추세, <20=횡보)"""
+    h, l, c = df['High'], df['Low'], df['Close']
+    tr = pd.concat([h-l, (h-c.shift()).abs(), (l-c.shift()).abs()], axis=1).max(axis=1)
+    plus_dm  = (h.diff()).where((h.diff() > l.diff().abs()) & (h.diff() > 0), 0)
+    minus_dm = (l.diff().abs()).where((l.diff().abs() > h.diff()) & (l.diff() < 0), 0)
+    atr = tr.rolling(period).mean()
+    plus_di  = 100 * (plus_dm.rolling(period).mean() / atr.replace(0, float('nan')))
+    minus_di = 100 * (minus_dm.rolling(period).mean() / atr.replace(0, float('nan')))
+    dx  = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, float('nan'))
+    adx = dx.rolling(period).mean()
+    return adx, plus_di, minus_di
+
+
+def calc_stochastic(df, k_period=14, d_period=3):
+    """스토캐스틱 %K, %D (0-100, >80=과매수, <20=과매도)"""
+    low_min  = df['Low'].rolling(k_period).min()
+    high_max = df['High'].rolling(k_period).max()
+    k = 100 * (df['Close'] - low_min) / (high_max - low_min).replace(0, float('nan'))
+    d = k.rolling(d_period).mean()
+    return k, d
+
+
+def calc_mfi(df, period=14):
+    """MFI 자금흐름지수 (RSI + 거래량, >80=과매수, <20=과매도)"""
+    tp = (df['High'] + df['Low'] + df['Close']) / 3
+    mf = tp * df['Volume']
+    delta = tp.diff()
+    pos_mf = mf.where(delta > 0, 0).rolling(period).sum()
+    neg_mf = mf.where(delta < 0, 0).rolling(period).sum().abs()
+    mfr = pos_mf / neg_mf.replace(0, float('nan'))
+    return 100 - (100 / (1 + mfr))
+
+
+def calc_obv_slope(df, period=20):
+    """OBV 누적 거래량의 최근 추세 (양수=매집, 음수=분산)"""
+    obv = ((df['Close'].diff() > 0).astype(int) - (df['Close'].diff() < 0).astype(int)) * df['Volume']
+    obv = obv.cumsum()
+    if len(obv) < period: return 0
+    recent = obv.iloc[-period:]
+    norm = recent.mean() if recent.mean() != 0 else 1
+    slope = (recent.iloc[-1] - recent.iloc[0]) / abs(norm) * 100
+    return float(slope) if not pd.isna(slope) else 0
+
+
+# ════════════════════════════════════════════════════════════════
+# 국가별 투자 성향 프로파일 (전략 파라미터 + 시장 특성)
+# ════════════════════════════════════════════════════════════════
+COUNTRY_PROFILES = {
+    "KR": {
+        "name": "한국",
+        "tendency": "반도체·외인 주도 고변동성 추세장. 원화 약세시 수출주 강세, 외국인 매수세가 단기 방향 결정.",
+        "ma_periods": (20, 50, 120),       # 한국은 200일보다 120일이 더 의미있음
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),
+        "vol_regime_mult": 1.4,
+        "momentum_windows": (21, 63, 126),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -6,
+        "use_volume": True,
+    },
+    "US": {
+        "name": "미국",
+        "tendency": "장기 추세 추종이 가장 잘 통하는 시장. 기관 자금이 MA200 기준선 역할. VIX>25에서 변동성 급증.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (35, 70),
+        "rsi_extreme": (30, 75),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 25,
+        "vol_drop_threshold": -5,
+        "use_volume": True,
+    },
+    "JP": {
+        "name": "일본",
+        "tendency": "엔화 약세 = 수출주 강세 (USD/JPY 상승시 닛케이 상승). BoJ 완화정책 지속, 워런 버핏 일본 상사 매수 효과.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 75),               # 일본 강세장에서 RSI 75 자주 돌파
+        "rsi_extreme": (25, 80),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -5,
+        "use_volume": False,
+    },
+    "CN": {
+        "name": "중국",
+        "tendency": "정책 주도 평균회귀형. 추세 지속력 약하고 RSI 극단(<25,>75)에서 반전 자주 발생. 정부 부양책 발표가 단기 반등 트리거.",
+        "ma_periods": (10, 30, 100),       # 중국은 짧은 사이클
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),            # 더 극단적 RSI 신호
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (10, 30, 90),  # 짧은 momentum
+        "trend_strength_min": 25,
+        "vol_drop_threshold": -7,
+        "use_volume": True,
+    },
+    "HK": {
+        "name": "홍콩",
+        "tendency": "본토 대비 외국인 접근 용이. 중국 정책 + 글로벌 자금흐름 이중 영향. 텐센트·알리바바 등 빅테크 비중↑.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),
+        "vol_regime_mult": 1.6,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -7,
+        "use_volume": True,
+    },
+    "IN": {
+        "name": "인도",
+        "tendency": "강한 장기 성장 추세. 내수자금(국내 SIP)이 외인 매도를 상쇄. 추세 신뢰도 매우 높음 → 레버리지 전략 최적.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (35, 75),               # 강세장 RSI 70+ 흔함
+        "rsi_extreme": (30, 80),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -5,
+        "use_volume": True,
+    },
+    "TW": {
+        "name": "대만",
+        "tendency": "TSMC가 시총 30% 차지하는 반도체 프록시. AI/반도체 사이클 = 가권지수 사이클. 미국 SOX 지수와 강한 연동.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -6,
+        "use_volume": True,
+    },
+    "EU": {
+        "name": "유럽",
+        "tendency": "낮은 변동성·고배당 시장. ECB 금리정책에 민감, 에너지·금융 비중 큼. 미국 대비 베타 0.7 수준.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (35, 70),
+        "rsi_extreme": (30, 75),
+        "vol_regime_mult": 1.3,             # 유럽은 변동성 임계값 낮춤
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -4,
+        "use_volume": False,
+    },
+    "AU": {
+        "name": "호주·뉴질랜드",
+        "tendency": "원자재(철광석·석탄·금) 비중↑, 중국 수요와 강한 상관. 호주달러는 리스크온 통화.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -5,
+        "use_volume": True,
+    },
+    "EM": {
+        "name": "신흥국",
+        "tendency": "USD 강세시 약세, 원자재 가격 민감. Fed 금리·달러지수(DXY) 방향이 핵심 변수.",
+        "ma_periods": (15, 50, 200),
+        "rsi_band": (25, 70),
+        "rsi_extreme": (20, 75),
+        "vol_regime_mult": 1.6,
+        "momentum_windows": (21, 63, 126),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -8,
+        "use_volume": True,
+    },
+    "ME": {
+        "name": "중동",
+        "tendency": "유가 변동에 직접 노출, 지정학 리스크↑. 사우디는 OPEC+ 정책, 이스라엘은 테크/방산 비중↑.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -6,
+        "use_volume": False,
+    },
+    "CRYPTO": {
+        "name": "크립토",
+        "tendency": "24시간 거래·고변동성·4년 반감기 사이클. 비트코인 도미넌스가 알트코인 흐름 결정.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 75),
+        "rsi_extreme": (25, 80),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (7, 30, 90),
+        "trend_strength_min": 25,
+        "vol_drop_threshold": -10,
+        "use_volume": False,
+    },
+}
+
+TICKER_COUNTRY = {
+    "^KS11": "KR", "^KQ11": "KR",
+    "^GSPC": "US", "^IXIC": "US", "^DJI": "US",
+    "^N225": "JP",
+    "^HSI": "HK",
+    "000001.SS": "CN", "399001.SZ": "CN",
+    "^NSEI": "IN", "^BSESN": "IN",
+    "^TWII": "TW",
+    "^GDAXI": "EU", "^FCHI": "EU", "^FTSE": "EU", "^STOXX50E": "EU", "^SSMI": "EU",
+    "^AXJO": "AU", "^NZ50": "AU",
+    "^BVSP": "EM", "^JKSE": "EM", "^KLSE": "EM", "^MXX": "EM", "^STI": "EM",
+    "^TA125.TA": "ME", "^TASI.SR": "ME",
+    "BTC-USD": "CRYPTO", "ETH-USD": "CRYPTO",
+}
+
+
+def get_country_profile(ticker):
+    code = TICKER_COUNTRY.get(ticker, "US")
+    return code, COUNTRY_PROFILES[code]
+
+
 # ════════════════════════════════════════════════════════════════
 # 데이터 로드
 # ════════════════════════════════════════════════════════════════
@@ -615,126 +831,208 @@ def analyze_minervini(df, params):
 # ════════════════════════════════════════════════════════════════
 # 전략 2: 레버리지 스위칭 (한국/미국 지수용)
 # ════════════════════════════════════════════════════════════════
-def analyze_leverage(df, params):
+def analyze_leverage(df, params, profile=None):
+    """레버리지 스위칭: MA50/200 + ADX 추세강도 + 변동성 필터.
+    국가 프로파일이 있으면 MA 기간·RSI 임계·변동성 임계값 조정."""
+    p = profile or COUNTRY_PROFILES["US"]
+    ma_s, ma_m, ma_l = p["ma_periods"]
+    rsi_lo, rsi_hi = p["rsi_band"]
+    vol_mult = p["vol_regime_mult"]
+    adx_min = p["trend_strength_min"]
+
     close = df['Close']
-    ma50 = close.rolling(50).mean()
-    ma200 = close.rolling(200).mean()
-    rsi = calc_rsi(close)
+    ma_mid  = close.rolling(ma_m).mean()
+    ma_long = close.rolling(ma_l).mean()
+    rsi  = calc_rsi(close)
+    adx, plus_di, minus_di = calc_adx(df, period=14)
+    stoch_k, stoch_d = calc_stochastic(df, k_period=14, d_period=3)
     vol20 = close.pct_change().rolling(20).std()
     vol60 = close.pct_change().rolling(60).std()
 
     i = len(df) - 1
     current = float(close.iloc[-1])
     prev = float(close.iloc[-2]) if len(close) > 1 else current
-    _ma50 = float(ma50.iloc[-1]) if not pd.isna(ma50.iloc[-1]) else current
-    _ma200 = float(ma200.iloc[-1]) if not pd.isna(ma200.iloc[-1]) else current
-    _rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50
-    _v20 = float(vol20.iloc[-1]) if not pd.isna(vol20.iloc[-1]) else 0.01
-    _v60 = float(vol60.iloc[-1]) if not pd.isna(vol60.iloc[-1]) else 0.01
+    _ma_m = float(ma_mid.iloc[-1])  if not pd.isna(ma_mid.iloc[-1])  else current
+    _ma_l = float(ma_long.iloc[-1]) if not pd.isna(ma_long.iloc[-1]) else current
+    _rsi  = float(rsi.iloc[-1])     if not pd.isna(rsi.iloc[-1])     else 50
+    _adx  = float(adx.iloc[-1])     if not pd.isna(adx.iloc[-1])     else 15
+    _pdi  = float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0
+    _mdi  = float(minus_di.iloc[-1])if not pd.isna(minus_di.iloc[-1])else 0
+    _stk  = float(stoch_k.iloc[-1]) if not pd.isna(stoch_k.iloc[-1]) else 50
+    _v20  = float(vol20.iloc[-1])   if not pd.isna(vol20.iloc[-1])   else 0.01
+    _v60  = float(vol60.iloc[-1])   if not pd.isna(vol60.iloc[-1])   else 0.01
 
-    slope50 = 0
-    if i >= 5 and not pd.isna(ma50.iloc[i-5]):
-        slope50 = (float(ma50.iloc[i]) - float(ma50.iloc[i-5])) / float(ma50.iloc[i-5]) * 100
+    slope_mid = 0
+    if i >= 5 and not pd.isna(ma_mid.iloc[i-5]):
+        slope_mid = (float(ma_mid.iloc[i]) - float(ma_mid.iloc[i-5])) / float(ma_mid.iloc[i-5]) * 100
 
-    vol_spike = _v20 > _v60 * 1.5 if _v60 > 0 else False
+    vol_spike = _v20 > _v60 * vol_mult if _v60 > 0 else False
+    trend_strong = _adx >= adx_min
+    trend_up     = _pdi > _mdi
 
-    # 골든크로스 / 데드크로스 감지
+    # 골든/데드크로스 감지
     cross_signal = "none"
-    if i >= 1 and not pd.isna(ma50.iloc[-2]) and not pd.isna(ma200.iloc[-2]):
-        prev_ma50  = float(ma50.iloc[-2])
-        prev_ma200 = float(ma200.iloc[-2])
-        if prev_ma50 < prev_ma200 and _ma50 >= _ma200:
-            cross_signal = "golden"   # 골든크로스 발생!
-        elif prev_ma50 > prev_ma200 and _ma50 <= _ma200:
-            cross_signal = "dead"     # 데드크로스 발생!
-        elif _ma50 > _ma200:
-            cross_signal = "bull"     # 골든크로스 유지
-        else:
-            cross_signal = "bear"     # 데드크로스 유지
+    if i >= 1 and not pd.isna(ma_mid.iloc[-2]) and not pd.isna(ma_long.iloc[-2]):
+        prev_m = float(ma_mid.iloc[-2]);  prev_l = float(ma_long.iloc[-2])
+        if prev_m < prev_l and _ma_m >= _ma_l:   cross_signal = "golden"
+        elif prev_m > prev_l and _ma_m <= _ma_l: cross_signal = "dead"
+        elif _ma_m > _ma_l:                       cross_signal = "bull"
+        else:                                     cross_signal = "bear"
 
-    # 레버리지 결정
-    if current > _ma50 and slope50 > 0 and _rsi > 50 and not vol_spike:
+    # ── 신뢰도 (confidence) 산출 0-100 ──
+    confidence = 50
+    if current > _ma_m: confidence += 10
+    if current > _ma_l: confidence += 10
+    if slope_mid > 0:   confidence += 10
+    if trend_strong:    confidence += 10
+    if trend_up:        confidence += 5
+    if rsi_lo < _rsi < rsi_hi: confidence += 5
+    if vol_spike: confidence -= 15
+    if cross_signal == "golden": confidence += 10
+    if cross_signal == "dead":   confidence -= 15
+    confidence = max(0, min(100, confidence))
+
+    # ── 레버리지 결정 (3단계: 2x / 1x / 0x) ──
+    # 2x 조건 강화: 추세강도 + 모멘텀 정렬
+    if (current > _ma_m > _ma_l and slope_mid > 0 and _rsi > 50
+        and trend_strong and trend_up and not vol_spike):
         lev = 2.0
-        signal = "🟢 2x 레버리지"
+        signal = "🟢 2x 레버리지 (강한 상승추세)"
         signal_type = "LEVERAGE_2X"
-    elif current > _ma200:
+    elif current > _ma_l and not vol_spike:
         lev = 1.0
-        signal = "🔵 1x 원물"
+        signal = "🔵 1x 원물 보유"
         signal_type = "HOLD_1X"
-    elif current < _ma200:
+    elif vol_spike and current < _ma_m:
         lev = 0.0
-        signal = "🔴 현금 전환"
+        signal = "🔴 현금 (변동성 급등)"
+        signal_type = "CASH_VOL"
+    elif current < _ma_l:
+        lev = 0.0
+        signal = "🔴 현금 전환 (장기추세 이탈)"
         signal_type = "CASH"
     else:
         lev = 1.0
         signal = "⚪ 1x 원물"
         signal_type = "HOLD_1X"
 
-    if vol_spike and current < _ma50:
-        lev = 0.0
-        signal = "🔴 현금 (변동성 급등)"
-        signal_type = "CASH_VOL"
-
     return {
         "signal": signal, "signal_type": signal_type,
         "leverage": lev,
         "price": current, "change_pct": (current-prev)/prev*100,
-        "ma50": _ma50, "ma200": _ma200, "ma50_slope": slope50,
-        "rsi": _rsi, "vol_spike": vol_spike,
+        "ma50": _ma_m, "ma200": _ma_l, "ma50_slope": slope_mid,
+        "rsi": _rsi, "adx": round(_adx, 1),
+        "trend_strong": trend_strong, "trend_up": trend_up,
+        "stoch_k": round(_stk, 1),
+        "vol_spike": vol_spike,
         "cross_signal": cross_signal,
-        "strategy_name": "레버리지 스위칭",
-        "strategy_label": f"2x/1x/0x (MA50/200)",
+        "confidence": confidence,
+        "strategy_name": "레버리지 스위칭 v2",
+        "strategy_label": f"2x/1x/0x · MA{ma_m}/{ma_l} · ADX{_adx:.0f}",
     }
 
 
 # ════════════════════════════════════════════════════════════════
 # 전략 3: 이중필터 모멘텀 (NIKKEI/항셍용)
 # ════════════════════════════════════════════════════════════════
-def analyze_dual_filter(df, params):
+def analyze_dual_filter(df, params, profile=None):
+    """이중필터 모멘텀: 단·중·장기 3개 모멘텀 + ADX 추세강도 + Stochastic 극단.
+    국가별 모멘텀 윈도우 차등 적용 (중국=10/30/90, 미국=21/63/210)."""
+    p = profile or COUNTRY_PROFILES["JP"]
+    w_short, w_mid, w_long = p["momentum_windows"]
+    rsi_lo, rsi_hi = p["rsi_band"]
+    rsi_x_lo, rsi_x_hi = p["rsi_extreme"]
+    adx_min = p["trend_strength_min"]
+
     close = df['Close']
     current = float(close.iloc[-1])
     prev = float(close.iloc[-2]) if len(close) > 1 else current
-    rsi_val = float(calc_rsi(close).iloc[-1])
 
-    mom_3m = (current / float(close.iloc[-63]) - 1) * 100 if len(close) >= 63 else 0
-    mom_10m = (current / float(close.iloc[-210]) - 1) * 100 if len(close) >= 210 else 0
+    n = len(close)
+    mom_s = (current / float(close.iloc[-w_short]) - 1) * 100 if n >= w_short else 0
+    mom_m = (current / float(close.iloc[-w_mid])   - 1) * 100 if n >= w_mid   else 0
+    mom_l = (current / float(close.iloc[-w_long])  - 1) * 100 if n >= w_long  else 0
 
-    both_neg = mom_3m < 0 and mom_10m < 0
-    any_pos = mom_3m > 0 or mom_10m > 0
+    rsi_val = float(calc_rsi(close).iloc[-1]) if not pd.isna(calc_rsi(close).iloc[-1]) else 50
+    adx, plus_di, minus_di = calc_adx(df, period=14)
+    _adx = float(adx.iloc[-1]) if not pd.isna(adx.iloc[-1]) else 15
+    _pdi = float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0
+    _mdi = float(minus_di.iloc[-1]) if not pd.isna(minus_di.iloc[-1]) else 0
+    stoch_k, stoch_d = calc_stochastic(df, k_period=14, d_period=3)
+    _stk = float(stoch_k.iloc[-1]) if not pd.isna(stoch_k.iloc[-1]) else 50
 
-    if both_neg:
-        signal = "🔴 현금 (3m & 10m 모두 음)"
-        signal_type = "CASH"
-        action = "현금 전환"
-    elif any_pos:
-        signal = "🟢 투자 유지"
+    pos_count = sum(1 for m in (mom_s, mom_m, mom_l) if m > 0)
+    neg_count = 3 - pos_count
+    trend_strong = _adx >= adx_min
+    trend_up = _pdi > _mdi
+
+    # 극단 RSI = 평균회귀 신호 (중국형 시장에서 유용)
+    rsi_extreme_low  = rsi_val <= rsi_x_lo
+    rsi_extreme_high = rsi_val >= rsi_x_hi
+
+    if pos_count == 3 and trend_strong and trend_up:
+        signal = "🟢 강력 매수 (3모멘텀+추세확정)"
+        signal_type = "STRONG_BUY"
+        action = "강력 매수"
+        confidence = 85
+    elif pos_count >= 2:
+        signal = "🟢 투자 유지 (양호한 모멘텀)"
         signal_type = "INVESTED"
         action = "투자 유지"
+        confidence = 65
+    elif rsi_extreme_low and pos_count == 0:
+        signal = "🟡 반등 대기 (과매도 극단)"
+        signal_type = "CAUTION"
+        action = "분할 매수 검토"
+        confidence = 55
+    elif neg_count == 3:
+        signal = "🔴 현금 (전 구간 음모멘텀)"
+        signal_type = "CASH"
+        action = "현금 전환"
+        confidence = 75
+    elif rsi_extreme_high and trend_strong and not trend_up:
+        signal = "🔴 매도 (과열+하락추세)"
+        signal_type = "SELL"
+        action = "분할 매도"
+        confidence = 70
     else:
         signal = "⚪ 관망"
         signal_type = "NEUTRAL"
         action = "관망"
+        confidence = 40
 
     return {
         "signal": signal, "signal_type": signal_type,
         "price": current, "change_pct": (current-prev)/prev*100,
-        "mom_3m": round(mom_3m, 2), "mom_10m": round(mom_10m, 2),
-        "rsi": rsi_val,
+        "mom_short": round(mom_s, 2), "mom_mid": round(mom_m, 2), "mom_long": round(mom_l, 2),
+        "mom_3m": round(mom_m, 2), "mom_10m": round(mom_l, 2),  # 호환성
+        "mom_windows": [w_short, w_mid, w_long],
+        "rsi": rsi_val, "adx": round(_adx, 1),
+        "trend_strong": trend_strong, "trend_up": trend_up,
+        "stoch_k": round(_stk, 1),
         "action": action,
-        "strategy_name": "이중필터 모멘텀",
-        "strategy_label": f"3m({mom_3m:+.1f}%) + 10m({mom_10m:+.1f}%)",
+        "confidence": confidence,
+        "strategy_name": "이중필터 모멘텀 v2",
+        "strategy_label": f"{w_short}/{w_mid}/{w_long}일 · ADX{_adx:.0f}",
     }
 
 
 # ════════════════════════════════════════════════════════════════
 # 전략 4: 위기방어형 (DAX + BTC 현물용)
 # ════════════════════════════════════════════════════════════════
-def analyze_risk_defense(df, params):
+def analyze_risk_defense(df, params, profile=None):
+    """위기방어형: 8개 위험요인 가중치 점수화. 국가별 변동성·하락 임계값 차등.
+    추가 지표: ADX(추세 약화), MFI(자금이탈), Bollinger %B."""
+    p = profile or COUNTRY_PROFILES["US"]
+    ma_s, ma_m, ma_l = p["ma_periods"]
+    vol_mult = p["vol_regime_mult"]
+    drop_threshold = p["vol_drop_threshold"]
+
     close = df['Close']
-    ma50 = close.rolling(50).mean()
-    ma200 = close.rolling(200).mean()
+    ma_mid  = close.rolling(ma_m).mean()
+    ma_long = close.rolling(ma_l).mean()
     rsi = calc_rsi(close)
-    # 크립토는 365일 기준, 주식은 252일 기준 연환산
+    adx, plus_di, minus_di = calc_adx(df, period=14)
     ann_factor = np.sqrt(365) if params.get('is_crypto') else np.sqrt(252)
     vol20 = close.pct_change().rolling(20).std() * ann_factor * 100
     vol60 = close.pct_change().rolling(60).std() * ann_factor * 100
@@ -742,24 +1040,42 @@ def analyze_risk_defense(df, params):
     i = len(df) - 1
     current = float(close.iloc[-1])
     prev = float(close.iloc[-2]) if len(close) > 1 else current
-    _ma50 = float(ma50.iloc[-1]) if not pd.isna(ma50.iloc[-1]) else current
-    _ma200 = float(ma200.iloc[-1]) if not pd.isna(ma200.iloc[-1]) else current
-    _rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50
-    _v20 = float(vol20.iloc[-1]) if not pd.isna(vol20.iloc[-1]) else 20
-    _v60 = float(vol60.iloc[-1]) if not pd.isna(vol60.iloc[-1]) else 20
+    _ma_m = float(ma_mid.iloc[-1])  if not pd.isna(ma_mid.iloc[-1])  else current
+    _ma_l = float(ma_long.iloc[-1]) if not pd.isna(ma_long.iloc[-1]) else current
+    _rsi  = float(rsi.iloc[-1])     if not pd.isna(rsi.iloc[-1])     else 50
+    _adx  = float(adx.iloc[-1])     if not pd.isna(adx.iloc[-1])     else 15
+    _pdi  = float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0
+    _mdi  = float(minus_di.iloc[-1])if not pd.isna(minus_di.iloc[-1])else 0
+    _v20  = float(vol20.iloc[-1])   if not pd.isna(vol20.iloc[-1])   else 20
+    _v60  = float(vol60.iloc[-1])   if not pd.isna(vol60.iloc[-1])   else 20
     r20 = (current / float(close.iloc[i-20]) - 1) * 100 if i >= 20 else 0
 
-    # 크립토는 변동성이 크므로 20일 하락 임계값을 -10%로 (주식은 -5%)
-    drop_threshold = -10 if params.get('is_crypto') else -5
+    # MFI 자금흐름
+    try:
+        mfi = calc_mfi(df, period=14)
+        _mfi = float(mfi.iloc[-1]) if not pd.isna(mfi.iloc[-1]) else 50
+    except Exception:
+        _mfi = 50
+
+    # Bollinger %B
+    try:
+        _, _, _, bb_pct_b, _ = calc_bollinger(close)
+    except Exception:
+        bb_pct_b = 0.5
 
     risk_score = 0
     risk_details = []
-    if current < _ma200:  risk_score += 30; risk_details.append("MA200↓")
-    if current < _ma50:   risk_score += 15; risk_details.append("MA50↓")
-    if _ma50 < _ma200:    risk_score += 15; risk_details.append("데드크로스")
-    if _rsi < 40:         risk_score += 10; risk_details.append(f"RSI{_rsi:.0f}")
-    if r20 < drop_threshold: risk_score += 15; risk_details.append(f"20일{r20:.1f}%")
-    if _v20 > _v60 * 1.5: risk_score += 15; risk_details.append("변동성↑")
+    if current < _ma_l:           risk_score += 25; risk_details.append("MA장기↓")
+    if current < _ma_m:           risk_score += 12; risk_details.append("MA중기↓")
+    if _ma_m < _ma_l:             risk_score += 12; risk_details.append("데드크로스")
+    if _rsi < 40:                 risk_score += 8;  risk_details.append(f"RSI{_rsi:.0f}")
+    if r20 < drop_threshold:      risk_score += 12; risk_details.append(f"20일{r20:.1f}%")
+    if _v20 > _v60 * vol_mult:    risk_score += 12; risk_details.append("변동성↑")
+    if _adx > 25 and _mdi > _pdi: risk_score += 10; risk_details.append("하락추세강함")
+    if _mfi < 30:                 risk_score += 5;  risk_details.append(f"MFI{_mfi:.0f}(자금이탈)")
+    if bb_pct_b < 0.1:            risk_score += 4;  risk_details.append("BB하단이탈")
+
+    risk_score = min(100, risk_score)
 
     if risk_score >= 70:
         signal = f"🔴 현금 전환 (위험 {risk_score}점)"
@@ -767,20 +1083,27 @@ def analyze_risk_defense(df, params):
     elif risk_score >= 50:
         signal = f"🟡 주의 (위험 {risk_score}점)"
         signal_type = "CAUTION"
-    elif risk_score <= 30:
+    elif risk_score <= 25:
         signal = f"🟢 투자 유지 (위험 {risk_score}점)"
         signal_type = "INVESTED"
     else:
         signal = f"⚪ 관망 (위험 {risk_score}점)"
         signal_type = "NEUTRAL"
 
+    confidence = 100 - risk_score if signal_type == "INVESTED" else risk_score
+
     return {
         "signal": signal, "signal_type": signal_type,
         "risk_score": risk_score, "risk_details": risk_details,
         "price": current, "change_pct": (current-prev)/prev*100,
-        "rsi": _rsi,
-        "strategy_name": "위기방어형",
-        "strategy_label": f"위험스코어 {risk_score}/100",
+        "rsi": _rsi, "adx": round(_adx, 1),
+        "mfi": round(_mfi, 1),
+        "ma50": _ma_m, "ma200": _ma_l,
+        "vol20": round(_v20, 1), "vol60": round(_v60, 1),
+        "r20": round(r20, 2),
+        "confidence": confidence,
+        "strategy_name": "위기방어형 v2",
+        "strategy_label": f"위험 {risk_score}/100 · MA{ma_m}/{ma_l}",
     }
 
 
@@ -790,17 +1113,24 @@ def analyze_risk_defense(df, params):
 def analyze_market(ticker, market_info, df):
     strategy = market_info["strategy"]
     params = market_info["params"]
+    country_code, profile = get_country_profile(ticker)
 
     if strategy == "minervini":
         result = analyze_minervini(df, params)
     elif strategy == "leverage":
-        result = analyze_leverage(df, params)
+        result = analyze_leverage(df, params, profile=profile)
     elif strategy == "dual_filter":
-        result = analyze_dual_filter(df, params)
+        result = analyze_dual_filter(df, params, profile=profile)
     elif strategy == "risk_defense":
-        result = analyze_risk_defense(df, params)
+        result = analyze_risk_defense(df, params, profile=profile)
     else:
         return None
+
+    # 추가 보조 지표 (모든 전략 공통)
+    try:
+        obv_slope = calc_obv_slope(df, period=20)
+    except Exception:
+        obv_slope = 0
 
     # 공통 필드 추가
     close = df['Close']
@@ -810,6 +1140,10 @@ def analyze_market(ticker, market_info, df):
         "symbol": market_info["symbol"],
         "flag": market_info["flag"],
         "strategy": strategy,
+        "country_code": country_code,
+        "country_name": profile["name"],
+        "country_tendency": profile["tendency"],
+        "obv_slope": round(obv_slope, 2),
         "high_1y": float(df['High'].max()),
         "low_1y": float(df['Low'].min()),
         "from_high_pct": round((result['price'] - float(df['High'].max())) / float(df['High'].max()) * 100, 1),

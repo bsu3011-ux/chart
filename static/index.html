@@ -1389,6 +1389,63 @@ function StockResultCard({data:d,onChart,onClose}){
             {d.high_52w&&<Met label="52주고점대비" value={`${d.from_high_pct?.toFixed(1)}%`} color={d.from_high_pct>-10?C.green:d.from_high_pct>-20?C.yellow:C.red}/>}
           </div>
         )}
+        {/* 펀더멘털 2번째 줄 — 배당·베타·ROE·EPS성장 */}
+        {(d.dividend_yield!=null||d.beta!=null||d.roe!=null||d.eps_growth!=null)&&(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:4,marginTop:4}}>
+            {d.dividend_yield!=null&&<Met label="배당" value={`${d.dividend_yield.toFixed(2)}%`} color={d.dividend_yield>3?C.green:C.cyan}/>}
+            {d.beta!=null&&<Met label="베타" value={d.beta.toFixed(2)} color={d.beta>1.5?C.red:d.beta>1?C.yellow:C.green}/>}
+            {d.roe!=null&&<Met label="ROE" value={`${d.roe.toFixed(1)}%`} color={d.roe>15?C.green:d.roe>5?C.cyan:C.red}/>}
+            {d.eps_growth!=null&&<Met label="EPS성장" value={`${d.eps_growth>=0?"+":""}${d.eps_growth.toFixed(0)}%`} color={d.eps_growth>10?C.green:d.eps_growth>0?C.cyan:C.red}/>}
+          </div>
+        )}
+        {/* 신뢰도 바 */}
+        {typeof d.confidence==="number"&&(
+          <div style={{marginTop:8,display:"flex",alignItems:"center",gap:8}}>
+            <span style={{color:C.muted,fontSize:10,minWidth:46}}>신뢰도</span>
+            <div style={{flex:1,height:6,background:C.border,borderRadius:3,overflow:"hidden"}}>
+              <div style={{width:`${d.confidence}%`,height:"100%",
+                background:d.confidence>=70?C.green:d.confidence>=50?C.cyan:d.confidence>=30?C.yellow:C.red,
+                transition:"width .3s"}}/>
+            </div>
+            <span style={{color:C.dim,fontSize:11,fontWeight:700,minWidth:24,textAlign:"right"}}>{d.confidence}</span>
+          </div>
+        )}
+        {/* 다이버전스/캔들 보조 시그널 */}
+        {(d.divergence||d.candle_pattern)&&(
+          <div style={{display:"flex",gap:5,marginTop:8,flexWrap:"wrap"}}>
+            {d.divergence==="bullish"&&<span style={{padding:"3px 7px",borderRadius:5,fontSize:10,fontWeight:700,
+              background:"rgba(34,197,94,0.12)",color:C.green,border:`1px solid ${C.green}33`}}>⚡ RSI 상승 다이버전스</span>}
+            {d.divergence==="bearish"&&<span style={{padding:"3px 7px",borderRadius:5,fontSize:10,fontWeight:700,
+              background:"rgba(239,68,68,0.12)",color:C.red,border:`1px solid ${C.red}33`}}>⚠️ RSI 하락 다이버전스</span>}
+            {d.candle_pattern&&<span style={{padding:"3px 7px",borderRadius:5,fontSize:10,fontWeight:700,
+              background:`${C.cyan}12`,color:C.cyan,border:`1px solid ${C.cyan}33`}}>🕯️ {d.candle_pattern}</span>}
+          </div>
+        )}
+        {/* 진입/출구 전략 (손절·목표·R:R·포지션) */}
+        {d.targets&&(
+          <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
+            background:`${C.green}06`,border:`1px solid ${C.green}22`}}>
+            <div style={{color:C.green,fontSize:9,fontWeight:700,marginBottom:6,letterSpacing:"0.05em"}}>
+              🎯 진입·출구 전략 (ATR 기반)
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+              <Met label="손절" value={fp(d.targets.stop,d.ticker)} color={C.red}/>
+              <Met label="목표" value={fp(d.targets.target,d.ticker)} color={C.green}/>
+              <Met label="R:R" value={d.targets.rr+":1"} color={d.targets.rr>=2?C.green:d.targets.rr>=1?C.yellow:C.red}/>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:C.muted}}>
+              <span>리스크: <span style={{color:C.red}}>{d.targets.risk_pct?.toFixed(1)}%</span></span>
+              <span>수익: <span style={{color:C.green}}>+{d.targets.reward_pct?.toFixed(1)}%</span></span>
+            </div>
+            {d.position&&d.position.shares>0&&(
+              <div style={{marginTop:6,paddingTop:6,borderTop:`1px solid ${C.border}33`,
+                fontSize:10,color:C.dim,lineHeight:1.5}}>
+                💼 <b>1천만원 · 1% 룰</b> 기준 → 권장 매수 <b style={{color:C.cyan}}>{d.position.shares.toLocaleString()}주</b>
+                {' '}(<b>{(d.position.invest/10000).toFixed(0)}만원</b>, 최대 손실 {(d.position.max_loss/10000).toFixed(0)}만원)
+              </div>
+            )}
+          </div>
+        )}
         <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:`${C.cyan}08`,border:`1px solid ${C.cyan}22`}}>
           <div style={{color:C.cyan,fontSize:9,fontWeight:700,marginBottom:3}}>🤖 AI 분석</div>
           {d.data_unavailable&&<div style={{color:C.yellow,fontSize:10,marginBottom:4}}>⚠️ 실시간 시세 조회 불가 — 기본 정보만 표시</div>}

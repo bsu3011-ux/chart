@@ -984,9 +984,9 @@ function StockChip({name,pct}){
     <span style={{display:"inline-flex",alignItems:"center",gap:2,
       padding:"1px 4px",borderRadius:4,marginRight:2,marginBottom:2,
       background:pos?"rgba(34,197,94,0.08)":"rgba(239,68,68,0.08)",
-      border:`1px solid ${col}33`}}>
-      <span style={{color:C.dim,fontSize:7}}>{name}</span>
-      <span style={{color:col,fontSize:7,fontWeight:700}}>{pos?"+":""}{pct?.toFixed(1)}%</span>
+      border:`1px solid ${col}33`,minWidth:0,overflow:"hidden",maxWidth:"100%"}}>
+      <span style={{color:C.dim,fontSize:7,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:60}}>{name}</span>
+      <span style={{color:col,fontSize:7,fontWeight:700,flexShrink:0}}>{pos?"+":""}{pct?.toFixed(1)}%</span>
     </span>
   );
 }

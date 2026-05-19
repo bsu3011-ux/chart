@@ -1087,6 +1087,77 @@ function SectorPanel({list,period}){
   );
 }
 
+// ════════════════════════════════════════════
+// 신호 히스토리 패널
+// ════════════════════════════════════════════
+function SignalHistory(){
+  const [open,setOpen]=useState(false);
+  const [history,setHistory]=useState([]);
+  useEffect(()=>{
+    if(!open) return;
+    fetch(`${API_BASE}/api/signal_history`)
+      .then(r=>r.json()).then(d=>setHistory(d.history||[])).catch(()=>{});
+  },[open]);
+
+  const changes=history.flatMap(h=>(h.changes||[]).map(c=>({...c,timestamp:h.timestamp})));
+  const recent=changes.slice(-20).reverse();
+
+  function timeAgo(ts){
+    const diff=Math.floor((Date.now()-new Date(ts))/1000);
+    if(diff<60) return `${diff}초 전`;
+    if(diff<3600) return `${Math.floor(diff/60)}분 전`;
+    if(diff<86400) return `${Math.floor(diff/3600)}시간 전`;
+    return `${Math.floor(diff/86400)}일 전`;
+  }
+
+  const sigColor=(sig)=>{
+    if(!sig) return C.muted;
+    if(sig.includes("레버리지")||sig.includes("매수")||sig.includes("투자")) return C.green;
+    if(sig.includes("현금")||sig.includes("매도")) return C.red;
+    return C.cyan;
+  };
+
+  return(
+    <div style={{marginBottom:10}}>
+      <div onClick={()=>setOpen(!open)} style={{
+        display:"flex",justifyContent:"space-between",alignItems:"center",
+        padding:"10px 12px",borderRadius:12,background:C.cardGradient,
+        border:`1px solid ${C.border}`,cursor:"pointer"}}>
+        <span style={{color:C.dim,fontSize:10,fontWeight:700}}>📋 시그널 변경 히스토리</span>
+        <span style={{color:C.muted,fontSize:12}}>{open?"▲":"▼"}</span>
+      </div>
+      {open&&(
+        <div style={{padding:"10px 12px",borderRadius:"0 0 12px 12px",
+          background:C.surface,border:`1px solid ${C.border}`,borderTop:"none"}}>
+          {recent.length===0
+            ? <div style={{color:C.muted,fontSize:11,textAlign:"center",padding:"12px 0"}}>
+                아직 신호 변경 기록이 없습니다
+              </div>
+            : recent.map((c,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:8,
+                  padding:"7px 0",borderBottom:i<recent.length-1?`1px solid ${C.border}33`:"none"}}>
+                  <span style={{fontSize:15,flexShrink:0}}>{c.flag}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.dim,
+                      overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</div>
+                    <div style={{fontSize:10,marginTop:1,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+                      <span style={{color:sigColor(c.old_signal)}}>{c.old_signal}</span>
+                      <span style={{color:C.muted}}>→</span>
+                      <span style={{color:sigColor(c.new_signal),fontWeight:700}}>{c.new_signal}</span>
+                    </div>
+                  </div>
+                  <div style={{color:C.muted,fontSize:9,flexShrink:0,textAlign:"right"}}>
+                    {timeAgo(c.timestamp)}
+                  </div>
+                </div>
+              ))
+          }
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SectorHeatmap(){
   const [data,setData]=useState({us_sectors:[],kr_sectors:[]});
   const [open,setOpen]=useState(false);
@@ -1305,6 +1376,19 @@ function StockResultCard({data:d,onChart,onClose}){
           <Met label="MA50" value={fp(d.ma50,d.ticker)} color={d.price>d.ma50?C.green:C.red}/>
           <Met label="MA200" value={d.ma200?fp(d.ma200,d.ticker):"N/A"} color={d.ma200?(d.price>d.ma200?C.green:C.red):C.muted}/>
         </div>
+        {/* 펀더멘털 */}
+        {(d.pe_ratio||d.market_cap||d.high_52w)&&(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginTop:6}}>
+            {d.pe_ratio&&<Met label="PER" value={d.pe_ratio?.toFixed(1)+"x"} color={d.pe_ratio<15?C.green:d.pe_ratio<25?C.cyan:C.red}/>}
+            {d.market_cap&&<Met label="시총" value={
+              d.market_cap>=1e12?`$${(d.market_cap/1e12).toFixed(1)}T`:
+              d.market_cap>=1e9?`$${(d.market_cap/1e9).toFixed(0)}B`:
+              d.market_cap>=1e8?`${(d.market_cap/1e8).toFixed(0)}억`:
+              `${(d.market_cap/1e4).toFixed(0)}만`
+            } color={C.muted}/>}
+            {d.high_52w&&<Met label="52주고점대비" value={`${d.from_high_pct?.toFixed(1)}%`} color={d.from_high_pct>-10?C.green:d.from_high_pct>-20?C.yellow:C.red}/>}
+          </div>
+        )}
         <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:`${C.cyan}08`,border:`1px solid ${C.cyan}22`}}>
           <div style={{color:C.cyan,fontSize:9,fontWeight:700,marginBottom:3}}>🤖 AI 분석</div>
           {d.data_unavailable&&<div style={{color:C.yellow,fontSize:10,marginBottom:4}}>⚠️ 실시간 시세 조회 불가 — 기본 정보만 표시</div>}
@@ -1866,7 +1950,7 @@ function MarketTab({markets,onChart,data,fetchSignals,runAnalysis,loading,apiCon
           WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
           MULTI-MARKET TRADING BOT v4.0
         </div>
-        <div style={{color:C.muted,fontSize:10,display:"flex",justifyContent:"center",gap:6}}>
+        <div style={{color:C.muted,fontSize:10,display:"flex",justifyContent:"center",gap:6,flexWrap:"wrap"}}>
           <span>{clock.toLocaleString("ko-KR")}</span>
           {apiConnected
             ?<span style={{color:C.green,display:"flex",alignItems:"center",gap:3}}>
@@ -1874,6 +1958,13 @@ function MarketTab({markets,onChart,data,fetchSignals,runAnalysis,loading,apiCon
               </span>
             :<span style={{color:C.yellow}}>● 데모</span>}
         </div>
+        {data?.generated_at&&(()=>{
+          const diff=Math.floor((Date.now()-new Date(data.generated_at))/60000);
+          const ago=diff<1?"방금":diff<60?`${diff}분 전`:`${Math.floor(diff/60)}시간 전`;
+          return <div style={{color:C.muted,fontSize:9,textAlign:"center",marginTop:1}}>
+            ⏱ 분석: {ago}
+          </div>;
+        })()}
       </div>
 
       {/* 🔍 종목 검색 (최상단) */}
@@ -1900,6 +1991,9 @@ function MarketTab({markets,onChart,data,fetchSignals,runAnalysis,loading,apiCon
 
       {/* 섹터 히트맵 */}
       <SectorHeatmap/>
+
+      {/* 신호 히스토리 */}
+      <SignalHistory/>
 
       {/* 액션 + 요약 (데스크탑: 2컬럼) */}
       <div className="desktop-grid" style={{marginBottom:0}}>
@@ -1993,7 +2087,7 @@ function MarketTab({markets,onChart,data,fetchSignals,runAnalysis,loading,apiCon
       <div style={{marginTop:16,padding:"12px 14px",borderRadius:12,
         background:C.surface,borderTop:`1px solid ${C.border}`,textAlign:"center"}}>
         <div style={{color:C.muted,fontSize:10,marginBottom:4}}>
-          ⏰ 자동 업데이트: 매일 <span style={{color:C.cyan}}>08:00</span> / <span style={{color:C.cyan}}>20:00</span> KST
+          ⏰ 자동 분석: 매일 <span style={{color:C.cyan}}>08:00</span> / <span style={{color:C.cyan}}>16:00</span> KST · 신호 변경 시 텔레그램 알림
         </div>
         <div style={{color:C.muted,fontSize:10}}>
           5년 실데이터 백테스트 · 20개+ 지수 + 개별주 · 4개 전략

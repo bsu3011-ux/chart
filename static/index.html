@@ -999,14 +999,14 @@ function SectorCard({s,large,period}){
   const bg=pct>2?C.greenBg:pct>0?"rgba(34,197,94,0.05)":pct>-2?"rgba(239,68,68,0.05)":C.redBg;
   return(
     <div style={{padding:large?"10px 8px":"7px 6px",borderRadius:8,background:bg,
-      border:`1px solid ${col}33`,boxShadow:large?`0 0 12px ${col}22`:"none"}}>
+      border:`1px solid ${col}33`,boxShadow:large?`0 0 12px ${col}22`:"none",overflow:"hidden",minWidth:0}}>
       <div style={{display:"flex",alignItems:"flex-start",gap:4,marginBottom:3}}>
         <span style={{fontSize:large?14:12,flexShrink:0,lineHeight:1.3}}>{s.emoji}</span>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:2}}>
+        <div style={{flex:1,minWidth:0,overflow:"hidden"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:2,flexWrap:"wrap"}}>
             <div style={{color:C.dim,fontSize:large?9:8,fontWeight:700,lineHeight:1.3,
-              wordBreak:"keep-all",overflowWrap:"break-word",flex:1}}>{s.name}</div>
-            <span style={{color:col,fontSize:large?11:10,fontWeight:700,flexShrink:0,whiteSpace:"nowrap"}}>
+              wordBreak:"keep-all",overflowWrap:"break-word",flex:1,minWidth:0}}>{s.name}</div>
+            <span style={{color:col,fontSize:large?10:9,fontWeight:700,flexShrink:0,whiteSpace:"nowrap"}}>
               {pct>=0?"+":""}{pct?.toFixed(1)}%
             </span>
           </div>
@@ -1014,7 +1014,7 @@ function SectorCard({s,large,period}){
         </div>
       </div>
       {/* 1D/1W/1M 미니 뱃지 */}
-      <div style={{display:"flex",gap:3,marginBottom:3}}>
+      <div style={{display:"flex",gap:2,marginBottom:3,flexWrap:"wrap"}}>
         {[["1D","pct_1d"],["1W","pct_1w"],["1M","pct_1m"]].map(([label,key])=>{
           const v=s[key]; if(v==null) return null;
           const c=v>=0?C.green:C.red;
@@ -1056,7 +1056,7 @@ function SectorPanel({list,period}){
           <span style={{color:C.green,fontSize:9,fontWeight:800}}>주도 섹터 TOP 3</span>
           <span style={{color:C.muted,fontSize:8}}>({periodLabel} 기준)</span>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:4}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:4,overflow:"hidden"}}>
           {leaders.map(s=><SectorCard key={cardKey(s)} s={s} large={true} period={period}/>)}
         </div>
       </div>
@@ -1068,7 +1068,7 @@ function SectorPanel({list,period}){
           <span style={{color:C.red,fontSize:9,fontWeight:800}}>약세 섹터 BOTTOM 3</span>
           <span style={{color:C.muted,fontSize:8}}>({periodLabel} 기준)</span>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:4}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:4,overflow:"hidden"}}>
           {laggards.map(s=><SectorCard key={cardKey(s)} s={s} large={true} period={period}/>)}
         </div>
       </div>

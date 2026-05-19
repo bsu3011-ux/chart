@@ -771,16 +771,23 @@ function ForexBoard(){
       border:`1px solid ${C.border}`,animation:"pulse 2s infinite"}}/>
   );
   if(!rates.length) return null;
+  const fmtRate=(r)=>{
+    const v=r.rate;
+    if(v>=100000000) return (v/100000000).toFixed(2)+'억';
+    if(v>=10000) return Math.round(v).toLocaleString();
+    if(v>=100) return Math.round(v).toLocaleString();
+    return v?.toFixed(2);
+  };
   return(
     <div style={{marginBottom:10}}>
-      <div style={{color:C.dim,fontSize:10,fontWeight:700,letterSpacing:"0.06em",marginBottom:6}}>💱 실시간 환율</div>
+      <div style={{color:C.dim,fontSize:10,fontWeight:700,letterSpacing:"0.06em",marginBottom:6}}>💱 실시간 환율 (원화기준)</div>
       <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4}}>
         {rates.map(r=>(
           <div key={r.ticker} style={{flexShrink:0,padding:"7px 10px",borderRadius:10,
-            background:C.cardGradient,border:`1px solid ${C.border}`,minWidth:80,textAlign:"center"}}>
+            background:C.cardGradient,border:`1px solid ${C.border}`,minWidth:82,textAlign:"center"}}>
             <div style={{fontSize:16,marginBottom:2}}>{r.flag}</div>
-            <div style={{color:C.dim,fontSize:9}}>{r.name}</div>
-            <div style={{color:C.text,fontSize:11,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{r.rate?.toLocaleString()}</div>
+            <div style={{color:C.dim,fontSize:9}}>{r.label}</div>
+            <div style={{color:C.text,fontSize:11,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{fmtRate(r)}원</div>
             <div style={{color:r.change_pct>=0?C.green:C.red,fontSize:9,fontWeight:700}}>
               {r.change_pct>=0?"+":""}{r.change_pct?.toFixed(2)}%
             </div>

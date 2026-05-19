@@ -404,41 +404,78 @@ def get_fear_greed():
 
 @app.route('/api/forex')
 def get_forex():
-    """주요 환율 데이터"""
+    """주요 환율 데이터 — 모두 원화 기준으로 환산"""
     import yfinance as yf
     import pandas as pd
 
-    pairs = [
-        ("USDKRW=X",  "USD/KRW",  "🇰🇷", "원"),
-        ("USDJPY=X",  "USD/JPY",  "🇯🇵", "엔"),
-        ("EURUSD=X",  "EUR/USD",  "🇪🇺", "유로"),
-        ("GBPUSD=X",  "GBP/USD",  "🇬🇧", "파운드"),
-        ("USDCNY=X",  "USD/CNY",  "🇨🇳", "위안"),
-        ("USDINR=X",  "USD/INR",  "🇮🇳", "루피"),
-        ("USDAUD=X",  "USD/AUD",  "🇦🇺", "호주달러"),
-        ("BTC-USD",   "BTC/USD",  "₿",   "비트코인"),
-    ]
-    results = []
-    for ticker, name, flag, unit in pairs:
+    def fetch(ticker):
         try:
             df = yf.download(ticker, period="5d", interval="1d",
                              auto_adjust=True, progress=False, threads=False)
-            if df is None or df.empty: continue
+            if df is None or df.empty: return None, None
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
             cur  = float(df['Close'].iloc[-1])
             prev = float(df['Close'].iloc[-2]) if len(df) > 1 else cur
-            chg  = (cur - prev) / prev * 100
-            # 소수점 자리수 조절
-            dec = 0 if cur > 100 else (2 if cur > 1 else 4)
-            results.append({
-                "ticker": ticker, "name": name, "flag": flag, "unit": unit,
-                "rate": round(cur, dec),
-                "change_pct": round(chg, 3),
-                "prev": round(prev, dec),
-            })
+            return cur, prev
         except Exception:
-            pass
+            return None, None
+
+    usd_cur, usd_prev = fetch("USDKRW=X")
+    if not usd_cur:
+        return jsonify({"rates": [], "generated_at": datetime.datetime.now().isoformat()})
+
+    results = []
+
+    def add(key, name, flag, label, krw_cur, krw_prev):
+        if krw_cur is None: return
+        chg = (krw_cur - krw_prev) / krw_prev * 100 if krw_prev else 0
+        dec = 0 if krw_cur >= 10 else 2
+        results.append({
+            "ticker": key, "name": name, "flag": flag, "label": label,
+            "rate": round(krw_cur, dec),
+            "change_pct": round(chg, 3),
+            "unit": "원",
+        })
+
+    # USD: 1달러 = USDKRW원
+    add("USDKRW", "USD", "🇺🇸", "1달러", usd_cur, usd_prev)
+
+    # EUR: 1유로 = EURUSD × USDKRW
+    eur, eur_p = fetch("EURUSD=X")
+    if eur:
+        add("EURKRW", "EUR", "🇪🇺", "1유로", eur * usd_cur, eur_p * usd_prev)
+
+    # JPY: 100엔 = (USDKRW / USDJPY) × 100
+    jpy, jpy_p = fetch("USDJPY=X")
+    if jpy:
+        add("JPYKRW", "JPY", "🇯🇵", "100엔", (usd_cur / jpy) * 100, (usd_prev / jpy_p) * 100)
+
+    # GBP: 1파운드 = GBPUSD × USDKRW
+    gbp, gbp_p = fetch("GBPUSD=X")
+    if gbp:
+        add("GBPKRW", "GBP", "🇬🇧", "1파운드", gbp * usd_cur, gbp_p * usd_prev)
+
+    # CNY: 1위안 = USDKRW / USDCNY
+    cny, cny_p = fetch("USDCNY=X")
+    if cny:
+        add("CNYKRW", "CNY", "🇨🇳", "1위안", usd_cur / cny, usd_prev / cny_p)
+
+    # INR: 1루피 = USDKRW / USDINR
+    inr, inr_p = fetch("USDINR=X")
+    if inr:
+        add("INRKRW", "INR", "🇮🇳", "1루피", usd_cur / inr, usd_prev / inr_p)
+
+    # AUD: 1호주달러 = USDKRW / USDAUD  (USDAUD=X: AUD per 1 USD)
+    aud, aud_p = fetch("USDAUD=X")
+    if aud:
+        add("AUDKRW", "AUD", "🇦🇺", "1호주달러", usd_cur / aud, usd_prev / aud_p)
+
+    # BTC: 1BTC = BTC-USD × USDKRW
+    btc, btc_p = fetch("BTC-USD")
+    if btc:
+        add("BTCKRW", "BTC", "₿", "1BTC", btc * usd_cur, btc_p * usd_prev)
+
     return jsonify({"rates": results, "generated_at": datetime.datetime.now().isoformat()})
 
 

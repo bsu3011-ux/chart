@@ -1431,6 +1431,20 @@ def analyze_stock(ticker: str) -> dict:
     if df.empty or len(df) < 30:
         raise ValueError(f"데이터를 불러올 수 없습니다: {ticker}")
 
+    # 펀더멘털 (PER, 시총)
+    pe_ratio = None
+    market_cap = None
+    try:
+        t_obj = yf.Ticker(ticker)
+        fi = t_obj.fast_info
+        market_cap = getattr(fi, 'market_cap', None)
+        full_info = t_obj.info
+        pe_ratio = full_info.get('trailingPE') or full_info.get('forwardPE')
+        if pe_ratio and (pe_ratio < 0 or pe_ratio > 1000):
+            pe_ratio = None
+    except Exception:
+        pass
+
     close = df['Close']
     high  = df['High']
     low   = df['Low']
@@ -1539,6 +1553,8 @@ def analyze_stock(ticker: str) -> dict:
         "forecasts": forecasts,
         "risk": risk,
         "price_history": price_history,
+        "pe_ratio": round(pe_ratio, 1) if pe_ratio else None,
+        "market_cap": int(market_cap) if market_cap else None,
         "generated_at": datetime.datetime.now().isoformat(),
     }
 

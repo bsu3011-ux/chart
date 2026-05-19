@@ -36,10 +36,125 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 app = Flask(__name__, static_folder=STATIC_DIR)
 CORS(app)  # 모든 도메인 허용
 
-OUTPUT_DIR   = os.environ.get("OUTPUT_DIR", os.path.join(BASE_DIR, "output"))
-SIGNALS_FILE = os.path.join(OUTPUT_DIR, "signals_v4.json")
+OUTPUT_DIR          = os.environ.get("OUTPUT_DIR", os.path.join(BASE_DIR, "output"))
+SIGNALS_FILE        = os.path.join(OUTPUT_DIR, "signals_v4.json")
+SIGNAL_HISTORY_FILE = os.path.join(OUTPUT_DIR, "signal_history.json")
 os.makedirs(OUTPUT_DIR,   exist_ok=True)
 os.makedirs(STATIC_DIR,   exist_ok=True)
+
+# ── 텔레그램 설정 (환경변수로 주입) ──
+TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+
+def send_telegram(text: str) -> bool:
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        url     = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}).encode()
+        req     = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+        return True
+    except Exception as e:
+        print(f"[telegram] 전송 실패: {e}")
+        return False
+
+
+def _save_signal_history(new_data: dict) -> list:
+    """신호 저장 + 이전과 비교해 변경 시 Telegram 알림. 변경 목록 반환."""
+    history = []
+    if os.path.exists(SIGNAL_HISTORY_FILE):
+        try:
+            with open(SIGNAL_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+
+    markets  = new_data.get("markets", [])
+    cur_map  = {m["ticker"]: m for m in markets}
+    changes  = []
+
+    if history:
+        prev_map = {m["ticker"]: m for m in history[-1].get("markets", [])}
+        for ticker, m in cur_map.items():
+            prev = prev_map.get(ticker, {})
+            if prev and prev.get("signal_type") != m.get("signal_type"):
+                changes.append({
+                    "ticker":     ticker,
+                    "name":       m.get("name", ticker),
+                    "flag":       m.get("flag", ""),
+                    "old_signal": prev.get("signal", "?"),
+                    "new_signal": m.get("signal", "?"),
+                    "price":      m.get("price"),
+                })
+
+    entry = {
+        "timestamp": new_data.get("generated_at", datetime.datetime.now().isoformat()),
+        "changes":   changes,
+        "markets": [{
+            "ticker":      m.get("ticker"),
+            "name":        m.get("name"),
+            "flag":        m.get("flag"),
+            "signal_type": m.get("signal_type"),
+            "signal":      m.get("signal"),
+            "price":       m.get("price"),
+            "change_pct":  m.get("change_pct"),
+        } for m in markets],
+    }
+    history.append(entry)
+    history = history[-90:]  # 최근 90회 보관
+
+    with open(SIGNAL_HISTORY_FILE, 'w', encoding='utf-8') as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+    if changes:
+        ts   = datetime.datetime.now().strftime("%m/%d %H:%M")
+        lines = [f"📊 <b>시그널 변경 알림</b> ({ts})"]
+        for c in changes:
+            lines.append(f"{c['flag']} {c['name']}: {c['old_signal']} → {c['new_signal']}")
+        send_telegram("\n".join(lines))
+
+    return changes
+
+
+def _run_bot_background():
+    """백그라운드에서 봇 분석 → 히스토리 저장 → 텔레그램 알림"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(run_bot())
+        loop.close()
+        print("[bot] 분석 완료 → signals_v4.json 갱신")
+        if os.path.exists(SIGNALS_FILE):
+            with open(SIGNALS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            changes = _save_signal_history(data)
+            if changes:
+                print(f"[bot] 신호 변경 {len(changes)}개 → Telegram 알림 전송")
+    except Exception as e:
+        print(f"[bot] 분석 오류: {e}")
+
+
+def _daily_scheduler():
+    """매일 오전 8시·오후 4시 (KST = UTC+9) 자동 분석"""
+    import time
+    run_hours   = {8, 16}
+    _last_fired = set()
+    while True:
+        try:
+            kst  = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+            key  = (kst.date(), kst.hour)
+            if kst.hour in run_hours and key not in _last_fired:
+                _last_fired.add(key)
+                # 오래된 key 정리
+                today = kst.date()
+                _last_fired = {k for k in _last_fired if k[0] >= today}
+                print(f"[scheduler] KST {kst.hour}시 자동 분석 시작")
+                _run_bot_background()
+        except Exception as e:
+            print(f"[scheduler] 오류: {e}")
+        time.sleep(60)
 
 
 @app.route('/api/signals')
@@ -71,6 +186,23 @@ def run_analysis():
             return jsonify({"status": "error", "message": "분석 완료했지만 파일 생성 실패"}), 500
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/signal_history')
+def get_signal_history():
+    """신호 히스토리 및 변경 이력"""
+    if not os.path.exists(SIGNAL_HISTORY_FILE):
+        return jsonify({"history": [], "message": "아직 기록이 없습니다"})
+    with open(SIGNAL_HISTORY_FILE, 'r', encoding='utf-8') as f:
+        history = json.load(f)
+    return jsonify({"history": history[-30:]})
+
+
+@app.route('/api/telegram_test')
+def telegram_test():
+    """텔레그램 연결 테스트"""
+    ok = send_telegram("✅ 멀티마켓 봇 텔레그램 연결 테스트 성공!")
+    return jsonify({"ok": ok, "token_set": bool(TELEGRAM_TOKEN), "chat_id_set": bool(TELEGRAM_CHAT_ID)})
 
 
 @app.route('/api/status')
@@ -542,7 +674,9 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     print(f"\n  🚀 멀티마켓 봇 API 서버 시작")
     print(f"  http://localhost:{port}")
-    print(f"  /api/signals — 시그널 조회")
-    print(f"  /api/run     — 수동 분석 실행")
-    print(f"  /api/status  — 서버 상태\n")
+    print(f"  텔레그램: {'설정됨' if TELEGRAM_TOKEN else '미설정 (TELEGRAM_TOKEN 환경변수 필요)'}\n")
+    # 시작 시 분석 실행
+    threading.Thread(target=_run_bot_background, daemon=True).start()
+    # 일일 스케줄러 (KST 08:00, 16:00)
+    threading.Thread(target=_daily_scheduler, daemon=True).start()
     app.run(host='0.0.0.0', port=port, debug=False)

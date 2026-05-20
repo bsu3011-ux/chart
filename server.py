@@ -61,8 +61,17 @@ def send_telegram(text: str) -> bool:
         return False
 
 
+def _signal_group(signal_type: str) -> str:
+    """신호를 3개 그룹으로 분류: buy / neutral / sell"""
+    if signal_type in ("STRONG_BUY", "BUY"):
+        return "buy"
+    if signal_type in ("SELL", "STRONG_SELL", "CASH", "CASH_VOL"):
+        return "sell"
+    return "neutral"
+
+
 def _save_signal_history(new_data: dict) -> list:
-    """신호 저장 + 이전과 비교해 변경 시 Telegram 알림. 변경 목록 반환."""
+    """신호 저장 + 그룹 방향 전환 시에만 Telegram 알림. 변경 목록 반환."""
     history = []
     if os.path.exists(SIGNAL_HISTORY_FILE):
         try:
@@ -71,23 +80,33 @@ def _save_signal_history(new_data: dict) -> list:
         except Exception:
             history = []
 
-    markets  = new_data.get("markets", [])
-    cur_map  = {m["ticker"]: m for m in markets}
-    changes  = []
+    markets = new_data.get("markets", [])
+    cur_map = {m["ticker"]: m for m in markets}
+    changes = []   # signal_type 변경 (히스토리 기록용)
+    alerts  = []   # 그룹 전환 (텔레그램 발송용)
 
     if history:
         prev_map = {m["ticker"]: m for m in history[-1].get("markets", [])}
         for ticker, m in cur_map.items():
             prev = prev_map.get(ticker, {})
-            if prev and prev.get("signal_type") != m.get("signal_type"):
-                changes.append({
-                    "ticker":     ticker,
-                    "name":       m.get("name", ticker),
-                    "flag":       m.get("flag", ""),
-                    "old_signal": prev.get("signal", "?"),
-                    "new_signal": m.get("signal", "?"),
-                    "price":      m.get("price"),
-                })
+            if not prev:
+                continue
+            old_type = prev.get("signal_type", "")
+            new_type = m.get("signal_type", "")
+            if old_type == new_type:
+                continue
+            change = {
+                "ticker":     ticker,
+                "name":       m.get("name", ticker),
+                "flag":       m.get("flag", ""),
+                "old_signal": prev.get("signal", "?"),
+                "new_signal": m.get("signal", "?"),
+                "price":      m.get("price"),
+            }
+            changes.append(change)
+            # 그룹이 달라질 때만 텔레그램 발송
+            if _signal_group(old_type) != _signal_group(new_type):
+                alerts.append(change)
 
     entry = {
         "timestamp": new_data.get("generated_at", datetime.datetime.now().isoformat()),
@@ -108,10 +127,10 @@ def _save_signal_history(new_data: dict) -> list:
     with open(SIGNAL_HISTORY_FILE, 'w', encoding='utf-8') as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
-    if changes:
-        ts   = datetime.datetime.now().strftime("%m/%d %H:%M")
-        lines = [f"📊 <b>시그널 변경 알림</b> ({ts})"]
-        for c in changes:
+    if alerts:
+        ts    = datetime.datetime.now().strftime("%m/%d %H:%M")
+        lines = [f"📊 <b>시그널 방향 전환</b> ({ts})"]
+        for c in alerts:
             lines.append(f"{c['flag']} {c['name']}: {c['old_signal']} → {c['new_signal']}")
         send_telegram("\n".join(lines))
 
@@ -713,8 +732,6 @@ if __name__ == '__main__':
     print(f"\n  🚀 멀티마켓 봇 API 서버 시작")
     print(f"  http://localhost:{port}")
     print(f"  텔레그램: {'설정됨' if TELEGRAM_TOKEN else '미설정 (TELEGRAM_TOKEN 환경변수 필요)'}\n")
-    # 시작 시 분석 실행
-    threading.Thread(target=_run_bot_background, daemon=True).start()
-    # 일일 스케줄러 (KST 08:00, 16:00)
+    # 일일 스케줄러 (KST 08:00, 16:00) — 시작 시 자동 분석은 하지 않음
     threading.Thread(target=_daily_scheduler, daemon=True).start()
     app.run(host='0.0.0.0', port=port, debug=False)

@@ -80,45 +80,45 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 일본/홍콩: 이중필터 모멘텀 (NIKKEI +103%, 항셍 +25%) ──
+    # ── 일본/홍콩: 레버리지 스위칭 (1570.T 2x, YINN 3x) ──
     "^N225": {
         "name": "Nikkei 225", "symbol": "NKI", "flag": "🇯🇵",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
     "^HSI": {
         "name": "항셍지수", "symbol": "HSI", "flag": "🇭🇰",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 유럽: 위기방어형 (DAX +58%) ──
+    # ── 유럽: 레버리지 (LDAX 2x DAX 가능) ──
     "^GDAXI": {
         "name": "DAX", "symbol": "DAX", "flag": "🇩🇪",
-        "strategy": "risk_defense",
+        "strategy": "leverage",
         "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 미국: DOW (위기방어형, MDD 관리) ──
+    # ── 미국: DOW 레버리지 (DDM 2x) ──
     "^DJI": {
         "name": "다우존스", "symbol": "DJI", "flag": "🇺🇸",
-        "strategy": "risk_defense",
+        "strategy": "leverage",
         "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 중국: 상해종합 (이중필터 모멘텀) ──
+    # ── 중국: 상해종합 레버리지 (CHAU 2x, YINN 3x) ──
     "000001.SS": {
         "name": "상해종합", "symbol": "SSE", "flag": "🇨🇳",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 중국: 심천성분 (이중필터 모멘텀) ──
+    # ── 중국: 심천성분 레버리지 (YINN 3x) ──
     "399001.SZ": {
         "name": "심천성분", "symbol": "SZSE", "flag": "🇨🇳",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
     # ── 인도: NIFTY 50 (레버리지 — 강한 성장 시장) ──
@@ -142,10 +142,10 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 호주: ASX 200 (위기방어형) ──
+    # ── 호주: ASX 200 레버리지 (GEAR 2x) ──
     "^AXJO": {
         "name": "ASX 200", "symbol": "ASX", "flag": "🇦🇺",
-        "strategy": "risk_defense",
+        "strategy": "leverage",
         "params": {"check_interval":5},
         "period": "2y",
     },
@@ -163,11 +163,11 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 브라질: Bovespa (이중필터 모멘텀) ──
+    # ── 브라질: Bovespa 레버리지 (BRZU 3x) ──
     "^BVSP": {
         "name": "Bovespa", "symbol": "BVSP", "flag": "🇧🇷",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
     # ── 싱가포르: STI (위기방어형) ──
@@ -184,10 +184,10 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "1y",
     },
-    # ── 유로 스탁스 50 ──
+    # ── 유로 스탁스 50 레버리지 (UPV 2x) ──
     "^STOXX50E": {
         "name": "Euro Stoxx 50", "symbol": "SX5E", "flag": "🇪🇺",
-        "strategy": "risk_defense",
+        "strategy": "leverage",
         "params": {"check_interval":5},
         "period": "2y",
     },
@@ -991,22 +991,25 @@ MARKET_ETF = {
     "^DJI": {
         "2x":  "DDM (ProShares Ultra Dow30)",
         "1x":  "DIA (SPDR Dow Jones ETF)",
-        "inv": "DOG (ProShares Short Dow30)",
+        "inv": "DOG (ProShares Short Dow30) · SDOW(3x)",
     },
-    # ── 일본 ──
+    # ── 일본 (레버리지 전환) ──
     "^N225": {
-        "1x":   "TIGER 일본니케이225 (241180) · EWJ",
-        "exit": "현금 보유",
+        "2x":  "1570.T (NEXT FUNDS Nikkei 2x) · EZJ",
+        "1x":  "TIGER 일본니케이225 (241180) · EWJ",
+        "inv": "1357.T (일본인버스 2x) · 현금",
     },
-    # ── 홍콩 ──
+    # ── 홍콩 (레버리지 전환) ──
     "^HSI": {
-        "1x":   "TIGER 차이나항셍테크 (371460) · EWH",
-        "exit": "현금 보유",
+        "2x":  "YINN (Direxion China Bull 3x) · XPP",
+        "1x":  "TIGER 차이나항셍테크 (371460) · EWH",
+        "inv": "YANG (Direxion China Bear 3x) · 현금",
     },
-    # ── 유럽 ──
+    # ── 유럽 DAX (레버리지 전환) ──
     "^GDAXI": {
-        "1x":   "EWG (iShares Germany) · VGK (Vanguard Europe)",
-        "exit": "현금 보유",
+        "2x":  "LDAX (Lyxor DAX 2x) · DBX0BV (DAX 2x 유럽 상장)",
+        "1x":  "EWG (iShares Germany) · DAXEX",
+        "inv": "SDAX 인버스 ETF · 현금",
     },
     "^FCHI": {
         "1x":   "EWQ (iShares France) · VGK",
@@ -1017,8 +1020,9 @@ MARKET_ETF = {
         "exit": "현금 보유",
     },
     "^STOXX50E": {
-        "1x":   "TIGER 유럽STOXX50(H) (195930) · VGK · EZU",
-        "exit": "현금 보유",
+        "2x":  "UPV (ProShares Ultra FTSE Europe)",
+        "1x":  "TIGER 유럽STOXX50(H) (195930) · VGK · EZU",
+        "inv": "EPV (ProShares UltraShort) · 현금",
     },
     "^SSMI": {
         "1x":   "EWL (iShares Switzerland)",
@@ -1048,14 +1052,16 @@ MARKET_ETF = {
         "1x":   "EWO (iShares Austria) · VGK",
         "exit": "현금 보유",
     },
-    # ── 중국 ──
+    # ── 중국 (레버리지 전환) ──
     "000001.SS": {
-        "1x":   "TIGER 차이나CSI300 (192090) · FXI · MCHI",
-        "exit": "현금 보유",
+        "2x":  "CHAU (Direxion CSI300 Bull 2x) · YINN(3x)",
+        "1x":  "TIGER 차이나CSI300 (192090) · FXI · MCHI",
+        "inv": "YANG (Direxion China Bear 3x) · 현금",
     },
     "399001.SZ": {
-        "1x":   "TIGER 차이나CSI300 (192090) · MCHI",
-        "exit": "현금 보유",
+        "2x":  "YINN (Direxion China Bull 3x) · CHAU",
+        "1x":  "MCHI (iShares China) · KWEB",
+        "inv": "YANG (Direxion China Bear 3x) · 현금",
     },
     # ── 인도 ──
     "^NSEI": {
@@ -1074,19 +1080,21 @@ MARKET_ETF = {
         "1x":  "EWT (iShares Taiwan) · CQQQ",
         "inv": "현금 보유",
     },
-    # ── 호주·뉴질랜드 ──
+    # ── 호주 (레버리지 전환) ──
     "^AXJO": {
-        "1x":   "EWA (iShares Australia)",
-        "exit": "현금 보유",
+        "2x":  "GEAR (BetaShares Aus Equities 2x)",
+        "1x":  "EWA (iShares Australia) · IAF",
+        "inv": "BBOZ (BetaShares Aus Bear 2x) · 현금",
     },
     "^NZ50": {
         "1x":   "ENZL (iShares New Zealand)",
         "exit": "현금 보유",
     },
-    # ── 신흥국 ──
+    # ── 신흥국 (브라질 레버리지 전환) ──
     "^BVSP": {
-        "1x":   "EWZ (iShares Brazil)",
-        "exit": "현금 보유",
+        "2x":  "BRZU (Direxion Brazil Bull 3x)",
+        "1x":  "EWZ (iShares Brazil)",
+        "inv": "BRZS (Direxion Brazil Bear 3x) · 현금",
     },
     "^JKSE": {
         "1x":   "EIDO (iShares Indonesia)",

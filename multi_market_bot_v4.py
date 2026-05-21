@@ -45,13 +45,67 @@ MARKETS = {
         "params": {"check_interval":5, "is_crypto":True},
         "period": "1y",
     },
-    # ── ETH 현물: 미너비니 타이트 (5년 실데이터 +135%, MDD -48%, PF 1.9) ──
+    # ── ETH 현물: 미너비니 타이트 ──
     "ETH-USD": {
         "name": "이더리움", "symbol": "ETH", "flag": "Ξ",
         "strategy": "minervini",
         "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
                    "exit_buffer_atr":1.0,"trailing_atr":3.0,
-                   "hard_stop_pct":0.10,"cooldown_days":2},
+                   "hard_stop_pct":0.12,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── SOL: 미너비니 (고변동성 알트, 타이트 스탑) ──
+    "SOL-USD": {
+        "name": "솔라나", "symbol": "SOL", "flag": "◎",
+        "strategy": "minervini",
+        "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.2,"trailing_atr":3.5,
+                   "hard_stop_pct":0.15,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── XRP: 미너비니 ──
+    "XRP-USD": {
+        "name": "리플", "symbol": "XRP", "flag": "✕",
+        "strategy": "minervini",
+        "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.0,"trailing_atr":3.0,
+                   "hard_stop_pct":0.15,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── BNB: 미너비니 ──
+    "BNB-USD": {
+        "name": "바이낸스코인", "symbol": "BNB", "flag": "🟡",
+        "strategy": "minervini",
+        "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.0,"trailing_atr":3.0,
+                   "hard_stop_pct":0.12,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── DOGE: 미너비니 (고변동성, 넓은 스탑) ──
+    "DOGE-USD": {
+        "name": "도지코인", "symbol": "DOGE", "flag": "🐕",
+        "strategy": "minervini",
+        "params": {"ma_fast":7,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.5,"trailing_atr":4.0,
+                   "hard_stop_pct":0.20,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── ADA: 미너비니 ──
+    "ADA-USD": {
+        "name": "에이다", "symbol": "ADA", "flag": "🔵",
+        "strategy": "minervini",
+        "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.2,"trailing_atr":3.5,
+                   "hard_stop_pct":0.15,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── AVAX: 미너비니 ──
+    "AVAX-USD": {
+        "name": "아발란체", "symbol": "AVAX", "flag": "🔺",
+        "strategy": "minervini",
+        "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.2,"trailing_atr":3.5,
+                   "hard_stop_pct":0.15,"cooldown_days":2},
         "period": "1y",
     },
     # ── 한국 지수 2x ETF: 레버리지 스위칭 (KOSPI +230%, KOSDAQ +74%) ──
@@ -960,6 +1014,8 @@ TICKER_COUNTRY = {
     "^J203.JO": "EM",
     "^TA125.TA": "ME", "^TASI.SR": "ME",
     "BTC-USD": "CRYPTO", "ETH-USD": "CRYPTO",
+    "SOL-USD": "CRYPTO", "XRP-USD": "CRYPTO", "BNB-USD": "CRYPTO",
+    "DOGE-USD": "CRYPTO", "ADA-USD": "CRYPTO", "AVAX-USD": "CRYPTO",
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -1152,7 +1208,31 @@ MARKET_ETF = {
         "inv": "SBIT (ProShares Short Bitcoin) · USDT 전환",
     },
     "ETH-USD": {
-        "1x":   "ETHE (Grayscale) · 현물 직접 보유",
+        "1x":   "ETHA (iShares ETH Spot) · ETHW · 현물 직접 보유",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "SOL-USD": {
+        "1x":   "SOLS (Bitwise Solana) · BSOL · 현물 직접 보유",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "XRP-USD": {
+        "1x":   "XRPH (ProShares XRP) · 현물 직접 보유",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "BNB-USD": {
+        "1x":   "현물 직접 보유 (바이낸스)",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "DOGE-USD": {
+        "1x":   "현물 직접 보유 (업비트·바이낸스)",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "ADA-USD": {
+        "1x":   "현물 직접 보유",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "AVAX-USD": {
+        "1x":   "현물 직접 보유",
         "exit": "USDT 스테이블코인 전환",
     },
 }

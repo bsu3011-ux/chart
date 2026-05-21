@@ -452,6 +452,37 @@ function Card({m,open,onToggle,onChart}){
                 <Met label="R:R" value={`${m.rr_ratio?.toFixed(1)}:1`} color={m.rr_ratio>=2?C.green:C.yellow} small/>
               </div>
             )}
+            {/* 추천 ETF */}
+            {m.etf&&Object.keys(m.etf).length>0&&(()=>{
+              const is2x=m.signal_type==="LEVERAGE_2X";
+              const isBuy=["LEVERAGE_2X","STRONG_BUY","BUY","INVESTED"].includes(m.signal_type);
+              const is1x=isBuy&&!is2x;
+              const isExit=["CASH","CASH_VOL","SELL","STRONG_SELL"].includes(m.signal_type);
+              const rows=[];
+              if(m.etf["2x"])  rows.push({label:"⚡ 2x 레버리지",val:m.etf["2x"],  active:is2x});
+              if(m.etf["1x"])  rows.push({label:"📈 1x 원물보유", val:m.etf["1x"],  active:is1x||(isBuy&&!m.etf["2x"])});
+              if(m.etf["inv"]) rows.push({label:"🛡️ 인버스·현금",  val:m.etf["inv"], active:isExit});
+              if(m.etf["exit"])rows.push({label:"🛡️ 현금보유",     val:m.etf["exit"],active:isExit});
+              return(
+                <div style={{marginBottom:8,padding:"8px 10px",borderRadius:8,
+                  background:`${C.surface}`,border:`1px solid ${C.border}44`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,
+                    letterSpacing:"0.06em",marginBottom:6}}>📦 추천 ETF 상품</div>
+                  {rows.map((row,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,
+                      padding:"5px 0",borderBottom:i<rows.length-1?`1px solid ${C.border}22`:"none"}}>
+                      <span style={{color:row.active?s.c:C.muted,fontSize:9,fontWeight:700,
+                        minWidth:76,marginTop:1,flexShrink:0}}>{row.label}</span>
+                      <span style={{color:row.active?C.text:C.dim,fontSize:10,
+                        fontWeight:row.active?600:400,lineHeight:1.45}}>{row.val}</span>
+                      {row.active&&<span style={{marginLeft:"auto",fontSize:9,
+                        color:s.c,background:`${s.c}18`,padding:"1px 5px",
+                        borderRadius:4,flexShrink:0,marginTop:1}}>현재</span>}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             <button onClick={()=>onChart(m)} style={{
               width:"100%",padding:"9px",borderRadius:10,
               border:`1px solid ${C.cyan}44`,background:C.cyan+"12",
@@ -828,6 +859,18 @@ const GEO_COORDS={
   "^NZ50":      {lon:172,  lat:-41,   label:"NZX50"},
   "^TA125.TA":  {lon:35,   lat:31.5,  label:"TA125"},
   "^TASI.SR":   {lon:45,   lat:24,    label:"Tadawul"},
+  "^IBEX":      {lon:-4,   lat:40,    label:"IBEX"},
+  "FTSEMIB.MI": {lon:12,   lat:43,    label:"MIB"},
+  "^AEX":       {lon:5,    lat:52.5,  label:"AEX"},
+  "^OMXSPI":    {lon:18,   lat:60,    label:"OMX"},
+  "^OSEBX":     {lon:10,   lat:62,    label:"Oslo"},
+  "^ATX":       {lon:16,   lat:48,    label:"ATX"},
+  "^WIG20":     {lon:21,   lat:52,    label:"WIG20"},
+  "XU100.IS":   {lon:35,   lat:39,    label:"BIST"},
+  "^J203.JO":   {lon:28,   lat:-26,   label:"JSE"},
+  "^SET.BK":    {lon:100,  lat:14,    label:"SET"},
+  "PSEi.PS":    {lon:121,  lat:13,    label:"PSEi"},
+  "^MERV":      {lon:-64,  lat:-34,   label:"MERVAL"},
 };
 
 function WorldMap({markets}){

@@ -240,6 +240,83 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "2y",
     },
+    # ── 유럽 추가 ──
+    "^IBEX": {
+        "name": "IBEX 35", "symbol": "IBEX", "flag": "🇪🇸",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    "FTSEMIB.MI": {
+        "name": "FTSE MIB", "symbol": "MIB", "flag": "🇮🇹",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    "^AEX": {
+        "name": "AEX", "symbol": "AEX", "flag": "🇳🇱",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    "^OMXSPI": {
+        "name": "OMX Stockholm", "symbol": "OMX", "flag": "🇸🇪",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    "^OSEBX": {
+        "name": "Oslo Bors", "symbol": "OBX", "flag": "🇳🇴",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    "^ATX": {
+        "name": "ATX", "symbol": "ATX", "flag": "🇦🇹",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    # ── 동유럽 / 터키 ──
+    "^WIG20": {
+        "name": "WIG20", "symbol": "WIG20", "flag": "🇵🇱",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    "XU100.IS": {
+        "name": "BIST 100", "symbol": "XU100", "flag": "🇹🇷",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    # ── 아프리카 ──
+    "^J203.JO": {
+        "name": "JSE All Share", "symbol": "JSE", "flag": "🇿🇦",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    # ── 동남아 ──
+    "^SET.BK": {
+        "name": "SET Index", "symbol": "SET", "flag": "🇹🇭",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    "PSEi.PS": {
+        "name": "PSEi", "symbol": "PSEi", "flag": "🇵🇭",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    # ── 남미 ──
+    "^MERV": {
+        "name": "MERVAL", "symbol": "MERV", "flag": "🇦🇷",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -876,10 +953,199 @@ TICKER_COUNTRY = {
     "^NSEI": "IN", "^BSESN": "IN",
     "^TWII": "TW",
     "^GDAXI": "EU", "^FCHI": "EU", "^FTSE": "EU", "^STOXX50E": "EU", "^SSMI": "EU",
+    "^IBEX": "EU", "FTSEMIB.MI": "EU", "^AEX": "EU", "^OMXSPI": "EU", "^OSEBX": "EU", "^ATX": "EU",
     "^AXJO": "AU", "^NZ50": "AU",
     "^BVSP": "EM", "^JKSE": "EM", "^KLSE": "EM", "^MXX": "EM", "^STI": "EM",
+    "^WIG20": "EM", "XU100.IS": "EM", "^SET.BK": "EM", "PSEi.PS": "EM", "^MERV": "EM",
+    "^J203.JO": "EM",
     "^TA125.TA": "ME", "^TASI.SR": "ME",
     "BTC-USD": "CRYPTO", "ETH-USD": "CRYPTO",
+}
+
+# ════════════════════════════════════════════════════════════════
+# 추천 ETF 가이드 (ticker → 전략별 상품)
+# ════════════════════════════════════════════════════════════════
+MARKET_ETF = {
+    # ── 한국 ──
+    "^KS11": {
+        "2x":  "KODEX 레버리지 (122630) · TIGER 200레버리지 (243890)",
+        "1x":  "KODEX 200 (069500) · TIGER 200 (102110)",
+        "inv": "KODEX 인버스 (114800) · KODEX 200선물인버스2X (252670)",
+    },
+    "^KQ11": {
+        "2x":  "KODEX 코스닥150레버리지 (233740)",
+        "1x":  "KODEX 코스닥150 (229200) · TIGER 코스닥150 (232080)",
+        "inv": "KODEX 코스닥150인버스(H) (251340)",
+    },
+    # ── 미국 ──
+    "^GSPC": {
+        "2x":  "KODEX 미국S&P500레버리지(H) (214980) · SSO",
+        "1x":  "TIGER 미국S&P500 (360750) · SPY · VOO",
+        "inv": "KODEX 미국S&P500선물인버스(H) (219480) · SH",
+    },
+    "^IXIC": {
+        "2x":  "TIGER 미국나스닥100레버리지(H) (433580) · QLD",
+        "1x":  "TIGER 미국나스닥100 (133690) · QQQ",
+        "inv": "KODEX 미국나스닥100선물인버스(H) (314250) · PSQ",
+    },
+    "^DJI": {
+        "2x":  "DDM (ProShares Ultra Dow30)",
+        "1x":  "DIA (SPDR Dow Jones ETF)",
+        "inv": "DOG (ProShares Short Dow30)",
+    },
+    # ── 일본 ──
+    "^N225": {
+        "1x":   "TIGER 일본니케이225 (241180) · EWJ",
+        "exit": "현금 보유",
+    },
+    # ── 홍콩 ──
+    "^HSI": {
+        "1x":   "TIGER 차이나항셍테크 (371460) · EWH",
+        "exit": "현금 보유",
+    },
+    # ── 유럽 ──
+    "^GDAXI": {
+        "1x":   "EWG (iShares Germany) · VGK (Vanguard Europe)",
+        "exit": "현금 보유",
+    },
+    "^FCHI": {
+        "1x":   "EWQ (iShares France) · VGK",
+        "exit": "현금 보유",
+    },
+    "^FTSE": {
+        "1x":   "EWU (iShares UK)",
+        "exit": "현금 보유",
+    },
+    "^STOXX50E": {
+        "1x":   "TIGER 유럽STOXX50(H) (195930) · VGK · EZU",
+        "exit": "현금 보유",
+    },
+    "^SSMI": {
+        "1x":   "EWL (iShares Switzerland)",
+        "exit": "현금 보유",
+    },
+    "^IBEX": {
+        "1x":   "EWP (iShares Spain) · VGK",
+        "exit": "현금 보유",
+    },
+    "FTSEMIB.MI": {
+        "1x":   "EWI (iShares Italy) · VGK",
+        "exit": "현금 보유",
+    },
+    "^AEX": {
+        "1x":   "EWN (iShares Netherlands) · VGK",
+        "exit": "현금 보유",
+    },
+    "^OMXSPI": {
+        "1x":   "EWD (iShares Sweden) · VGK",
+        "exit": "현금 보유",
+    },
+    "^OSEBX": {
+        "1x":   "NORW (Global X Norway)",
+        "exit": "현금 보유",
+    },
+    "^ATX": {
+        "1x":   "EWO (iShares Austria) · VGK",
+        "exit": "현금 보유",
+    },
+    # ── 중국 ──
+    "000001.SS": {
+        "1x":   "TIGER 차이나CSI300 (192090) · FXI · MCHI",
+        "exit": "현금 보유",
+    },
+    "399001.SZ": {
+        "1x":   "TIGER 차이나CSI300 (192090) · MCHI",
+        "exit": "현금 보유",
+    },
+    # ── 인도 ──
+    "^NSEI": {
+        "2x":  "INDL (Direxion India Bull 2x)",
+        "1x":  "TIGER 인도니프티50 (437080) · INDA · EPI",
+        "inv": "현금 보유",
+    },
+    "^BSESN": {
+        "2x":  "INDL (Direxion India Bull 2x)",
+        "1x":  "TIGER 인도니프티50 (437080) · EPI",
+        "inv": "현금 보유",
+    },
+    # ── 대만 ──
+    "^TWII": {
+        "2x":  "현지 00631L (Yuanta 2x) · FTXS",
+        "1x":  "EWT (iShares Taiwan) · CQQQ",
+        "inv": "현금 보유",
+    },
+    # ── 호주·뉴질랜드 ──
+    "^AXJO": {
+        "1x":   "EWA (iShares Australia)",
+        "exit": "현금 보유",
+    },
+    "^NZ50": {
+        "1x":   "ENZL (iShares New Zealand)",
+        "exit": "현금 보유",
+    },
+    # ── 신흥국 ──
+    "^BVSP": {
+        "1x":   "EWZ (iShares Brazil)",
+        "exit": "현금 보유",
+    },
+    "^JKSE": {
+        "1x":   "EIDO (iShares Indonesia)",
+        "exit": "현금 보유",
+    },
+    "^KLSE": {
+        "1x":   "EWM (iShares Malaysia)",
+        "exit": "현금 보유",
+    },
+    "^MXX": {
+        "1x":   "EWW (iShares Mexico)",
+        "exit": "현금 보유",
+    },
+    "^STI": {
+        "1x":   "EWS (iShares Singapore)",
+        "exit": "현금 보유",
+    },
+    "^WIG20": {
+        "1x":   "EPOL (iShares Poland)",
+        "exit": "현금 보유",
+    },
+    "XU100.IS": {
+        "1x":   "TUR (iShares Turkey)",
+        "exit": "현금 보유",
+    },
+    "^J203.JO": {
+        "1x":   "EZA (iShares South Africa)",
+        "exit": "현금 보유",
+    },
+    "^SET.BK": {
+        "1x":   "THD (iShares Thailand)",
+        "exit": "현금 보유",
+    },
+    "PSEi.PS": {
+        "1x":   "EPHE (iShares Philippines)",
+        "exit": "현금 보유",
+    },
+    "^MERV": {
+        "1x":   "ARGT (Global X Argentina)",
+        "exit": "현금 보유",
+    },
+    # ── 중동 ──
+    "^TA125.TA": {
+        "1x":   "EIS (iShares Israel)",
+        "exit": "현금 보유",
+    },
+    "^TASI.SR": {
+        "1x":   "KSA (iShares Saudi Arabia)",
+        "exit": "현금 보유",
+    },
+    # ── 크립토 ──
+    "BTC-USD": {
+        "1x":   "TIGER 비트코인선물ETF(H) · 현물 직접 보유",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "ETH-USD": {
+        "1x":   "ETHE (Grayscale) · 현물 직접 보유",
+        "exit": "USDT 스테이블코인 전환",
+    },
 }
 
 
@@ -1288,6 +1554,7 @@ def analyze_market(ticker, market_info, df):
         "low_1y": float(df['Low'].min()),
         "from_high_pct": round((result['price'] - float(df['High'].max())) / float(df['High'].max()) * 100, 1),
         "price_history": _build_price_history(df, n=20),
+        "etf": MARKET_ETF.get(ticker, {}),
     })
     return result
 

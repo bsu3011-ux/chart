@@ -1290,14 +1290,23 @@ def analyze_minervini(df, params):
     ma_exit = _ms - _atr * p['exit_buffer_atr']
     hard_stop = current * (1 - p['hard_stop_pct'])
     stoploss = max(trailing_stop, ma_exit, hard_stop)
-    target = current + _atr * (3.0 if is_stage2 else 2.0)
+
+    # ATR 배수 기반 목표: stage2=3x, 일반=2x ATR
+    atr_mult = 3.0 if is_stage2 else 2.0
+    target_atr = current + _atr * atr_mult
 
     risk = current - stoploss
-    reward = target - current
+    reward = target_atr - current
     rr = reward / risk if risk > 0 else 0
+
+    # R:R이 2.0 미만이면 목표를 ATR 배수로 늘리되, 최대 5x ATR까지만 허용
     if rr < 2.0 and risk > 0:
-        target = current + risk * 2.0
-        rr = 2.0
+        target_atr = current + risk * 2.0
+        # 단, ATR×5 상한으로 비현실적인 목표 방지
+        target_atr = min(target_atr, current + _atr * 5.0)
+        rr = (target_atr - current) / risk
+
+    target = target_atr
 
     if is_stage2:
         signal = "🟢 매수 (Stage2)"
@@ -1387,25 +1396,36 @@ def analyze_leverage(df, params, profile=None):
     if cross_signal == "dead":   confidence -= 15
     confidence = max(0, min(100, confidence))
 
-    # ── 레버리지 결정 (3단계: 2x / 1x / 0x) ──
-    # 2x 조건 강화: 추세강도 + 모멘텀 정렬
-    if (current > _ma_m > _ma_l and slope_mid > 0 and _rsi > 50
-        and trend_strong and trend_up and not vol_spike):
-        lev = 2.0
-        signal = "🟢 2x 레버리지 (강한 상승추세)"
-        signal_type = "LEVERAGE_2X"
-    elif current > _ma_l and not vol_spike:
-        lev = 1.0
-        signal = "🔵 1x 원물 보유"
-        signal_type = "HOLD_1X"
-    elif vol_spike and current < _ma_m:
-        lev = 0.0
-        signal = "🔴 현금 (변동성 급등)"
-        signal_type = "CASH_VOL"
-    elif current < _ma_l:
+    # ── 레버리지 결정 (점수제: 6개 조건 → 2x/1x/0x) ──
+    # 6개 조건에 가중치를 부여하여 AND 경직성 해소
+    score_2x = 0
+    if current > _ma_m > _ma_l: score_2x += 2  # 핵심 추세 정렬 (가중치 2)
+    if slope_mid > 0:            score_2x += 1  # MA중기 상승기울기
+    if _rsi > 50:                score_2x += 1  # RSI 중립 이상
+    if trend_strong:             score_2x += 1  # ADX 추세강도 확인
+    if trend_up:                 score_2x += 1  # +DI > -DI (방향 확인)
+    # 최대 점수: 6점
+
+    if current < _ma_l:
+        # 장기 MA 하단 = 무조건 현금 (하락장)
         lev = 0.0
         signal = "🔴 현금 전환 (장기추세 이탈)"
         signal_type = "CASH"
+    elif vol_spike and current < _ma_m:
+        # 변동성 급등 + 중기선 하단 = 현금
+        lev = 0.0
+        signal = "🔴 현금 (변동성 급등)"
+        signal_type = "CASH_VOL"
+    elif score_2x >= 5 and not vol_spike:
+        # 5~6점: 2x 레버리지 (강한 상승추세)
+        lev = 2.0
+        signal = "🟢 2x 레버리지 (강한 상승추세)"
+        signal_type = "LEVERAGE_2X"
+    elif score_2x >= 3 or (current > _ma_l and not vol_spike):
+        # 3~4점 or 장기선 위: 1x 보유
+        lev = 1.0
+        signal = "🔵 1x 원물 보유"
+        signal_type = "HOLD_1X"
     else:
         lev = 1.0
         signal = "⚪ 1x 원물"
@@ -1422,6 +1442,7 @@ def analyze_leverage(df, params, profile=None):
         "vol_spike": vol_spike,
         "cross_signal": cross_signal,
         "confidence": confidence,
+        "score_2x": score_2x,
         "strategy_name": "레버리지 스위칭 v2",
         "strategy_label": f"2x/1x/0x · MA{ma_m}/{ma_l} · ADX{_adx:.0f}",
     }
@@ -1470,21 +1491,40 @@ def analyze_dual_filter(df, params, profile=None):
         signal_type = "STRONG_BUY"
         action = "강력 매수"
         confidence = 85
-    elif pos_count >= 2:
-        signal = "🟢 투자 유지 (양호한 모멘텀)"
+    elif pos_count == 3 and (trend_strong or trend_up):
+        # 3모멘텀 but ADX or 방향 하나만 확정 → 일반 매수
+        signal = "🟢 매수 (3모멘텀·추세 부분확정)"
+        signal_type = "BUY"
+        action = "매수"
+        confidence = 72
+    elif pos_count == 2 and trend_strong and trend_up:
+        # 2모멘텀 + 추세 확정 → 투자 유지
+        signal = "🟢 투자 유지 (2모멘텀+추세확정)"
         signal_type = "INVESTED"
         action = "투자 유지"
         confidence = 65
+    elif pos_count == 2:
+        # 2모멘텀 but 추세 미확정 → 소극적 관망
+        signal = "⚪ 관망 (2모멘텀·추세 미확정)"
+        signal_type = "NEUTRAL"
+        action = "관망"
+        confidence = 48
     elif rsi_extreme_low and pos_count == 0:
         signal = "🟡 반등 대기 (과매도 극단)"
         signal_type = "CAUTION"
         action = "분할 매수 검토"
         confidence = 55
+    elif neg_count == 3 and trend_strong and not trend_up:
+        # 전구간 음모멘텀 + 하락추세 확인 → 강한 현금
+        signal = "🔴 현금 (전 구간 음모멘텀+하락추세)"
+        signal_type = "CASH"
+        action = "현금 전환"
+        confidence = 80
     elif neg_count == 3:
         signal = "🔴 현금 (전 구간 음모멘텀)"
         signal_type = "CASH"
         action = "현금 전환"
-        confidence = 75
+        confidence = 70
     elif rsi_extreme_high and trend_strong and not trend_up:
         signal = "🔴 매도 (과열+하락추세)"
         signal_type = "SELL"
@@ -1804,8 +1844,12 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
     elif rsi >= 70:              score -= 5   # 과매수 경계
     elif rsi <= 30:              score += 5   # 과매도 반등 가능
     else:                        score -= 5
-    if macd_hist > 0:            score += 8
-    else:                        score -= 8
+    # MACD 히스토그램: 크기 비례 점수 (최대 ±12점)
+    if macd_hist != 0:
+        # 가격 대비 히스토그램 비율로 정규화 (0.5% 기준 ±8점, 최대 ±12점)
+        _macd_norm = (macd_hist / price) * 100 if price else 0
+        _macd_pts = max(-12, min(12, _macd_norm / 0.5 * 8))
+        score += int(_macd_pts)
 
     # 단기 추세 (15점)
     if price > ma20:             score += 8

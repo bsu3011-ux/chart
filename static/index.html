@@ -2022,31 +2022,45 @@ function BottomTabBar({tab,setTab}){
 function MarketTab({markets,onChart,data,fetchSignals,runAnalysis,loading,apiConnected,clock}){
   const [openMap,setOpenMap]=useState({"^KS11":true});
   const [sigFilter,setSigFilter]=useState("all");
+  const [openSec,setOpenSec]=useState({lev:true,dual:true,risk:false,crypto:true});
   const [searchResult,setSearchResult]=useState(null);
 
   const toggle=(t)=>setOpenMap(p=>({...p,[t]:!p[t]}));
+  const toggleSec=(k)=>setOpenSec(p=>({...p,[k]:!p[k]}));
 
-  const cats=useMemo(()=>({
-    "🪙 크립토":      markets.filter(m=>m.ticker?.includes("USD")),
-    "🇰🇷 한국":       markets.filter(m=>m.ticker?.includes("KS")||m.ticker?.includes("KQ")),
-    "🇺🇸 미국":       markets.filter(m=>["^GSPC","^IXIC","^DJI"].includes(m.ticker)),
-    "🌏 일본/홍콩":   markets.filter(m=>["^N225","^HSI"].includes(m.ticker)),
-    "🇨🇳 중국/대만":  markets.filter(m=>m.ticker?.includes(".SS")||m.ticker?.includes(".SZ")||["^TWII"].includes(m.ticker)),
-    "🇮🇳 인도":       markets.filter(m=>["^NSEI","^BSESN"].includes(m.ticker)),
-    "🌏 동남아":      markets.filter(m=>["^STI","^JKSE","^KLSE"].includes(m.ticker)),
-    "🇪🇺 유럽":       markets.filter(m=>["^GDAXI","^FTSE","^FCHI","^STOXX50E","^SSMI"].includes(m.ticker)),
-    "🌎 아메리카":    markets.filter(m=>["^AXJO","^BVSP","^MXX","^NZ50"].includes(m.ticker)),
-    "🌍 중동/기타":   markets.filter(m=>["^TA125.TA","^TASI.SR"].includes(m.ticker)),
-    "📊 변동성":      markets.filter(m=>m.ticker==="^VIX"),
-  }),[markets]);
+  const STRAT_GROUPS=useMemo(()=>[
+    {
+      key:"lev", color:C.green,
+      label:"⚡ 레버리지 스위칭",
+      desc:"MA200 추세 + ADX 강도로 2x ETF → 1x 원물 → 현금 자동 전환. 트렌딩 시장·유동성 충분한 2x 상품 보유 시장.",
+      note:"🇰🇷한국 · 🇺🇸미국 · 🇯🇵일본 · 🇭🇰홍콩 · 🇨🇳중국 · 🇮🇳인도 · 🇹🇼대만 · 🇩🇪DAX · 🇪🇺STOXX · 🇦🇺호주 · 🇧🇷브라질 · ₿BTC",
+      ms: markets.filter(m=>m.strategy==="leverage"),
+    },
+    {
+      key:"dual", color:"#a855f7",
+      label:"📊 이중 모멘텀 필터",
+      desc:"3개월·10개월 모멘텀 동시 양전환 시 진입. 레버리지 ETF가 없거나 정치·환율 변수가 큰 신흥국 시장.",
+      note:"🇸🇬싱가포르 · 🇮🇩인도네시아 · 🇲🇾말레이시아 · 🇲🇽멕시코 · 🇵🇱폴란드 · 🇹🇷터키 · 🇿🇦남아공 · 🇹🇭태국 · 🇵🇭필리핀 · 🇦🇷아르헨티나",
+      ms: markets.filter(m=>m.strategy==="dual_filter"),
+    },
+    {
+      key:"risk", color:C.yellow,
+      label:"🛡️ 위기방어형",
+      desc:"MA·RSI·변동성 종합 위험스코어(0~100). 낮은 성장·고배당·방어적 유럽 시장. 2x ETF 유동성 부족.",
+      note:"🇬🇧영국 · 🇫🇷프랑스 · 🇨🇭스위스 · 🇪🇸스페인 · 🇮🇹이탈리아 · 🇳🇱네덜란드 · 🇸🇪스웨덴 · 🇳🇴노르웨이 · 🇦🇹오스트리아 · 🇳🇿뉴질랜드 · 🇮🇱이스라엘 · 🇸🇦사우디",
+      ms: markets.filter(m=>m.strategy==="risk_defense"),
+    },
+    {
+      key:"crypto", color:C.cyan,
+      label:"Ξ 크립토 추세추종",
+      desc:"미너비니 MA10/21 돌파 + ATR 트레일링 스탑. 24h 고변동성 특성에 최적화된 타이트 추세추종.",
+      note:"Ξ ETH",
+      ms: markets.filter(m=>m.strategy==="minervini"),
+    },
+  ],[markets]);
 
   const buys=markets.filter(m=>["BUY","LEVERAGE_2X","INVESTED","STRONG_BUY"].includes(m.signal_type)).length;
   const sells=markets.filter(m=>["SELL","CASH","CASH_VOL","STRONG_SELL"].includes(m.signal_type)).length;
-
-  const filtered=sigFilter==="all"?markets
-    :sigFilter==="buy"?markets.filter(m=>["BUY","LEVERAGE_2X","INVESTED","STRONG_BUY"].includes(m.signal_type))
-    :sigFilter==="sell"?markets.filter(m=>["SELL","CASH","CASH_VOL","STRONG_SELL"].includes(m.signal_type))
-    :markets.filter(m=>["HOLD_1X","NEUTRAL","CAUTION"].includes(m.signal_type));
 
   return(
     <div className="tab-content">
@@ -2150,45 +2164,42 @@ function MarketTab({markets,onChart,data,fetchSignals,runAnalysis,loading,apiCon
         ))}
       </div>
 
-      {/* 카테고리별 카드 (데스크탑: 2열 그리드) */}
-      {sigFilter==="all"
-        ?Object.entries(cats).map(([cat,ms])=>ms.length===0?null:(
-          <div key={cat} style={{marginBottom:14}}>
-            <div style={{color:C.dim,fontSize:11,fontWeight:700,letterSpacing:"0.04em",
-              marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
-              {cat}
-              <span style={{color:C.muted,fontSize:9}}>({ms.length})</span>
+      {/* 전략별 섹션 */}
+      {STRAT_GROUPS.map(({key,label,desc,note,color,ms})=>{
+        const vis=sigFilter==="all"?ms
+          :sigFilter==="buy"?ms.filter(m=>["BUY","LEVERAGE_2X","INVESTED","STRONG_BUY"].includes(m.signal_type))
+          :sigFilter==="sell"?ms.filter(m=>["SELL","CASH","CASH_VOL","STRONG_SELL"].includes(m.signal_type))
+          :ms.filter(m=>["HOLD_1X","NEUTRAL","CAUTION"].includes(m.signal_type));
+        if(vis.length===0) return null;
+        const gb=vis.filter(m=>["BUY","LEVERAGE_2X","INVESTED","STRONG_BUY"].includes(m.signal_type)).length;
+        const gs=vis.filter(m=>["SELL","CASH","CASH_VOL","STRONG_SELL"].includes(m.signal_type)).length;
+        const isOpen=openSec[key];
+        return(
+          <div key={key} style={{marginBottom:16}}>
+            <div onClick={()=>toggleSec(key)} style={{
+              padding:"11px 14px",borderRadius:12,cursor:"pointer",
+              background:`${color}09`,border:`1px solid ${color}28`,
+              borderLeft:`3px solid ${color}`,marginBottom:isOpen?8:0,
+              transition:"margin .2s"}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                <span style={{color,fontSize:12,fontWeight:800}}>{label}</span>
+                <span style={{color:C.muted,fontSize:9}}>({vis.length})</span>
+                <span style={{marginLeft:2,color:C.green,fontSize:9,fontWeight:700}}>🟢{gb}</span>
+                <span style={{color:C.red,fontSize:9,fontWeight:700}}>🔴{gs}</span>
+                <span style={{marginLeft:"auto",color:C.muted,fontSize:11}}>{isOpen?"▲":"▼"}</span>
+              </div>
+              <div style={{color:C.muted,fontSize:9,lineHeight:1.5}}>{desc}</div>
+              {isOpen&&<div style={{color:`${color}99`,fontSize:8,marginTop:4,lineHeight:1.6}}>{note}</div>}
             </div>
-            <div className="desktop-grid">
-              {ms.map(m=><Card key={m.ticker} m={m} open={!!openMap[m.ticker]}
-                onToggle={()=>toggle(m.ticker)} onChart={onChart}/>)}
-            </div>
+            {isOpen&&(
+              <div className="desktop-grid">
+                {vis.map(m=><Card key={m.ticker} m={m} open={!!openMap[m.ticker]}
+                  onToggle={()=>toggle(m.ticker)} onChart={onChart}/>)}
+              </div>
+            )}
           </div>
-        ))
-        :<div className="desktop-grid">
-          {filtered.map(m=><Card key={m.ticker} m={m} open={!!openMap[m.ticker]}
-            onToggle={()=>toggle(m.ticker)} onChart={onChart}/>)}
-        </div>
-      }
-
-      {/* 전략 가이드 */}
-      <div style={{marginTop:16,padding:"14px",borderRadius:12,background:C.surface,border:`1px solid ${C.border}`}}>
-        <div style={{color:C.dim,fontSize:11,fontWeight:700,marginBottom:10}}>📚 전략 가이드</div>
-        {[
-          {s:"minervini",c:C.cyan,  t:"미너비니 추세추종",d:"MA10/21 돌파+ATR 트레일링. BTC/ETH"},
-          {s:"leverage", c:C.green, t:"레버리지 스위칭",  d:"MA50/200 기반 2x→1x→현금. 한국·미국·인도"},
-          {s:"dual_filter",c:C.purple,t:"이중필터 모멘텀",d:"3m+10m 모멘텀 둘 다 음수 → 현금. 아시아·중국"},
-          {s:"risk_defense",c:C.yellow,t:"위기방어형",    d:"MA/RSI/변동성 위험스코어 0~100. 유럽·호주"},
-        ].map(({s,c,t,d})=>(
-          <div key={s} style={{display:"flex",gap:10,marginBottom:7}}>
-            <div style={{width:3,borderRadius:2,background:c,minHeight:34,flexShrink:0,marginTop:2}}/>
-            <div>
-              <div style={{color:c,fontSize:11,fontWeight:700}}>{t}</div>
-              <div style={{color:C.muted,fontSize:10,marginTop:1,lineHeight:1.5}}>{d}</div>
-            </div>
-          </div>
-        ))}
-      </div>
+        );
+      })}
 
       {/* 푸터 */}
       <div style={{marginTop:16,padding:"12px 14px",borderRadius:12,

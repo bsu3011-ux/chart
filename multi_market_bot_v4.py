@@ -38,10 +38,10 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 시장 정의 + 시장별 최적 전략 매핑
 # ════════════════════════════════════════════════════════════════
 MARKETS = {
-    # ── BTC 현물: 위기방어형 (5년 실데이터 +112%, MDD -38%, 승률80%, PF 4.3) ──
+    # ── BTC 현물: 레버리지 스위칭 (BITX 2x, MSTR 등) ──
     "BTC-USD": {
         "name": "비트코인", "symbol": "BTC", "flag": "₿",
-        "strategy": "risk_defense",
+        "strategy": "leverage",
         "params": {"check_interval":5, "is_crypto":True},
         "period": "1y",
     },
@@ -1147,8 +1147,9 @@ MARKET_ETF = {
     },
     # ── 크립토 ──
     "BTC-USD": {
-        "1x":   "TIGER 비트코인선물ETF(H) · 현물 직접 보유",
-        "exit": "USDT 스테이블코인 전환",
+        "2x":  "BITX (ProShares Ultra Bitcoin 2x) · MSTU",
+        "1x":  "IBIT (BlackRock BTC Spot) · FBTC · 현물 직접 보유",
+        "inv": "SBIT (ProShares Short Bitcoin) · USDT 전환",
     },
     "ETH-USD": {
         "1x":   "ETHE (Grayscale) · 현물 직접 보유",

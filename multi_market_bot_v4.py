@@ -2333,7 +2333,14 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
     in_pos   = False
     stop_p   = 0.0
     target_p = 0.0
+    entry_eq = 0.0   # 진입 시점 equity
     FEE      = 0.0015   # 편도 수수료·세금
+
+    trade_count = 0
+    win_count   = 0
+    loss_count  = 0
+    win_pnl     = []   # 수익 거래별 % (소수)
+    loss_pnl    = []   # 손실 거래별 % (소수)
 
     for i in range(210, n):
         c      = float(close.iloc[i])
@@ -2352,23 +2359,27 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
 
         if in_pos:
             if c_lo <= stop_p:
-                # 손절: 당일 저가가 손절가 이하 → 손절가에 청산
                 pr = (stop_p / c_prev - 1) - FEE
                 in_pos = False
+                trade_return = equity * (1 + pr) / entry_eq - 1
+                if trade_return >= 0: win_count += 1; win_pnl.append(trade_return)
+                else:                 loss_count += 1; loss_pnl.append(trade_return)
             elif c_hi >= target_p:
-                # 목표 달성: 당일 고가가 T2 이상 → 목표가에 청산
                 pr = (target_p / c_prev - 1) - FEE
                 in_pos = False
+                trade_return = equity * (1 + pr) / entry_eq - 1
+                if trade_return >= 0: win_count += 1; win_pnl.append(trade_return)
+                else:                 loss_count += 1; loss_pnl.append(trade_return)
             elif sig in ("SELL", "STRONG_SELL"):
-                # 매도 시그널: 종가 청산
                 pr = dr - FEE
                 in_pos = False
+                trade_return = equity * (1 + pr) / entry_eq - 1
+                if trade_return >= 0: win_count += 1; win_pnl.append(trade_return)
+                else:                 loss_count += 1; loss_pnl.append(trade_return)
             else:
-                # 보유 유지: mark-to-market
                 pr = dr
         else:
             if sig in ("BUY", "STRONG_BUY"):
-                # 신규 진입: 종가 매수, stop/target 설정
                 atr  = float(atr_s.iloc[i])   if not pd.isna(atr_s.iloc[i])   else c * 0.02
                 l10  = float(low10_s.iloc[i])  if not pd.isna(low10_s.iloc[i])  else c * 0.97
                 l20  = float(low20_s.iloc[i])  if not pd.isna(low20_s.iloc[i])  else c * 0.95
@@ -2379,7 +2390,9 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
                     in_pos   = True
                     stop_p   = tgts["stop"]
                     target_p = tgts["t2"]
-                    pr = -FEE   # 진입 수수료만 당일 반영
+                    entry_eq = equity
+                    trade_count += 1
+                    pr = -FEE
 
         equity  *= (1 + pr)
         peak_eq  = max(peak_eq, equity)
@@ -2394,6 +2407,11 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
     arr     = np.array(active)
     sharpe  = float(arr.mean() / arr.std() * np.sqrt(252)) if len(arr) > 10 and arr.std() > 0 else 0
 
+    closed_trades = win_count + loss_count
+    win_rate = round(win_count / closed_trades * 100, 1) if closed_trades > 0 else 0
+    avg_win  = round(float(np.mean(win_pnl))  * 100, 2) if win_pnl  else 0
+    avg_loss = round(float(np.mean(loss_pnl)) * 100, 2) if loss_pnl else 0
+
     yearly = {}
     try:
         today_yr = _dt.date.today().year
@@ -2407,14 +2425,19 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
         pass
 
     return {
-        "cagr":         round(cagr    * 100, 1),
-        "mdd":          round(mdd     * 100, 1),
-        "sharpe":       round(sharpe,  2),
-        "years":        round(years,   1),
-        "final_equity": round(equity,  1),
-        "cagr_bh":      round(cagr_bh * 100, 1),
-        "mdd_bh":       round(mdd_bh  * 100, 1),
-        "yearly":       yearly,
+        "cagr":          round(cagr    * 100, 1),
+        "mdd":           round(mdd     * 100, 1),
+        "sharpe":        round(sharpe,  2),
+        "years":         round(years,   1),
+        "final_equity":  round(equity,  1),
+        "cagr_bh":       round(cagr_bh * 100, 1),
+        "mdd_bh":        round(mdd_bh  * 100, 1),
+        "yearly":        yearly,
+        "trade_count":   trade_count,
+        "closed_trades": closed_trades,
+        "win_rate":      win_rate,
+        "avg_win":       avg_win,
+        "avg_loss":      avg_loss,
     }
 
 

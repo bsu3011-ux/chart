@@ -1642,6 +1642,25 @@ function StockResultCard({data:d,onChart,onClose}){
                     {alpha>0?"+":""}{alpha.toFixed(1)}% 초과수익
                   </span>
                 </div>
+                {btData.closed_trades>0&&(
+                  <div style={{marginTop:6,padding:"5px 8px",borderRadius:6,
+                    background:C.card,border:`1px solid ${C.border}33`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      <span style={{color:C.muted,fontSize:10}}>
+                        {btData.years?.toFixed(0)}년간 <span style={{color:C.text,fontWeight:700}}>{btData.closed_trades}회</span> 진입
+                      </span>
+                      <span style={{color:C.muted,fontSize:10}}>
+                        승률 <span style={{color:btData.win_rate>=50?C.green:C.red,fontWeight:700}}>{btData.win_rate}%</span>
+                      </span>
+                      {btData.avg_win!==0&&<span style={{color:C.muted,fontSize:10}}>
+                        평균익 <span style={{color:C.green,fontWeight:700}}>+{btData.avg_win}%</span>
+                      </span>}
+                      {btData.avg_loss!==0&&<span style={{color:C.muted,fontSize:10}}>
+                        평균손 <span style={{color:C.red,fontWeight:700}}>{btData.avg_loss}%</span>
+                      </span>}
+                    </div>
+                  </div>
+                )}
                 {btData.yearly&&Object.keys(btData.yearly).length>0&&(
                   <div style={{marginTop:6,display:"flex",gap:4,flexWrap:"wrap"}}>
                     {Object.entries(btData.yearly).sort((a,b)=>b[0]-a[0]).map(([yr,ret])=>(

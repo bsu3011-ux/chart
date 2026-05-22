@@ -1431,6 +1431,14 @@ def analyze_leverage(df, params, profile=None):
         signal = "⚪ 1x 원물"
         signal_type = "HOLD_1X"
 
+    # ── 횡보 변동성 보호: 레버리지 ETF 베타슬리피지 방지 ──
+    # 연환산 변동성 25% 초과 + ADX 추세 미확정 → 2x 강제 다운그레이드
+    ann_vol = _v20 * np.sqrt(252) * 100
+    if lev == 2.0 and ann_vol > 25 and not trend_strong:
+        lev = 1.0
+        signal = "🔵 1x 다운그레이드 (횡보 변동성 과다)"
+        signal_type = "HOLD_1X"
+
     return {
         "signal": signal, "signal_type": signal_type,
         "leverage": lev,
@@ -1440,6 +1448,7 @@ def analyze_leverage(df, params, profile=None):
         "trend_strong": trend_strong, "trend_up": trend_up,
         "stoch_k": round(_stk, 1),
         "vol_spike": vol_spike,
+        "ann_vol": round(ann_vol, 1),
         "cross_signal": cross_signal,
         "confidence": confidence,
         "score_2x": score_2x,
@@ -1686,6 +1695,240 @@ def analyze_market(ticker, market_info, df):
         "etf": MARKET_ETF.get(ticker, {}),
     })
     return result
+
+
+# ════════════════════════════════════════════════════════════════
+# 백테스트 엔진
+# ════════════════════════════════════════════════════════════════
+
+def _bt_positions_leverage(df, params, profile):
+    """레버리지 전략 - 포지션 배열 생성 (0/1/2)"""
+    ma_s, ma_m, ma_l = profile["ma_periods"]
+    vol_mult = profile["vol_regime_mult"]
+    adx_min = profile["trend_strength_min"]
+
+    close = df['Close']
+    n = len(close)
+    ma_mid  = close.rolling(ma_m).mean()
+    ma_long = close.rolling(ma_l).mean()
+    rsi_s   = calc_rsi(close)
+    adx_s, pdi_s, mdi_s = calc_adx(df, period=14)
+    v20_s = close.pct_change().rolling(20).std()
+    v60_s = close.pct_change().rolling(60).std()
+    slope_s = (ma_mid - ma_mid.shift(5)) / ma_mid.shift(5).replace(0, np.nan) * 100
+
+    positions = np.zeros(n)
+    start = max(ma_l + 10, 60)
+    for i in range(start, n):
+        c   = float(close.iloc[i])
+        mm  = float(ma_mid.iloc[i])  if not pd.isna(ma_mid.iloc[i])  else c
+        ml  = float(ma_long.iloc[i]) if not pd.isna(ma_long.iloc[i]) else c
+        rsi = float(rsi_s.iloc[i])   if not pd.isna(rsi_s.iloc[i])   else 50
+        adx = float(adx_s.iloc[i])   if not pd.isna(adx_s.iloc[i])   else 15
+        pdi = float(pdi_s.iloc[i])   if not pd.isna(pdi_s.iloc[i])   else 0
+        mdi = float(mdi_s.iloc[i])   if not pd.isna(mdi_s.iloc[i])   else 0
+        v20 = float(v20_s.iloc[i])   if not pd.isna(v20_s.iloc[i])   else 0.01
+        v60 = float(v60_s.iloc[i])   if not pd.isna(v60_s.iloc[i])   else 0.01
+        sl  = float(slope_s.iloc[i]) if not pd.isna(slope_s.iloc[i]) else 0
+
+        vs = v20 > v60 * vol_mult if v60 > 0 else False
+        ts = adx >= adx_min
+        tu = pdi > mdi
+
+        if c < ml or (vs and c < mm):
+            positions[i] = 0.0
+            continue
+
+        score = 0
+        if c > mm > ml: score += 2
+        if sl > 0: score += 1
+        if rsi > 50: score += 1
+        if ts: score += 1
+        if tu: score += 1
+
+        if score >= 5 and not vs:
+            pos = 2.0
+            ann_vol = v20 * np.sqrt(252) * 100
+            if ann_vol > 25 and not ts:
+                pos = 1.0
+        else:
+            pos = 1.0
+        positions[i] = pos
+    return positions
+
+
+def _bt_positions_dual(df, params, profile):
+    """이중필터 전략 - 포지션 배열 생성 (0/0.5/1)"""
+    w_short, w_mid, w_long = profile["momentum_windows"]
+    adx_min = profile["trend_strength_min"]
+
+    close = df['Close']
+    n = len(close)
+    adx_s, pdi_s, mdi_s = calc_adx(df, period=14)
+
+    positions = np.zeros(n)
+    start = max(w_long + 5, 30)
+    for i in range(start, n):
+        c = float(close.iloc[i])
+        mom_s = (c / float(close.iloc[i - w_short]) - 1) if i >= w_short else 0
+        mom_m = (c / float(close.iloc[i - w_mid])   - 1) if i >= w_mid   else 0
+        mom_l = (c / float(close.iloc[i - w_long])  - 1) if i >= w_long  else 0
+        adx = float(adx_s.iloc[i]) if not pd.isna(adx_s.iloc[i]) else 15
+        pdi = float(pdi_s.iloc[i]) if not pd.isna(pdi_s.iloc[i]) else 0
+        mdi = float(mdi_s.iloc[i]) if not pd.isna(mdi_s.iloc[i]) else 0
+        pos_count = sum(1 for m in (mom_s, mom_m, mom_l) if m > 0)
+        ts = adx >= adx_min
+        tu = pdi > mdi
+        if pos_count == 3 or (pos_count >= 2 and ts and tu):
+            positions[i] = 1.0
+        elif pos_count == 2:
+            positions[i] = 0.5
+    return positions
+
+
+def _bt_positions_minervini(df, params):
+    """미너비니 전략 - 포지션 배열 생성 (0/1)"""
+    close = df['Close']
+    n = len(close)
+    ma_f  = close.rolling(params['ma_fast']).mean()
+    ma_s  = close.rolling(params['ma_slow']).mean()
+    rsi_s = calc_rsi(close)
+    slope_s = (ma_s - ma_s.shift(5)) / ma_s.shift(5).replace(0, np.nan) * 100
+
+    positions = np.zeros(n)
+    start = max(params['ma_slow'] + 10, 30)
+    for i in range(start, n):
+        c   = float(close.iloc[i])
+        mf  = float(ma_f.iloc[i])  if not pd.isna(ma_f.iloc[i])  else c
+        ms  = float(ma_s.iloc[i])  if not pd.isna(ma_s.iloc[i])  else c
+        rsi = float(rsi_s.iloc[i]) if not pd.isna(rsi_s.iloc[i]) else 50
+        sl  = float(slope_s.iloc[i]) if not pd.isna(slope_s.iloc[i]) else 0
+        if c > mf > ms and sl > 0 and rsi >= params['entry_rsi']:
+            positions[i] = 1.0
+    return positions
+
+
+def _bt_positions_risk(df, params, profile):
+    """위기방어형 전략 - 포지션 배열 생성 (0/1)"""
+    ma_s, ma_m, ma_l = profile["ma_periods"]
+    vol_mult = profile["vol_regime_mult"]
+    drop_threshold = profile["vol_drop_threshold"]
+
+    close = df['Close']
+    n = len(close)
+    ma_mid  = close.rolling(ma_m).mean()
+    ma_long = close.rolling(ma_l).mean()
+    rsi_s   = calc_rsi(close)
+    adx_s, pdi_s, mdi_s = calc_adx(df, period=14)
+    v20_s = close.pct_change().rolling(20).std() * np.sqrt(252) * 100
+    v60_s = close.pct_change().rolling(60).std() * np.sqrt(252) * 100
+
+    positions = np.zeros(n)
+    start = max(ma_l + 10, 60)
+    for i in range(start, n):
+        c   = float(close.iloc[i])
+        mm  = float(ma_mid.iloc[i])  if not pd.isna(ma_mid.iloc[i])  else c
+        ml  = float(ma_long.iloc[i]) if not pd.isna(ma_long.iloc[i]) else c
+        rsi = float(rsi_s.iloc[i])   if not pd.isna(rsi_s.iloc[i])   else 50
+        adx = float(adx_s.iloc[i])   if not pd.isna(adx_s.iloc[i])   else 15
+        pdi = float(pdi_s.iloc[i])   if not pd.isna(pdi_s.iloc[i])   else 0
+        mdi = float(mdi_s.iloc[i])   if not pd.isna(mdi_s.iloc[i])   else 0
+        v20 = float(v20_s.iloc[i])   if not pd.isna(v20_s.iloc[i])   else 20
+        v60 = float(v60_s.iloc[i])   if not pd.isna(v60_s.iloc[i])   else 20
+        r20 = (c / float(close.iloc[i - 20]) - 1) * 100 if i >= 20 else 0
+
+        risk = 0
+        if c < ml: risk += 25
+        if c < mm: risk += 12
+        if mm < ml: risk += 12
+        if rsi < 40: risk += 8
+        if r20 < drop_threshold: risk += 12
+        if v20 > v60 * vol_mult: risk += 12
+        if adx > 25 and mdi > pdi: risk += 10
+        positions[i] = 0.0 if min(100, risk) >= 50 else 1.0
+    return positions
+
+
+def backtest_strategy(ticker, market_info, period="10y"):
+    """10년 백테스트: CAGR, MDD, Sharpe, Buy&Hold 비교.
+    레버리지 비용(2x=연0.5%, ETF보수=연0.1%) 반영."""
+    import datetime as _dt
+
+    df = load_data(ticker, period=period)
+    if df is None or len(df) < 250:
+        return None
+
+    strategy = market_info["strategy"]
+    params   = market_info["params"]
+    _, profile = get_country_profile(ticker)
+
+    close_arr = df['Close'].values.astype(float)
+    n = len(close_arr)
+
+    try:
+        if strategy == "leverage":
+            pos_arr = _bt_positions_leverage(df, params, profile)
+        elif strategy == "dual_filter":
+            pos_arr = _bt_positions_dual(df, params, profile)
+        elif strategy == "minervini":
+            pos_arr = _bt_positions_minervini(df, params)
+        elif strategy == "risk_defense":
+            pos_arr = _bt_positions_risk(df, params, profile)
+        else:
+            pos_arr = np.ones(n)
+    except Exception as e:
+        print(f"  ⚠️ backtest {ticker}: {e}")
+        return None
+
+    daily_ret = np.zeros(n)
+    daily_ret[1:] = np.diff(close_arr) / close_arr[:-1]
+
+    equity = 100.0; bnh = 100.0
+    peak_eq = 100.0; peak_bh = 100.0
+    mdd = 0.0; mdd_bh = 0.0
+    eq_curve = [100.0]
+    ret_list = []
+
+    for i in range(1, n):
+        r   = float(daily_ret[i])
+        pos = float(pos_arr[i - 1])
+        cost = (pos * 0.005 + (0.001 if pos > 0 else 0)) / 252
+        pr = r * pos - cost
+        equity *= (1 + pr); bnh *= (1 + r)
+        peak_eq = max(peak_eq, equity); peak_bh = max(peak_bh, bnh)
+        mdd    = max(mdd,    (peak_eq - equity) / peak_eq)
+        mdd_bh = max(mdd_bh, (peak_bh - bnh)   / peak_bh)
+        eq_curve.append(equity); ret_list.append(pr)
+
+    years    = n / 252
+    cagr     = float((equity / 100) ** (1 / years) - 1) if years > 0 else 0
+    cagr_bh  = float((bnh   / 100) ** (1 / years) - 1) if years > 0 else 0
+    arr = np.array(ret_list)
+    sharpe = float(arr.mean() / arr.std() * np.sqrt(252)) if len(arr) > 1 and arr.std() > 0 else 0
+
+    # 최근 5개년 연도별 수익률
+    yearly = {}
+    try:
+        today_yr = _dt.date.today().year
+        for yr_back in range(1, min(6, int(years) + 1)):
+            end_i   = max(0, len(eq_curve) - (yr_back - 1) * 252 - 1)
+            start_i = max(0, end_i - 252)
+            if start_i < end_i and eq_curve[start_i] > 0:
+                yr_ret = (eq_curve[end_i] / eq_curve[start_i] - 1) * 100
+                yearly[str(today_yr - yr_back)] = round(yr_ret, 1)
+    except Exception:
+        pass
+
+    return {
+        "cagr":         round(cagr    * 100, 1),
+        "mdd":          round(mdd     * 100, 1),
+        "sharpe":       round(sharpe,  2),
+        "years":        round(years,   1),
+        "final_equity": round(equity,  1),
+        "cagr_bh":      round(cagr_bh * 100, 1),
+        "mdd_bh":       round(mdd_bh  * 100, 1),
+        "yearly":       yearly,
+    }
 
 
 # ════════════════════════════════════════════════════════════════

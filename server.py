@@ -24,9 +24,10 @@ def _clean(obj):
     return obj
 
 # ── 봇 임포트 ──
+import time
 from multi_market_bot_v4 import (
     main as run_bot, MARKETS, load_data, analyze_market, save_json,
-    analyze_stock, POPULAR_STOCKS,
+    analyze_stock, POPULAR_STOCKS, backtest_strategy,
 )
 
 # ── 절대 경로 기준 설정 ──
@@ -36,11 +37,14 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 app = Flask(__name__, static_folder=STATIC_DIR)
 CORS(app)  # 모든 도메인 허용
 
-OUTPUT_DIR          = os.environ.get("OUTPUT_DIR", os.path.join(BASE_DIR, "output"))
-SIGNALS_FILE        = os.path.join(OUTPUT_DIR, "signals_v4.json")
-SIGNAL_HISTORY_FILE = os.path.join(OUTPUT_DIR, "signal_history.json")
+OUTPUT_DIR           = os.environ.get("OUTPUT_DIR", os.path.join(BASE_DIR, "output"))
+SIGNALS_FILE         = os.path.join(OUTPUT_DIR, "signals_v4.json")
+SIGNAL_HISTORY_FILE  = os.path.join(OUTPUT_DIR, "signal_history.json")
+BACKTEST_CACHE_FILE  = os.path.join(OUTPUT_DIR, "backtest_cache.json")
 os.makedirs(OUTPUT_DIR,   exist_ok=True)
 os.makedirs(STATIC_DIR,   exist_ok=True)
+
+_backtest_mem_cache: dict = {}   # { ticker: {ts, data} }
 
 # ── 텔레그램 설정 (환경변수로 주입) ──
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
@@ -671,6 +675,58 @@ def get_sectors():
         "kr_sectors": kr_results,
         "generated_at": datetime.datetime.now().isoformat(),
     })
+
+
+@app.route('/api/backtest')
+def get_backtest():
+    """GET /api/backtest?ticker=^KS11
+    전략 백테스트 결과 (CAGR, MDD, Sharpe, BnH 비교).
+    7일 파일 캐시 → 메모리 캐시 순으로 서빙."""
+    ticker = request.args.get('ticker', '').strip()
+    if not ticker or ticker not in MARKETS:
+        return jsonify({"error": "잘못된 ticker"}), 400
+
+    now      = time.time()
+    cache_ttl = 7 * 24 * 3600  # 7일
+
+    # 메모리 캐시 확인
+    mem = _backtest_mem_cache.get(ticker)
+    if mem and now - mem["ts"] < cache_ttl:
+        return jsonify(mem["data"])
+
+    # 파일 캐시 확인
+    try:
+        if os.path.exists(BACKTEST_CACHE_FILE):
+            with open(BACKTEST_CACHE_FILE, encoding="utf-8") as f:
+                file_cache = json.load(f)
+            if ticker in file_cache:
+                entry = file_cache[ticker]
+                if now - entry.get("ts", 0) < cache_ttl:
+                    _backtest_mem_cache[ticker] = entry
+                    return jsonify(entry["data"])
+    except Exception:
+        pass
+
+    # 백테스트 실행 (yfinance 10y 다운로드 포함, 5~30초 소요)
+    result = backtest_strategy(ticker, MARKETS[ticker])
+    if result is None:
+        return jsonify({"error": "데이터 부족"}), 404
+
+    entry = {"ts": now, "data": result}
+    _backtest_mem_cache[ticker] = entry
+
+    try:
+        file_cache = {}
+        if os.path.exists(BACKTEST_CACHE_FILE):
+            with open(BACKTEST_CACHE_FILE, encoding="utf-8") as f:
+                file_cache = json.load(f)
+        file_cache[ticker] = entry
+        with open(BACKTEST_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(file_cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+    return jsonify(result)
 
 
 @app.route('/guide')

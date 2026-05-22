@@ -1555,21 +1555,25 @@ function StockResultCard({data:d,onChart,onClose}){
         {d.targets&&(()=>{
           const tgt=d.targets;
           const isLong=tgt.is_long!==false;
-          const stopLbl=isLong?`손절 -${tgt.risk_pct?.toFixed(1)}%`:`손절 +${tgt.risk_pct?.toFixed(1)}%`;
+          // 매수: 손절 아래(-), 목표 위(+) / 매도(숏): 손절 위(+), 목표 아래(-)
+          const stopLbl=isLong?`손절 -${tgt.risk_pct?.toFixed(1)}%`:`손절 ↑${tgt.risk_pct?.toFixed(1)}%`;
           const t1Pct=(tgt.t1_pct??((tgt.t1-d.price)/d.price*100));
           const t2Pct=(tgt.t2_pct??((tgt.t2-d.price)/d.price*100));
-          const fmtPct=v=>`${v>=0?"+":""}${v?.toFixed(1)}%`;
+          const fmtPct=v=>isLong?`${v>=0?"+":""}${v?.toFixed(1)}%`:`↓${Math.abs(v)?.toFixed(1)}%`;
           const bdrColor=isLong?C.green:C.red;
           return(
           <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
             background:`${bdrColor}06`,border:`1px solid ${bdrColor}22`}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:isLong?6:2}}>
               <span style={{color:bdrColor,fontSize:9,fontWeight:700,letterSpacing:"0.05em"}}>
-                🎯 {isLong?"매수 진입":"매도 진입"} 전략
+                🎯 {isLong?"매수 진입":"공매도(숏) 진입"} 전략
               </span>
               <span style={{color:tgt.rr>=3?C.green:tgt.rr>=2?C.cyan:tgt.rr>=1?C.yellow:C.red,
                 fontSize:10,fontWeight:800}}>R:R {tgt.rr}:1</span>
             </div>
+            {!isLong&&<div style={{color:C.muted,fontSize:8,marginBottom:5}}>
+              손절↑ 가격 상승 시 손실차단 · 목표↓ 하락 시 수익실현
+            </div>}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginBottom:6}}>
               <div style={{textAlign:"center",padding:"5px 2px",borderRadius:6,
                 background:`${C.red}10`,border:`1px solid ${C.red}22`}}>

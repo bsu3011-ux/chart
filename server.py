@@ -10,6 +10,25 @@
 """
 
 import os, json, math, asyncio, datetime, threading, urllib.request, hmac, hashlib, subprocess
+
+# ── .env 파일 로드 (python-dotenv 없이 직접 파싱) ──────────────────
+def _load_env(path=None):
+    _path = path or os.path.join(os.path.dirname(__file__), ".env")
+    if not os.path.exists(_path):
+        return
+    with open(_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip(); v = v.strip()
+            if k and k not in os.environ:   # 이미 환경변수로 지정된 값 우선
+                os.environ[k] = v
+
+_load_env()
+# ────────────────────────────────────────────────────────────────────
+
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 

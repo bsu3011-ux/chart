@@ -42,6 +42,83 @@ SIGNALS_FILE         = os.path.join(OUTPUT_DIR, "signals_v4.json")
 SIGNAL_HISTORY_FILE  = os.path.join(OUTPUT_DIR, "signal_history.json")
 BACKTEST_CACHE_FILE  = os.path.join(OUTPUT_DIR, "backtest_cache_v2.json")  # v2: stop/target 전략 반영
 os.makedirs(OUTPUT_DIR,   exist_ok=True)
+
+# ── KRX 전종목 캐시 ──
+KRX_CACHE_FILE = os.path.join(OUTPUT_DIR, "krx_stocks.json")
+_krx_cache: dict = {}   # ticker → {name, market}
+
+def _load_krx_cache():
+    """파일 캐시에서 KRX 전종목 로드"""
+    global _krx_cache
+    if os.path.exists(KRX_CACHE_FILE):
+        try:
+            with open(KRX_CACHE_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            _krx_cache = data.get("stocks", {})
+            return True
+        except Exception:
+            pass
+    return False
+
+def _build_krx_cache():
+    """KRX 전종목 목록 수집 (FinanceDataReader → pykrx 순으로 시도)"""
+    global _krx_cache
+    stocks: dict = {}
+    try:
+        import FinanceDataReader as fdr
+        for market, suffix in (("KOSPI", ".KS"), ("KOSDAQ", ".KQ")):
+            df = fdr.StockListing(market)
+            code_col  = next((c for c in df.columns if c in ("Code","Symbol","Ticker")), None)
+            name_col  = next((c for c in df.columns if c in ("Name","ShortName","CompanyName")), None)
+            if code_col is None or name_col is None:
+                continue
+            for _, row in df.iterrows():
+                code = str(row[code_col]).zfill(6)
+                name = str(row[name_col])
+                stocks[code + suffix] = {"name": name, "market": market, "krx_code": code}
+    except Exception as e1:
+        print(f"[KRX] FDR 실패: {e1} — pykrx 시도")
+        try:
+            from pykrx import stock as krx_stock
+            import datetime as dt
+            today = dt.date.today().strftime("%Y%m%d")
+            for market, suffix in (("KOSPI", ".KS"), ("KOSDAQ", ".KQ")):
+                try:
+                    tickers = krx_stock.get_market_ticker_list(today, market=market)
+                except Exception:
+                    tickers = krx_stock.get_market_ticker_list(
+                        (dt.date.today()-dt.timedelta(days=1)).strftime("%Y%m%d"), market=market)
+                for t in tickers:
+                    name = krx_stock.get_market_ticker_name(t)
+                    stocks[t + suffix] = {"name": name, "market": market, "krx_code": t}
+        except Exception as e2:
+            print(f"[KRX] pykrx도 실패: {e2}")
+
+    if not stocks:
+        print("[KRX] 전종목 캐시 빌드 불가 (네트워크 제한). 6자리 코드 직접 검색은 여전히 작동합니다.")
+        return
+
+    _krx_cache = stocks
+    with open(KRX_CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump({"updated": datetime.datetime.now().isoformat(), "stocks": stocks}, f,
+                  ensure_ascii=False)
+    print(f"[KRX] 전종목 캐시 완료: {len(stocks)}개")
+
+def _init_krx_cache():
+    """서버 시작 시 캐시 로드 (없거나 7일 초과면 백그라운드 갱신)"""
+    loaded = _load_krx_cache()
+    needs_refresh = True
+    if loaded and _krx_cache:
+        try:
+            with open(KRX_CACHE_FILE, encoding="utf-8") as f:
+                meta = json.load(f)
+            updated = datetime.datetime.fromisoformat(meta.get("updated", "2000-01-01"))
+            age_days = (datetime.datetime.now() - updated).days
+            needs_refresh = age_days >= 7
+        except Exception:
+            needs_refresh = True
+    if needs_refresh:
+        threading.Thread(target=_build_krx_cache, daemon=True).start()
 os.makedirs(STATIC_DIR,   exist_ok=True)
 
 _backtest_mem_cache: dict = {}   # { ticker: {ts, data} }
@@ -299,25 +376,74 @@ def get_stock_analysis():
         return jsonify({"error": f"분석 실패: {str(e)}"}), 500
 
 
+def _yf_lookup_kr_code(code6: str):
+    """6자리 KRX 코드 → yfinance로 이름·시장 조회 (.KS 먼저, 실패 시 .KQ)"""
+    import yfinance as yf
+    for suffix, market in ((".KS", "KOSPI"), (".KQ", "KOSDAQ")):
+        ticker = code6 + suffix
+        try:
+            t = yf.Ticker(ticker)
+            info = t.fast_info
+            # fast_info에 last_price가 있으면 유효한 티커
+            price = getattr(info, "last_price", None)
+            if price and price > 0:
+                full_info = t.info
+                name = full_info.get("longName") or full_info.get("shortName") or ticker
+                return {"ticker": ticker, "name": name, "name_en": name,
+                        "sector": market, "flag": "🇰🇷"}
+        except Exception:
+            pass
+    return None
+
+
 @app.route('/api/search_stocks')
 def search_stocks():
-    """인기 주식 검색 (이름/티커 매칭)
+    """주식 검색 — POPULAR_STOCKS + KRX 캐시 + 6자리 코드 실시간 조회
     GET /api/search_stocks?q=삼성
-    GET /api/search_stocks?q=Apple
+    GET /api/search_stocks?q=에스비비
+    GET /api/search_stocks?q=389500
     """
     q = request.args.get('q', '').strip().lower()
     results = []
+    seen = set()
+
+    # 1) POPULAR_STOCKS 우선 검색 (섹터·영문명 포함)
     for ticker, info in POPULAR_STOCKS.items():
         if not q:
             results.append({"ticker": ticker, **info})
+            seen.add(ticker)
         else:
             if (q in ticker.lower()
                     or q in info.get("name", "").lower()
                     or q in info.get("name_en", "").lower()
                     or q in info.get("sector", "").lower()):
                 results.append({"ticker": ticker, **info})
+                seen.add(ticker)
         if len(results) >= 15:
             break
+
+    # 2) KRX 전종목 캐시에서 추가 검색 (미등록 종목 보완)
+    if q and len(results) < 15 and _krx_cache:
+        for ticker, info in _krx_cache.items():
+            if ticker in seen:
+                continue
+            name = info.get("name", "")
+            krx_code = info.get("krx_code", "")
+            if q in ticker.lower() or q in name.lower() or q in krx_code:
+                results.append({
+                    "ticker": ticker, "name": name, "name_en": "",
+                    "sector": info.get("market", ""), "flag": "🇰🇷",
+                })
+                seen.add(ticker)
+            if len(results) >= 15:
+                break
+
+    # 3) 6자리 숫자 코드 직접 입력 → yfinance 실시간 조회
+    if q and len(results) == 0 and q.isdigit() and len(q) == 6:
+        found = _yf_lookup_kr_code(q)
+        if found and found["ticker"] not in seen:
+            results.append(found)
+
     return jsonify({"results": results})
 
 
@@ -840,4 +966,6 @@ if __name__ == '__main__':
     print(f"  텔레그램: {'설정됨' if TELEGRAM_TOKEN else '미설정 (TELEGRAM_TOKEN 환경변수 필요)'}\n")
     # 일일 스케줄러 (KST 08:00, 16:00) — 시작 시 자동 분석은 하지 않음
     threading.Thread(target=_daily_scheduler, daemon=True).start()
+    # KRX 전종목 캐시 초기화 (없거나 7일 초과면 백그라운드 갱신)
+    _init_krx_cache()
     app.run(host='0.0.0.0', port=port, debug=False)

@@ -2174,10 +2174,19 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
     elif candle_pattern in ("약세 장악형", "슈팅스타 (고점 반전)"): score -= 5
 
     score = max(0, min(100, score))
-    if score >= 75: return "STRONG_BUY",  "🟢 강력 매수", score
-    if score >= 60: return "BUY",         "🟢 매수",     score
-    if score <= 25: return "STRONG_SELL", "🔴 강력 매도", score
-    if score <= 40: return "SELL",        "🔴 매도",     score
+
+    # MA200 추세 방향에 따라 임계값 비대칭 조정
+    # - 장기 상승추세(MA200 위): 단기 눌림목에서 SELL 과반응 방지 → 청산 임계 낮춤
+    # - 장기 하락추세(MA200 아래): 반등 함정 진입 방지 → 매수 임계 높임
+    _above_ma200 = bool(ma200 and price > ma200)
+    _buy_thresh  = 60 if _above_ma200 else 65   # 하락추세에서 진입 더 까다롭게
+    _sell_thresh = 32 if _above_ma200 else 40   # 상승추세에서 청산 더 까다롭게
+    _ss_thresh   = 18 if _above_ma200 else 25
+
+    if score >= 75:          return "STRONG_BUY",  "🟢 강력 매수", score
+    if score >= _buy_thresh: return "BUY",         "🟢 매수",     score
+    if score <= _ss_thresh:  return "STRONG_SELL", "🔴 강력 매도", score
+    if score <= _sell_thresh:return "SELL",        "🔴 매도",     score
     return "NEUTRAL", "⚪ 중립", score
 
 def _generate_analysis_text(ticker, price, chg, rsi, macd_hist, bb_pct_b,
@@ -2323,7 +2332,7 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
         vr   = float(volr_s.iloc[i])  if not pd.isna(volr_s.iloc[i])  else 1.0
         s50  = float(sl50_s.iloc[i])  if not pd.isna(sl50_s.iloc[i])  else 0
         sig, _, _ = _generate_signal(c, m20, m50, m200, rsi, mh, bpb, vr, ma50_slope=s50)
-        return sig, m20, m50
+        return sig, m20, m50, m200
 
     equity   = 100.0;  bnh      = 100.0
     peak_eq  = 100.0;  peak_bh  = 100.0
@@ -2354,8 +2363,9 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
         peak_bh = max(peak_bh, bnh)
         mdd_bh  = max(mdd_bh, (peak_bh - bnh) / peak_bh)
 
-        sig, m20, m50 = _sig(i)
+        sig, m20, m50, m200 = _sig(i)
         pr = 0.0  # 당일 포트폴리오 수익률 (현금 = 0)
+        above_ma200 = bool(m200 and c > m200)
 
         if in_pos:
             if c_lo <= stop_p:
@@ -2371,11 +2381,15 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
                 if trade_return >= 0: win_count += 1; win_pnl.append(trade_return)
                 else:                 loss_count += 1; loss_pnl.append(trade_return)
             elif sig in ("SELL", "STRONG_SELL"):
-                pr = dr - FEE
-                in_pos = False
-                trade_return = equity * (1 + pr) / entry_eq - 1
-                if trade_return >= 0: win_count += 1; win_pnl.append(trade_return)
-                else:                 loss_count += 1; loss_pnl.append(trade_return)
+                # MA200 위 + SELL만이면 보유 유지 (장기 상승추세 눌림목 필터)
+                if above_ma200 and sig == "SELL":
+                    pr = dr
+                else:
+                    pr = dr - FEE
+                    in_pos = False
+                    trade_return = equity * (1 + pr) / entry_eq - 1
+                    if trade_return >= 0: win_count += 1; win_pnl.append(trade_return)
+                    else:                 loss_count += 1; loss_pnl.append(trade_return)
             else:
                 pr = dr
         else:

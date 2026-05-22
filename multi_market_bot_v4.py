@@ -653,6 +653,163 @@ POPULAR_STOCKS = {
 
 
 # ════════════════════════════════════════════════════════════════
+# 7종 전략 프리셋 (섹터 기반 자동 분류)
+# ════════════════════════════════════════════════════════════════
+STRATEGY_PRESETS = {
+    # 1) 성장모멘텀: 추세 강한 보유, 손절 넓게, 눌림목 통과
+    "growth_momentum": {
+        "name": "성장모멘텀", "icon": "🚀",
+        "stop_atr": 3.0, "target_mult": 4.5,
+        "buy_thresh_up": 58, "buy_thresh_dn": 70,
+        "sell_thresh_up": 28, "sell_thresh_dn": 38,
+        "ss_thresh_up": 15, "ss_thresh_dn": 22,
+        "macd_w": 1.4, "rsi_w": 0.9, "ma_w": 1.3, "vol_w": 1.0, "bb_w": 0.6,
+        "desc": "넓은 손절·큰 목표·눌림목 보유, MACD/MA200 가중",
+    },
+    # 2) 경기민감: 추세전환 포착, 거래량·골든크로스 가중
+    "cyclical": {
+        "name": "경기민감", "icon": "🔄",
+        "stop_atr": 2.0, "target_mult": 3.5,
+        "buy_thresh_up": 60, "buy_thresh_dn": 68,
+        "sell_thresh_up": 32, "sell_thresh_dn": 40,
+        "ss_thresh_up": 18, "ss_thresh_dn": 25,
+        "macd_w": 1.0, "rsi_w": 1.0, "ma_w": 1.0, "vol_w": 1.5, "bb_w": 0.8,
+        "desc": "거래량 확인·MA50 골든크로스 가중, 중간 손절",
+    },
+    # 3) 방어/평균회귀: 좁은 손절, RSI 극단·BB 가중
+    "defensive": {
+        "name": "방어/평균회귀", "icon": "🛡️",
+        "stop_atr": 1.5, "target_mult": 2.5,
+        "buy_thresh_up": 60, "buy_thresh_dn": 62,
+        "sell_thresh_up": 35, "sell_thresh_dn": 40,
+        "ss_thresh_up": 22, "ss_thresh_dn": 25,
+        "macd_w": 0.7, "rsi_w": 1.6, "ma_w": 0.7, "vol_w": 0.8, "bb_w": 1.5,
+        "desc": "RSI 35/65 극단·BB 가중, 평균회귀 짧은 손절",
+    },
+    # 4) 금융/금리: MA50 추종·장기추세 중심
+    "financial": {
+        "name": "금융/금리", "icon": "🏦",
+        "stop_atr": 2.0, "target_mult": 3.0,
+        "buy_thresh_up": 60, "buy_thresh_dn": 65,
+        "sell_thresh_up": 32, "sell_thresh_dn": 40,
+        "ss_thresh_up": 18, "ss_thresh_dn": 25,
+        "macd_w": 1.0, "rsi_w": 1.0, "ma_w": 1.3, "vol_w": 1.0, "bb_w": 0.8,
+        "desc": "MA50 추종·금리 민감, 중장기 추세 위주",
+    },
+    # 5) 가치/장기: STRONG_SELL에만 청산, 매우 넓은 손절
+    "value": {
+        "name": "가치/장기", "icon": "🏛️",
+        "stop_atr": 4.0, "target_mult": 5.5,
+        "buy_thresh_up": 60, "buy_thresh_dn": 65,
+        "sell_thresh_up": 25, "sell_thresh_dn": 32,
+        "ss_thresh_up": 15, "ss_thresh_dn": 22,
+        "macd_w": 0.7, "rsi_w": 0.8, "ma_w": 1.5, "vol_w": 0.8, "bb_w": 0.6,
+        "desc": "MA200 추종·매우 넓은 손절, STRONG_SELL만 청산",
+    },
+    # 6) REIT/부동산: 좁은 변동성, 금리민감 + 배당
+    "reit": {
+        "name": "REIT/부동산", "icon": "🏢",
+        "stop_atr": 2.0, "target_mult": 3.0,
+        "buy_thresh_up": 60, "buy_thresh_dn": 65,
+        "sell_thresh_up": 32, "sell_thresh_dn": 40,
+        "ss_thresh_up": 18, "ss_thresh_dn": 25,
+        "macd_w": 0.8, "rsi_w": 1.2, "ma_w": 1.2, "vol_w": 0.7, "bb_w": 1.2,
+        "desc": "금리민감·좁은 변동성, BB·RSI 가중",
+    },
+    # 7) 원자재/금: 인플레헤지, 추세·거래량 가중
+    "commodity": {
+        "name": "원자재/금", "icon": "🛢️",
+        "stop_atr": 2.5, "target_mult": 4.0,
+        "buy_thresh_up": 60, "buy_thresh_dn": 65,
+        "sell_thresh_up": 32, "sell_thresh_dn": 40,
+        "ss_thresh_up": 18, "ss_thresh_dn": 25,
+        "macd_w": 1.2, "rsi_w": 1.0, "ma_w": 1.0, "vol_w": 1.3, "bb_w": 0.9,
+        "desc": "인플레헤지·추세·거래량 가중, 중간 손절",
+    },
+    # 기본 (분류 안된 종목)
+    "default": {
+        "name": "기본전략", "icon": "📊",
+        "stop_atr": 2.0, "target_mult": 3.0,
+        "buy_thresh_up": 60, "buy_thresh_dn": 65,
+        "sell_thresh_up": 32, "sell_thresh_dn": 40,
+        "ss_thresh_up": 18, "ss_thresh_dn": 25,
+        "macd_w": 1.0, "rsi_w": 1.0, "ma_w": 1.0, "vol_w": 1.0, "bb_w": 1.0,
+        "desc": "표준 가중치·표준 임계값",
+    },
+}
+
+# 섹터 키워드 → 전략 프리셋 매핑 (부분일치)
+_SECTOR_KEYWORDS = [
+    # 성장모멘텀
+    ("growth_momentum", [
+        "반도체", "Semiconductor", "Software", "소프트웨어", "AI", "Cloud", "SaaS",
+        "바이오", "Biotech", "EV", "배터리", "Internet", "인터넷", "Fintech",
+        "Cybersecurity", "Networking", "Observability", "Servers", "Streaming",
+        "Gaming", "게임", "Crypto", "Mobility", "Travel/Platform", "Delivery",
+        "Music Streaming", "E-Commerce", "Media/Ent", "Social Media",
+        "IT Services", "IT서비스", "IT인프라", "Technology", "Electronics",
+        "AI/Data", "AI/헬스", "AI의료", "OLED장비", "반도체장비", "반도체검사",
+        "반도체소재", "Semiconductor Eq", "Telecom/VC", "레이저", "로봇", "FA/Sensor",
+    ]),
+    # 경기민감
+    ("cyclical", [
+        "철강", "조선", "건설", "화학", "기계", "비철금속", "소재", "해운",
+        "Industrial", "Aerospace", "Defense", "방산", "자동차", "Automotive",
+        "EV/Auto", "자동차부품", "에너지", "Energy", "Apparel", "전기/전선",
+        "전기기기", "전선", "전선/지주", "제약/화학", "FA/디스플레이",
+        "PCB", "PCB/전자", "부품",
+    ]),
+    # 방어/평균회귀
+    ("defensive", [
+        "통신", "유틸리티", "전력", "전력기기", "Pharma", "제약", "Healthcare",
+        "헬스케어", "의료기기", "CMO", "Restaurant", "Retail", "유통",
+        "에너지/유통", "Home Improve", "엔터", "미디어", "바이오/미용",
+        "제약/바이오", "제약/지주",
+    ]),
+    # 금융/금리
+    ("financial", [
+        "금융", "Finance", "Banking", "은행", "보험", "증권", "Asset Mgmt",
+        "Crypto Exchange", "Crypto Payment",
+    ]),
+    # 가치/장기
+    ("value", [
+        "지주회사", "지주", "전자", "Meme Coin",
+    ]),
+    # REIT/부동산
+    ("reit", [
+        "REIT", "Real Estate", "부동산",
+    ]),
+    # 원자재/금
+    ("commodity", [
+        "Commodity ETF", "Gold", "원자재", "금", "Bond ETF",
+    ]),
+]
+
+def classify_sector(sector: str) -> str:
+    """섹터 문자열 → 전략 프리셋 키.
+    부분일치(case-insensitive)로 매칭. 매칭 없으면 'default'."""
+    if not sector:
+        return "default"
+    s = sector.lower()
+    for preset_key, keywords in _SECTOR_KEYWORDS:
+        for kw in keywords:
+            if kw.lower() in s:
+                return preset_key
+    return "default"
+
+def get_strategy_preset(ticker: str = None, sector: str = None) -> dict:
+    """티커 또는 섹터로 전략 프리셋 가져오기.
+    반환: STRATEGY_PRESETS의 dict + 'key' 필드 추가"""
+    if ticker and sector is None:
+        info = POPULAR_STOCKS.get(ticker, {})
+        sector = info.get("sector", "")
+    key = classify_sector(sector or "")
+    preset = dict(STRATEGY_PRESETS.get(key, STRATEGY_PRESETS["default"]))
+    preset["key"] = key
+    return preset
+
+
+# ════════════════════════════════════════════════════════════════
 # 공통 지표
 # ════════════════════════════════════════════════════════════════
 def calc_rsi(c, p=14):
@@ -748,29 +905,23 @@ def detect_candle_pattern(df):
 
 
 def calc_position_targets(price, atr_val, support, resistance, signal_type,
-                           ma20=None, ma50=None, low_10d=None):
-    """손절가·목표가·R:R 계산 (기술적 지지/저항 + ATR 기반)
-
-    손절 우선순위:
-      1) 10일 스윙로우 + ATR×0.2 버퍼
-      2) 20일 지지선 + ATR×0.2 버퍼
-      3) MA20 - ATR×0.3
-      4) MA50 - ATR×0.3
-      5) 폴백: 현재가 - ATR×2
-      → ATR×0.8 ~ ATR×3 범위로 클램핑
-
-    목표 (신호 강도 반응):
-      STRONG_BUY = 3.5R / BUY = 3.0R / 기타 = 2.5R
-      T1 = 1.5R (1차 부분익절)
-      T2 = 메인 목표 (저항선이 1% 이상 위에 있으면 max 반영)
-    """
+                           ma20=None, ma50=None, low_10d=None, preset=None):
+    """손절가·목표가·R:R 계산. preset이 있으면 섹터별 ATR 손절·목표배수 적용."""
     if not atr_val or atr_val <= 0 or price <= 0:
         return None
 
+    P = preset or STRATEGY_PRESETS["default"]
+    stop_atr_max  = P["stop_atr"]            # 손절 최대 ATR배수
+    stop_atr_min  = max(0.8, stop_atr_max * 0.3)
+    target_mult   = P["target_mult"]         # 기본 목표 R 배수
+
     is_long = signal_type in ("STRONG_BUY", "BUY", "LEVERAGE_2X", "HOLD_1X", "INVESTED")
-    # 신호 강도 → 목표 배수
-    mult = {"STRONG_BUY": 3.5, "BUY": 3.0}.get(signal_type, 2.5) if is_long \
-      else {"STRONG_SELL": 3.5, "SELL": 3.0}.get(signal_type, 2.5)
+    # 신호 강도 → 목표 배수 보정 (프리셋 배수 × 강도가중)
+    strength_mult = (
+        {"STRONG_BUY": 1.15, "BUY": 1.0}.get(signal_type, 0.85) if is_long
+        else {"STRONG_SELL": 1.15, "SELL": 1.0}.get(signal_type, 0.85)
+    )
+    mult = target_mult * strength_mult
 
     if is_long:
         # ── 손절 후보 ──
@@ -779,12 +930,11 @@ def calc_position_targets(price, atr_val, support, resistance, signal_type,
         if support  and support  < price: cands.append(support  - atr_val * 0.2)
         if ma20     and ma20     < price: cands.append(ma20     - atr_val * 0.3)
         if ma50     and ma50     < price: cands.append(ma50     - atr_val * 0.3)
-        # ATR×0.8 ~ ATR×3 사이의 후보만 유효
-        valid = [c for c in cands if atr_val * 0.8 < price - c < atr_val * 3.0]
-        stop = max(valid) if valid else price - atr_val * 2.0  # 가장 가까운 유효 지지선
-        # 클램핑
-        stop = max(stop, price - atr_val * 3.0)
-        stop = min(stop, price - atr_val * 0.8)
+        # 프리셋의 ATR 범위 안에서만 유효
+        valid = [c for c in cands if atr_val * stop_atr_min < price - c < atr_val * stop_atr_max]
+        stop = max(valid) if valid else price - atr_val * min(2.0, stop_atr_max * 0.7)
+        stop = max(stop, price - atr_val * stop_atr_max)
+        stop = min(stop, price - atr_val * stop_atr_min)
 
         risk = price - stop
         if risk <= 0: return None
@@ -807,10 +957,10 @@ def calc_position_targets(price, atr_val, support, resistance, signal_type,
         if resistance and resistance > price: cands.append(resistance + atr_val * 0.2)
         if ma20 and ma20 > price: cands.append(ma20 + atr_val * 0.3)
         if ma50 and ma50 > price: cands.append(ma50 + atr_val * 0.3)
-        valid = [c for c in cands if atr_val * 0.8 < c - price < atr_val * 3.0]
-        stop = min(valid) if valid else price + atr_val * 2.0
-        stop = min(stop, price + atr_val * 3.0)
-        stop = max(stop, price + atr_val * 0.8)
+        valid = [c for c in cands if atr_val * stop_atr_min < c - price < atr_val * stop_atr_max]
+        stop = min(valid) if valid else price + atr_val * min(2.0, stop_atr_max * 0.7)
+        stop = min(stop, price + atr_val * stop_atr_max)
+        stop = max(stop, price + atr_val * stop_atr_min)
 
         risk = stop - price
         if risk <= 0: return None
@@ -2124,69 +2274,66 @@ def _slope(series, n=5):
     return (v_now - v_prev) / v_prev * 100 if v_prev != 0 else 0.0
 
 def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
-                       divergence=None, candle_pattern=None, ma50_slope=0):
-    """가중치 기반 신호 생성 (0~100점)
-    - MA200/MA50 추세: 35점 (장기 가장 중요)
-    - 모멘텀 (RSI/MACD): 25점
-    - 단기 추세 (MA20·기울기): 15점
-    - 변동성/거래량 (BB/Vol): 15점
-    - 다이버전스·캔들 보정: ±10점
+                       divergence=None, candle_pattern=None, ma50_slope=0, preset=None):
+    """가중치 기반 신호 생성 (0~100점). preset이 있으면 섹터별 가중치·임계값 적용.
     """
+    P = preset or STRATEGY_PRESETS["default"]
     score = 50  # 중립 시작점
 
-    # 장기 추세 (35점)
-    if ma200 and price > ma200: score += 20
-    elif ma200:                  score -= 20
-    if price > ma50:             score += 10
-    else:                        score -= 10
-    if ma50_slope > 0.5:         score += 5
-    elif ma50_slope < -0.5:      score -= 5
+    # 장기 추세 (MA 가중)
+    ma_w = P["ma_w"]
+    if ma200 and price > ma200: score += int(20 * ma_w)
+    elif ma200:                  score -= int(20 * ma_w)
+    if price > ma50:             score += int(10 * ma_w)
+    else:                        score -= int(10 * ma_w)
+    if ma50_slope > 0.5:         score += int(5 * ma_w)
+    elif ma50_slope < -0.5:      score -= int(5 * ma_w)
 
-    # 모멘텀 (25점)
-    if   50 < rsi < 70:          score += 10
-    elif rsi >= 70:              score -= 5   # 과매수 경계
-    elif rsi <= 30:              score += 5   # 과매도 반등 가능
-    else:                        score -= 5
-    # MACD 히스토그램: 크기 비례 점수 (최대 ±12점)
-    if macd_hist != 0:
-        # 가격 대비 히스토그램 비율로 정규화 (0.5% 기준 ±8점, 최대 ±12점)
-        _macd_norm = (macd_hist / price) * 100 if price else 0
-        _macd_pts = max(-12, min(12, _macd_norm / 0.5 * 8))
+    # 모멘텀 - RSI (가중)
+    rsi_w = P["rsi_w"]
+    if   50 < rsi < 70:          score += int(10 * rsi_w)
+    elif rsi >= 70:              score -= int(5  * rsi_w)
+    elif rsi <= 30:              score += int(5  * rsi_w)   # 과매도 반등 (방어주에서 크게 작용)
+    else:                        score -= int(5  * rsi_w)
+    # MACD 히스토그램 (가중)
+    if macd_hist != 0 and price:
+        _macd_norm = (macd_hist / price) * 100
+        _macd_pts = max(-12, min(12, _macd_norm / 0.5 * 8)) * P["macd_w"]
         score += int(_macd_pts)
 
-    # 단기 추세 (15점)
+    # 단기 추세 (MA20)
     if price > ma20:             score += 8
     else:                        score -= 8
 
-    # 변동성/거래량 (15점)
-    if 0.3 < bb_pct_b < 0.7:     score += 5   # 중심부 = 안정
-    elif bb_pct_b > 0.9:         score -= 3   # 상단 이탈 = 단기 조정 위험
-    elif bb_pct_b < 0.1:         score += 3   # 하단 = 단기 반등 가능
-    if vol_ratio > 1.5:          score += 5   # 거래량 동반 추세
-    elif vol_ratio < 0.7:        score -= 3   # 거래량 위축 = 모멘텀 약화
+    # 볼린저밴드 (가중)
+    bb_w = P["bb_w"]
+    if 0.3 < bb_pct_b < 0.7:     score += int(5 * bb_w)
+    elif bb_pct_b > 0.9:         score -= int(3 * bb_w)
+    elif bb_pct_b < 0.1:         score += int(3 * bb_w)
+    # 거래량 (가중)
+    vol_w = P["vol_w"]
+    if vol_ratio > 1.5:          score += int(5 * vol_w)
+    elif vol_ratio < 0.7:        score -= int(3 * vol_w)
 
     # 다이버전스 보정 (±10점)
     if divergence == "bullish":  score += 10
     elif divergence == "bearish": score -= 10
-
     # 캔들 패턴 보정 (±5점)
     if candle_pattern in ("강세 장악형", "해머 (저점 반전)"):     score += 5
     elif candle_pattern in ("약세 장악형", "슈팅스타 (고점 반전)"): score -= 5
 
     score = max(0, min(100, score))
 
-    # MA200 추세 방향에 따라 임계값 비대칭 조정
-    # - 장기 상승추세(MA200 위): 단기 눌림목에서 SELL 과반응 방지 → 청산 임계 낮춤
-    # - 장기 하락추세(MA200 아래): 반등 함정 진입 방지 → 매수 임계 높임
-    _above_ma200 = bool(ma200 and price > ma200)
-    _buy_thresh  = 60 if _above_ma200 else 65   # 하락추세에서 진입 더 까다롭게
-    _sell_thresh = 32 if _above_ma200 else 40   # 상승추세에서 청산 더 까다롭게
-    _ss_thresh   = 18 if _above_ma200 else 25
+    # MA200 위치에 따라 비대칭 임계값 (프리셋별로 다름)
+    _above = bool(ma200 and price > ma200)
+    _buy_t = P["buy_thresh_up"]  if _above else P["buy_thresh_dn"]
+    _sl_t  = P["sell_thresh_up"] if _above else P["sell_thresh_dn"]
+    _ss_t  = P["ss_thresh_up"]   if _above else P["ss_thresh_dn"]
 
-    if score >= 75:          return "STRONG_BUY",  "🟢 강력 매수", score
-    if score >= _buy_thresh: return "BUY",         "🟢 매수",     score
-    if score <= _ss_thresh:  return "STRONG_SELL", "🔴 강력 매도", score
-    if score <= _sell_thresh:return "SELL",        "🔴 매도",     score
+    if score >= 75:      return "STRONG_BUY",  "🟢 강력 매수", score
+    if score >= _buy_t:  return "BUY",         "🟢 매수",     score
+    if score <= _ss_t:   return "STRONG_SELL", "🔴 강력 매도", score
+    if score <= _sl_t:   return "SELL",        "🔴 매도",     score
     return "NEUTRAL", "⚪ 중립", score
 
 def _generate_analysis_text(ticker, price, chg, rsi, macd_hist, bb_pct_b,
@@ -2278,16 +2425,12 @@ def _build_price_history(df, n=20):
 # 개별 종목 백테스트
 # ════════════════════════════════════════════════════════════════
 def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
-    """개별 종목 백테스트 — 실제 전략 시뮬레이션.
-
-    진입·청산 규칙 (카드에 보여주는 전략과 동일):
-      - BUY/STRONG_BUY 시그널 → 종가 진입, calc_position_targets()로 stop/T2 설정
-      - 당일 저가 ≤ stop  → 손절가에 청산
-      - 당일 고가 ≥ T2   → 목표가에 청산
-      - SELL/STRONG_SELL → 당일 종가 청산
-      - 거래비용: 진입 0.15% + 청산 0.15% (왕복 0.3%)
-    """
+    """개별 종목 백테스트 — 섹터별 전략 프리셋 적용 시뮬레이션."""
     import datetime as _dt
+
+    # 섹터 → 전략 프리셋
+    _sector = POPULAR_STOCKS.get(ticker, {}).get("sector", "")
+    preset = get_strategy_preset(ticker=ticker, sector=_sector)
 
     df = load_data(ticker, period=period)
     if df is None or len(df) < 250:
@@ -2331,7 +2474,8 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
         bpb  = float(bpctb_s.iloc[i]) if not pd.isna(bpctb_s.iloc[i]) else 0.5
         vr   = float(volr_s.iloc[i])  if not pd.isna(volr_s.iloc[i])  else 1.0
         s50  = float(sl50_s.iloc[i])  if not pd.isna(sl50_s.iloc[i])  else 0
-        sig, _, _ = _generate_signal(c, m20, m50, m200, rsi, mh, bpb, vr, ma50_slope=s50)
+        sig, _, _ = _generate_signal(c, m20, m50, m200, rsi, mh, bpb, vr,
+                                     ma50_slope=s50, preset=preset)
         return sig, m20, m50, m200
 
     equity   = 100.0;  bnh      = 100.0
@@ -2381,8 +2525,12 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
                 if trade_return >= 0: win_count += 1; win_pnl.append(trade_return)
                 else:                 loss_count += 1; loss_pnl.append(trade_return)
             elif sig in ("SELL", "STRONG_SELL"):
-                # MA200 위 + SELL만이면 보유 유지 (장기 상승추세 눌림목 필터)
-                if above_ma200 and sig == "SELL":
+                # 청산 룰 (프리셋별):
+                # - 가치/장기: STRONG_SELL에만 청산
+                # - 그 외: MA200 위 + SELL만이면 보유 유지 (눌림목 필터)
+                if preset["key"] == "value" and sig == "SELL":
+                    pr = dr
+                elif above_ma200 and sig == "SELL":
                     pr = dr
                 else:
                     pr = dr - FEE
@@ -2399,7 +2547,8 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
                 l20  = float(low20_s.iloc[i])  if not pd.isna(low20_s.iloc[i])  else c * 0.95
                 h20  = float(high20_s.iloc[i]) if not pd.isna(high20_s.iloc[i]) else c * 1.05
                 tgts = calc_position_targets(c, atr, l20, h20, sig,
-                                              ma20=m20, ma50=m50, low_10d=l10)
+                                              ma20=m20, ma50=m50, low_10d=l10,
+                                              preset=preset)
                 if tgts and 0 < tgts["stop"] < c < tgts["t2"]:
                     in_pos   = True
                     stop_p   = tgts["stop"]
@@ -2452,6 +2601,12 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
         "win_rate":      win_rate,
         "avg_win":       avg_win,
         "avg_loss":      avg_loss,
+        "strategy": {
+            "key":  preset["key"],
+            "name": preset["name"],
+            "icon": preset["icon"],
+            "desc": preset["desc"],
+        },
     }
 
 
@@ -2544,16 +2699,21 @@ def analyze_stock(ticker: str) -> dict:
     # 캔들 패턴
     candle_pattern = detect_candle_pattern(df)
 
-    # 신호 생성 (가중치 + 다이버전스 + 캔들)
+    # 섹터 → 전략 프리셋
+    _sector = POPULAR_STOCKS.get(ticker, {}).get("sector", "")
+    preset = get_strategy_preset(ticker=ticker, sector=_sector)
+
+    # 신호 생성 (프리셋별 가중치·임계값 적용)
     signal_type, signal_text, confidence = _generate_signal(
         current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
-        divergence=divergence, candle_pattern=candle_pattern, ma50_slope=ma50_slope
+        divergence=divergence, candle_pattern=candle_pattern, ma50_slope=ma50_slope,
+        preset=preset,
     )
 
-    # 손절/목표/R:R (기술적 지지선 + MA + 스윙로우 전달)
+    # 손절/목표/R:R (프리셋별 ATR 손절·목표 배수 적용)
     targets = calc_position_targets(
         current, atr_val, support, resistance, signal_type,
-        ma20=ma20, ma50=ma50, low_10d=low_10d
+        ma20=ma20, ma50=ma50, low_10d=low_10d, preset=preset,
     )
     # 포지션 사이즈 (계좌 1천만원, 1% 리스크 가정 기본값)
     position = calc_position_size(current, targets["stop"], 10_000_000, 1.0) if targets else None
@@ -2644,6 +2804,13 @@ def analyze_stock(ticker: str) -> dict:
         # ── 신호 보조 ──
         "divergence": divergence,
         "candle_pattern": candle_pattern,
+        # ── 적용 전략 ──
+        "strategy": {
+            "key":  preset["key"],
+            "name": preset["name"],
+            "icon": preset["icon"],
+            "desc": preset["desc"],
+        },
         "generated_at": datetime.datetime.now().isoformat(),
     }
 

@@ -1469,12 +1469,18 @@ function StockResultCard({data:d,onChart,onClose}){
   const chg=d.change_pct>=0?C.green:C.red;
   const [btData,setBtData]=useState(null);
   const [btLoad,setBtLoad]=useState(false);
+  const [news,setNews]=useState(null);
+  const [newsLoad,setNewsLoad]=useState(false);
   useEffect(()=>{
     if(!d.ticker||d.data_unavailable) return;
     setBtLoad(true);
     fetch(`/api/stock_backtest?ticker=${encodeURIComponent(d.ticker)}`)
       .then(r=>r.json()).then(j=>{setBtData(j);setBtLoad(false);})
       .catch(()=>setBtLoad(false));
+    setNewsLoad(true);
+    fetch(`/api/news?ticker=${encodeURIComponent(d.ticker)}&name=${encodeURIComponent(d.name||"")}`)
+      .then(r=>r.json()).then(j=>{setNews(j);setNewsLoad(false);})
+      .catch(()=>setNewsLoad(false));
   },[d.ticker]);
   return(
     <div style={{borderRadius:14,border:`1px solid ${s.b}`,borderLeft:`3px solid ${s.c}`,
@@ -1486,6 +1492,13 @@ function StockResultCard({data:d,onChart,onClose}){
             <div>
               <div style={{color:C.text,fontSize:15,fontWeight:800}}>{d.name||d.ticker}</div>
               <div style={{color:C.muted,fontSize:10}}>{d.ticker}{d.sector?` · ${d.sector}`:""}</div>
+              {d.strategy&&(
+                <div style={{marginTop:4,display:"inline-flex",alignItems:"center",gap:4,
+                  padding:"2px 7px",borderRadius:6,background:C.cyan+"14",border:`1px solid ${C.cyan}44`}}>
+                  <span style={{fontSize:10}}>{d.strategy.icon}</span>
+                  <span style={{color:C.cyan,fontSize:10,fontWeight:700}}>{d.strategy.name}</span>
+                </div>
+              )}
             </div>
           </div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
@@ -1676,6 +1689,50 @@ function StockResultCard({data:d,onChart,onClose}){
                 )}
               </>);
             })()}
+          </div>
+        )}
+        {(news||newsLoad)&&(
+          <div style={{marginTop:10,padding:10,borderRadius:10,
+            background:C.surface,border:`1px solid ${C.border}55`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{color:C.muted,fontSize:10,fontWeight:700,letterSpacing:"0.06em"}}>
+                📰 실시간 뉴스·공시
+              </div>
+              {news&&news.sources&&(
+                <div style={{display:"flex",gap:4,fontSize:9,color:C.muted}}>
+                  {news.sources.dart>0    && <span style={{color:C.cyan}}>DART {news.sources.dart}</span>}
+                  {news.sources.naver>0   && <span style={{color:C.green}}>네이버 {news.sources.naver}</span>}
+                  {news.sources.telegram>0&& <span style={{color:C.yellow}}>TG {news.sources.telegram}</span>}
+                </div>
+              )}
+            </div>
+            {newsLoad&&<div style={{color:C.dim,fontSize:11}}>로딩 중...</div>}
+            {news&&!news.error&&news.items&&news.items.length===0&&(
+              <div style={{color:C.dim,fontSize:11}}>최근 30일 뉴스 없음 (DART/텔레그램 비활성 시 네이버 뉴스만)</div>
+            )}
+            {news&&news.items&&news.items.length>0&&(
+              <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:240,overflowY:"auto"}}>
+                {news.items.slice(0,8).map((it,i)=>(
+                  <a key={i} href={it.url} target="_blank" rel="noopener noreferrer"
+                    style={{textDecoration:"none",display:"block",padding:"6px 8px",borderRadius:6,
+                      background:C.card,border:`1px solid ${C.border}33`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:6}}>
+                      <span style={{color:C.text,fontSize:11,fontWeight:600,flex:1,lineHeight:1.35}}>
+                        {it.title}
+                      </span>
+                      <span style={{
+                        fontSize:8,padding:"1px 5px",borderRadius:4,whiteSpace:"nowrap",
+                        background: it.source?.startsWith("DART")  ? `${C.cyan}22`   :
+                                    it.source?.startsWith("TG")    ? `${C.yellow}22` : `${C.green}22`,
+                        color:      it.source?.startsWith("DART")  ? C.cyan          :
+                                    it.source?.startsWith("TG")    ? C.yellow        : C.green,
+                      }}>{it.source}</span>
+                    </div>
+                    <div style={{color:C.muted,fontSize:9,marginTop:2}}>{it.date}</div>
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
         )}
         <button onClick={()=>onChart({ticker:d.ticker,name:d.name,flag:d.flag,strategy_name:d.signal_text})}

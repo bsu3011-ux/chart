@@ -779,6 +779,41 @@ def get_backtest():
     return jsonify(result)
 
 
+# ════════════════════════════════════════════
+# 뉴스 피드 (DART + 네이버 + 텔레그램)
+# ════════════════════════════════════════════
+try:
+    from news_feed import fetch_news as _fetch_news, status as _news_status
+    _NEWS_AVAILABLE = True
+except Exception as _e:
+    _NEWS_AVAILABLE = False
+    print(f"⚠️ news_feed 모듈 로드 실패: {_e}")
+
+@app.route('/api/news')
+def get_news():
+    """GET /api/news?ticker=005930.KS&name=삼성전자
+    종목별 통합 뉴스 (DART 공시 + 네이버 뉴스 + 텔레그램 채널)."""
+    if not _NEWS_AVAILABLE:
+        return jsonify({"error": "뉴스 모듈 비활성", "items": []}), 200
+    ticker = request.args.get('ticker', '').strip().upper()
+    name   = request.args.get('name', '').strip()
+    if not ticker:
+        return jsonify({"error": "ticker 필요"}), 400
+    if ticker.isdigit() and len(ticker) == 6:
+        ticker = ticker + ".KS"
+    try:
+        return jsonify(_fetch_news(ticker, stock_name=name, max_items=15))
+    except Exception as e:
+        return jsonify({"error": str(e), "items": []}), 200
+
+@app.route('/api/news/status')
+def get_news_status():
+    """뉴스 소스 활성화 상태 (어떤 API키가 설정됐는지)."""
+    if not _NEWS_AVAILABLE:
+        return jsonify({"available": False})
+    return jsonify({"available": True, **_news_status()})
+
+
 @app.route('/guide')
 def guide():
     return send_from_directory(STATIC_DIR, 'guide.html')

@@ -747,37 +747,93 @@ def detect_candle_pattern(df):
     return None
 
 
-def calc_position_targets(price, atr_val, support, resistance, signal_type):
-    """손절가·목표가·R:R 계산 (변동성 기반)
-    - 손절: ATR×2 또는 직전 지지선 중 가까운 쪽
-    - 목표: ATR×4 또는 직전 저항선 중 먼 쪽 (R:R ≥ 2 목표)
+def calc_position_targets(price, atr_val, support, resistance, signal_type,
+                           ma20=None, ma50=None, low_10d=None):
+    """손절가·목표가·R:R 계산 (기술적 지지/저항 + ATR 기반)
+
+    손절 우선순위:
+      1) 10일 스윙로우 + ATR×0.2 버퍼
+      2) 20일 지지선 + ATR×0.2 버퍼
+      3) MA20 - ATR×0.3
+      4) MA50 - ATR×0.3
+      5) 폴백: 현재가 - ATR×2
+      → ATR×0.8 ~ ATR×3 범위로 클램핑
+
+    목표 (신호 강도 반응):
+      STRONG_BUY = 3.5R / BUY = 3.0R / 기타 = 2.5R
+      T1 = 1.5R (1차 부분익절)
+      T2 = 메인 목표 (저항선이 1% 이상 위에 있으면 max 반영)
     """
-    if not atr_val or atr_val <= 0:
+    if not atr_val or atr_val <= 0 or price <= 0:
         return None
+
     is_long = signal_type in ("STRONG_BUY", "BUY", "LEVERAGE_2X", "HOLD_1X", "INVESTED")
+    # 신호 강도 → 목표 배수
+    mult = {"STRONG_BUY": 3.5, "BUY": 3.0}.get(signal_type, 2.5) if is_long \
+      else {"STRONG_SELL": 3.5, "SELL": 3.0}.get(signal_type, 2.5)
+
     if is_long:
-        stop_atr = price - atr_val * 2
-        stop = max(stop_atr, support) if support and support < price else stop_atr
+        # ── 손절 후보 ──
+        cands = []
+        if low_10d  and low_10d  < price: cands.append(low_10d  - atr_val * 0.2)
+        if support  and support  < price: cands.append(support  - atr_val * 0.2)
+        if ma20     and ma20     < price: cands.append(ma20     - atr_val * 0.3)
+        if ma50     and ma50     < price: cands.append(ma50     - atr_val * 0.3)
+        # ATR×0.8 ~ ATR×3 사이의 후보만 유효
+        valid = [c for c in cands if atr_val * 0.8 < price - c < atr_val * 3.0]
+        stop = max(valid) if valid else price - atr_val * 2.0  # 가장 가까운 유효 지지선
+        # 클램핑
+        stop = max(stop, price - atr_val * 3.0)
+        stop = min(stop, price - atr_val * 0.8)
+
         risk = price - stop
         if risk <= 0: return None
-        target_atr = price + atr_val * 4
-        target = max(target_atr, resistance) if resistance and resistance > price else target_atr
-        reward = target - price
-    else:
-        stop_atr = price + atr_val * 2
-        stop = min(stop_atr, resistance) if resistance and resistance > price else stop_atr
+
+        # ── 목표가 ──
+        t1     = price + risk * 1.5
+        t2_base= price + risk * mult
+        # 저항선이 현재가 1% 이상 위이고 T2 기본값 아래 있으면 t2에 반영
+        if resistance and resistance > price * 1.01:
+            t2 = max(t2_base, min(resistance, price + risk * 5))
+        else:
+            t2 = t2_base
+
+        reward = t2 - price
+        rr     = round(reward / risk, 2) if risk > 0 else 0
+        target = t2
+
+    else:  # 매도 시그널
+        cands = []
+        if resistance and resistance > price: cands.append(resistance + atr_val * 0.2)
+        if ma20 and ma20 > price: cands.append(ma20 + atr_val * 0.3)
+        if ma50 and ma50 > price: cands.append(ma50 + atr_val * 0.3)
+        valid = [c for c in cands if atr_val * 0.8 < c - price < atr_val * 3.0]
+        stop = min(valid) if valid else price + atr_val * 2.0
+        stop = min(stop, price + atr_val * 3.0)
+        stop = max(stop, price + atr_val * 0.8)
+
         risk = stop - price
         if risk <= 0: return None
-        target_atr = price - atr_val * 4
-        target = min(target_atr, support) if support and support < price else target_atr
-        reward = price - target
-    rr = round(reward / risk, 2) if risk > 0 else 0
+
+        t1     = price - risk * 1.5
+        t2_base= price - risk * mult
+        if support and support < price * 0.99:
+            t2 = min(t2_base, max(support, price - risk * 5))
+        else:
+            t2 = t2_base
+
+        reward = price - t2
+        rr     = round(reward / risk, 2) if risk > 0 else 0
+        target = t2
+
     return {
-        "stop":   round(stop, 2),
-        "target": round(target, 2),
-        "rr":     rr,
-        "risk_pct":   round(abs(risk) / price * 100, 2),
-        "reward_pct": round(abs(reward) / price * 100, 2),
+        "stop":       round(stop,   2),
+        "target":     round(target, 2),   # 메인 목표 (T2)
+        "t1":         round(t1,     2),   # 1차 부분익절
+        "t2":         round(t2,     2),
+        "rr":         max(0, rr),
+        "risk_pct":   round(abs(price - stop)   / price * 100, 2),
+        "reward_pct": round(abs(target - price) / price * 100, 2),
     }
 
 
@@ -2380,6 +2436,7 @@ def analyze_stock(ticker: str) -> dict:
     avg_vol     = int(df['Volume'].rolling(20).mean().iloc[-1]) if not pd.isna(df['Volume'].rolling(20).mean().iloc[-1]) else 0
 
     # 지지/저항
+    low_10d    = float(low.rolling(10).min().iloc[-1])   # 스윙로우 (손절 기준)
     support    = float(low.rolling(20).min().iloc[-1])
     resistance = float(high.rolling(20).max().iloc[-1])
 
@@ -2405,8 +2462,11 @@ def analyze_stock(ticker: str) -> dict:
         divergence=divergence, candle_pattern=candle_pattern, ma50_slope=ma50_slope
     )
 
-    # 손절/목표/R:R
-    targets = calc_position_targets(current, atr_val, support, resistance, signal_type)
+    # 손절/목표/R:R (기술적 지지선 + MA + 스윙로우 전달)
+    targets = calc_position_targets(
+        current, atr_val, support, resistance, signal_type,
+        ma20=ma20, ma50=ma50, low_10d=low_10d
+    )
     # 포지션 사이즈 (계좌 1천만원, 1% 리스크 가정 기본값)
     position = calc_position_size(current, targets["stop"], 10_000_000, 1.0) if targets else None
 

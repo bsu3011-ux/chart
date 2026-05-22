@@ -1555,23 +1555,38 @@ function StockResultCard({data:d,onChart,onClose}){
         {d.targets&&(
           <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
             background:`${C.green}06`,border:`1px solid ${C.green}22`}}>
-            <div style={{color:C.green,fontSize:9,fontWeight:700,marginBottom:6,letterSpacing:"0.05em"}}>
-              🎯 진입·출구 전략 (ATR 기반)
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <span style={{color:C.green,fontSize:9,fontWeight:700,letterSpacing:"0.05em"}}>
+                🎯 진입·출구 전략
+              </span>
+              <span style={{color:d.targets.rr>=3?C.green:d.targets.rr>=2?C.cyan:d.targets.rr>=1?C.yellow:C.red,
+                fontSize:10,fontWeight:800}}>
+                R:R {d.targets.rr}:1
+              </span>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
-              <Met label="손절" value={fp(d.targets.stop,d.ticker)} color={C.red}/>
-              <Met label="목표" value={fp(d.targets.target,d.ticker)} color={C.green}/>
-              <Met label="R:R" value={d.targets.rr+":1"} color={d.targets.rr>=2?C.green:d.targets.rr>=1?C.yellow:C.red}/>
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,color:C.muted}}>
-              <span>리스크: <span style={{color:C.red}}>{d.targets.risk_pct?.toFixed(1)}%</span></span>
-              <span>수익: <span style={{color:C.green}}>+{d.targets.reward_pct?.toFixed(1)}%</span></span>
+            {/* 손절 + T1/T2 목표 3열 */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginBottom:6}}>
+              <div style={{textAlign:"center",padding:"5px 2px",borderRadius:6,
+                background:`${C.red}10`,border:`1px solid ${C.red}22`}}>
+                <div style={{color:C.red,fontSize:11,fontWeight:800}}>{fp(d.targets.stop,d.ticker)}</div>
+                <div style={{color:C.muted,fontSize:8,marginTop:1}}>손절 -{d.targets.risk_pct?.toFixed(1)}%</div>
+              </div>
+              <div style={{textAlign:"center",padding:"5px 2px",borderRadius:6,
+                background:`${C.yellow}10`,border:`1px solid ${C.yellow}22`}}>
+                <div style={{color:C.yellow,fontSize:11,fontWeight:800}}>{fp(d.targets.t1||d.targets.target,d.ticker)}</div>
+                <div style={{color:C.muted,fontSize:8,marginTop:1}}>T1 부분익절 (1.5R)</div>
+              </div>
+              <div style={{textAlign:"center",padding:"5px 2px",borderRadius:6,
+                background:`${C.green}10`,border:`1px solid ${C.green}22`}}>
+                <div style={{color:C.green,fontSize:11,fontWeight:800}}>{fp(d.targets.t2||d.targets.target,d.ticker)}</div>
+                <div style={{color:C.muted,fontSize:8,marginTop:1}}>T2 메인목표 +{d.targets.reward_pct?.toFixed(1)}%</div>
+              </div>
             </div>
             {d.position&&d.position.shares>0&&(
-              <div style={{marginTop:6,paddingTop:6,borderTop:`1px solid ${C.border}33`,
+              <div style={{paddingTop:5,borderTop:`1px solid ${C.border}33`,
                 fontSize:10,color:C.dim,lineHeight:1.5}}>
-                💼 <b>1천만원 · 1% 룰</b> 기준 → 권장 매수 <b style={{color:C.cyan}}>{d.position.shares.toLocaleString()}주</b>
-                {' '}(<b>{(d.position.invest/10000).toFixed(0)}만원</b>, 최대 손실 {(d.position.max_loss/10000).toFixed(0)}만원)
+                💼 <b>1천만원 · 1% 룰</b> → 권장 <b style={{color:C.cyan}}>{d.position.shares.toLocaleString()}주</b>
+                {' '}(<b>{(d.position.invest/10000).toFixed(0)}만원</b>, 최대손실 {(d.position.max_loss/10000).toFixed(0)}만원)
               </div>
             )}
           </div>

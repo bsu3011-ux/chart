@@ -2206,6 +2206,112 @@ def _build_price_history(df, n=20):
 
 
 # ════════════════════════════════════════════════════════════════
+# 개별 종목 백테스트
+# ════════════════════════════════════════════════════════════════
+def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
+    """개별 종목 백테스트: _generate_signal 스코어 로직 벡터화 적용.
+    BUY/STRONG_BUY → 보유(1x), 나머지 → 현금(0x). 거래비용 0.1%/년 반영."""
+    import datetime as _dt
+
+    df = load_data(ticker, period=period)
+    if df is None or len(df) < 250:
+        return None
+    df = df.dropna(subset=['Close', 'High', 'Low', 'Open', 'Volume'])
+    if len(df) < 250:
+        return None
+
+    close = df['Close']
+    n = len(close)
+
+    # 모든 지표 한번에 계산 (vectorized)
+    ma20   = close.rolling(20).mean()
+    ma50   = close.rolling(50).mean()
+    ma200  = close.rolling(200).mean()
+    rsi_s  = calc_rsi(close)
+
+    ema12  = close.ewm(span=12, adjust=False).mean()
+    ema26  = close.ewm(span=26, adjust=False).mean()
+    _macd  = ema12 - ema26
+    _msig  = _macd.ewm(span=9, adjust=False).mean()
+    mhist  = _macd - _msig
+
+    bb_mid  = close.rolling(20).mean()
+    bb_std  = close.rolling(20).std()
+    bb_u    = bb_mid + 2 * bb_std
+    bb_l    = bb_mid - 2 * bb_std
+    bb_pctb = (close - bb_l) / (bb_u - bb_l).replace(0, np.nan)
+
+    vol20  = df['Volume'].rolling(20).mean()
+    volr   = df['Volume'] / vol20.replace(0, np.nan)
+    sl50   = (ma50 - ma50.shift(5)) / ma50.shift(5).replace(0, np.nan) * 100
+
+    positions = np.zeros(n)
+    for i in range(210, n):
+        c   = float(close.iloc[i])
+        m20 = float(ma20.iloc[i])   if not pd.isna(ma20.iloc[i])  else c
+        m50 = float(ma50.iloc[i])   if not pd.isna(ma50.iloc[i])  else c
+        m200= float(ma200.iloc[i])  if not pd.isna(ma200.iloc[i]) else None
+        rsi = float(rsi_s.iloc[i])  if not pd.isna(rsi_s.iloc[i]) else 50
+        mh  = float(mhist.iloc[i])  if not pd.isna(mhist.iloc[i]) else 0
+        bpb = float(bb_pctb.iloc[i])if not pd.isna(bb_pctb.iloc[i]) else 0.5
+        vr  = float(volr.iloc[i])   if not pd.isna(volr.iloc[i])  else 1.0
+        s50 = float(sl50.iloc[i])   if not pd.isna(sl50.iloc[i])  else 0
+
+        sig, _, _ = _generate_signal(c, m20, m50, m200, rsi, mh, bpb, vr, ma50_slope=s50)
+        positions[i] = 1.0 if sig in ("STRONG_BUY", "BUY") else 0.0
+
+    # 수익률 시뮬레이션
+    close_vals = close.values.astype(float)
+    daily_ret  = np.zeros(n)
+    daily_ret[1:] = np.diff(close_vals) / close_vals[:-1]
+
+    equity = 100.0; bnh = 100.0
+    peak_eq = 100.0; peak_bh = 100.0
+    mdd = 0.0; mdd_bh = 0.0
+    eq_curve = [100.0]; ret_list = []
+
+    for i in range(1, n):
+        r   = float(daily_ret[i])
+        pos = float(positions[i - 1])
+        cost = (0.001 if pos > 0 else 0) / 252
+        pr = r * pos - cost
+        equity *= (1 + pr); bnh *= (1 + r)
+        peak_eq = max(peak_eq, equity); peak_bh = max(peak_bh, bnh)
+        mdd    = max(mdd,    (peak_eq - equity) / peak_eq)
+        mdd_bh = max(mdd_bh, (peak_bh - bnh)   / peak_bh)
+        eq_curve.append(equity); ret_list.append(pr)
+
+    years   = n / 252
+    cagr    = float((equity / 100) ** (1 / years) - 1) if years > 0 else 0
+    cagr_bh = float((bnh    / 100) ** (1 / years) - 1) if years > 0 else 0
+    arr     = np.array(ret_list)
+    sharpe  = float(arr.mean() / arr.std() * np.sqrt(252)) if len(arr) > 1 and arr.std() > 0 else 0
+
+    yearly = {}
+    try:
+        today_yr = _dt.date.today().year
+        for yr_back in range(1, min(6, int(years) + 1)):
+            end_i   = max(0, len(eq_curve) - (yr_back - 1) * 252 - 1)
+            start_i = max(0, end_i - 252)
+            if start_i < end_i and eq_curve[start_i] > 0:
+                yearly[str(today_yr - yr_back)] = round(
+                    (eq_curve[end_i] / eq_curve[start_i] - 1) * 100, 1)
+    except Exception:
+        pass
+
+    return {
+        "cagr":         round(cagr    * 100, 1),
+        "mdd":          round(mdd     * 100, 1),
+        "sharpe":       round(sharpe,  2),
+        "years":        round(years,   1),
+        "final_equity": round(equity,  1),
+        "cagr_bh":      round(cagr_bh * 100, 1),
+        "mdd_bh":       round(mdd_bh  * 100, 1),
+        "yearly":       yearly,
+    }
+
+
+# ════════════════════════════════════════════════════════════════
 # 주식 검색 분석 — 메인 함수
 # ════════════════════════════════════════════════════════════════
 def analyze_stock(ticker: str) -> dict:

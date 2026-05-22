@@ -1467,6 +1467,15 @@ function TopSearchBar({onResult}){
 function StockResultCard({data:d,onChart,onClose}){
   const s=SIG[d.signal_type]||SIG.NEUTRAL;
   const chg=d.change_pct>=0?C.green:C.red;
+  const [btData,setBtData]=useState(null);
+  const [btLoad,setBtLoad]=useState(false);
+  useEffect(()=>{
+    if(!d.ticker||d.data_unavailable) return;
+    setBtLoad(true);
+    fetch(`/api/stock_backtest?ticker=${encodeURIComponent(d.ticker)}`)
+      .then(r=>r.json()).then(j=>{setBtData(j);setBtLoad(false);})
+      .catch(()=>setBtLoad(false));
+  },[d.ticker]);
   return(
     <div style={{borderRadius:14,border:`1px solid ${s.b}`,borderLeft:`3px solid ${s.c}`,
       background:C.cardGradient,boxShadow:s.glow,marginBottom:10,animation:"fadeIn .3s ease"}}>
@@ -1572,6 +1581,63 @@ function StockResultCard({data:d,onChart,onClose}){
           {d.data_unavailable&&<div style={{color:C.yellow,fontSize:10,marginBottom:4}}>⚠️ 실시간 시세 조회 불가 — 기본 정보만 표시</div>}
           <div style={{color:C.dim,fontSize:11,lineHeight:1.6}}>{d.analysis_text}</div>
         </div>
+        {/* 백테스트 성과 */}
+        {!d.data_unavailable&&(
+          <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
+            background:C.surface,border:`1px solid ${C.border}44`}}>
+            <div style={{color:C.muted,fontSize:9,fontWeight:700,
+              letterSpacing:"0.06em",marginBottom:6}}>
+              📈 백테스트 성과{btData&&!btData.error?` (${btData.years?.toFixed(0)}년)`:""}
+            </div>
+            {btLoad&&<div style={{color:C.dim,fontSize:11,padding:"4px 0"}}>계산 중... (최초 1회, 이후 7일 캐시)</div>}
+            {!btLoad&&!btData&&<div style={{color:C.dim,fontSize:11}}>로딩 중...</div>}
+            {btData&&btData.error&&<div style={{color:C.red,fontSize:11}}>{btData.error}</div>}
+            {btData&&!btData.error&&(()=>{
+              const alpha=btData.cagr-btData.cagr_bh;
+              return(<>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:4,marginBottom:8}}>
+                  {[
+                    {label:"연평균(CAGR)",val:`${btData.cagr>0?"+":""}${btData.cagr}%`,
+                      color:btData.cagr>8?C.green:btData.cagr>0?C.cyan:C.red},
+                    {label:"최대낙폭(MDD)",val:`-${btData.mdd}%`,
+                      color:btData.mdd<15?C.green:btData.mdd<30?C.yellow:C.red},
+                    {label:"Sharpe",val:`${btData.sharpe}`,
+                      color:btData.sharpe>1?C.green:btData.sharpe>0.5?C.cyan:C.muted},
+                  ].map((item,i)=>(
+                    <div key={i} style={{textAlign:"center",padding:"5px 2px",borderRadius:6,
+                      background:C.card,border:`1px solid ${C.border}33`}}>
+                      <div style={{color:item.color,fontSize:14,fontWeight:800,
+                        fontVariantNumeric:"tabular-nums"}}>{item.val}</div>
+                      <div style={{color:C.muted,fontSize:8,marginTop:2}}>{item.label}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                  padding:"5px 6px",borderRadius:6,
+                  background:alpha>0?`${C.green}10`:`${C.red}10`,
+                  border:`1px solid ${alpha>0?C.green:C.red}22`}}>
+                  <span style={{color:C.muted,fontSize:10}}>vs 단순보유 ({btData.cagr_bh}%/년)</span>
+                  <span style={{color:alpha>0?C.green:C.red,fontSize:11,fontWeight:700}}>
+                    {alpha>0?"+":""}{alpha.toFixed(1)}% 초과수익
+                  </span>
+                </div>
+                {btData.yearly&&Object.keys(btData.yearly).length>0&&(
+                  <div style={{marginTop:6,display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {Object.entries(btData.yearly).sort((a,b)=>b[0]-a[0]).map(([yr,ret])=>(
+                      <div key={yr} style={{textAlign:"center",padding:"3px 6px",borderRadius:5,
+                        background:`${ret>=0?C.green:C.red}14`,
+                        border:`1px solid ${ret>=0?C.green:C.red}22`}}>
+                        <div style={{color:ret>=0?C.green:C.red,fontSize:11,fontWeight:700}}>
+                          {ret>=0?"+":""}{ret}%</div>
+                        <div style={{color:C.muted,fontSize:8}}>{yr}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>);
+            })()}
+          </div>
+        )}
         <button onClick={()=>onChart({ticker:d.ticker,name:d.name,flag:d.flag,strategy_name:d.signal_text})}
           style={{width:"100%",marginTop:8,padding:"8px",borderRadius:10,
             border:`1px solid ${C.cyan}44`,background:C.cyan+"12",

@@ -27,7 +27,7 @@ def _clean(obj):
 import time
 from multi_market_bot_v4 import (
     main as run_bot, MARKETS, load_data, analyze_market, save_json,
-    analyze_stock, POPULAR_STOCKS, backtest_strategy,
+    analyze_stock, POPULAR_STOCKS, backtest_strategy, backtest_stock,
 )
 
 # ── 절대 경로 기준 설정 ──
@@ -675,6 +675,56 @@ def get_sectors():
         "kr_sectors": kr_results,
         "generated_at": datetime.datetime.now().isoformat(),
     })
+
+
+@app.route('/api/stock_backtest')
+def get_stock_backtest():
+    """GET /api/stock_backtest?ticker=AAPL
+    개별 종목 백테스트 (7일 캐시)."""
+    ticker = request.args.get('ticker', '').strip().upper()
+    if not ticker:
+        return jsonify({"error": "ticker 필요"}), 400
+    if ticker.isdigit() and len(ticker) == 6:
+        ticker = ticker + ".KS"
+
+    now       = time.time()
+    cache_ttl = 7 * 24 * 3600
+    cache_key = f"stock_{ticker}"
+
+    mem = _backtest_mem_cache.get(cache_key)
+    if mem and now - mem["ts"] < cache_ttl:
+        return jsonify(mem["data"])
+
+    try:
+        if os.path.exists(BACKTEST_CACHE_FILE):
+            with open(BACKTEST_CACHE_FILE, encoding="utf-8") as f:
+                file_cache = json.load(f)
+            if cache_key in file_cache:
+                entry = file_cache[cache_key]
+                if now - entry.get("ts", 0) < cache_ttl:
+                    _backtest_mem_cache[cache_key] = entry
+                    return jsonify(entry["data"])
+    except Exception:
+        pass
+
+    result = backtest_stock(ticker)
+    if result is None:
+        return jsonify({"error": "데이터 부족 (최소 1년 이상 상장 종목만 지원)"}), 404
+
+    entry = {"ts": now, "data": result}
+    _backtest_mem_cache[cache_key] = entry
+    try:
+        file_cache = {}
+        if os.path.exists(BACKTEST_CACHE_FILE):
+            with open(BACKTEST_CACHE_FILE, encoding="utf-8") as f:
+                file_cache = json.load(f)
+        file_cache[cache_key] = entry
+        with open(BACKTEST_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(file_cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+    return jsonify(result)
 
 
 @app.route('/api/backtest')

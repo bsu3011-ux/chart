@@ -519,11 +519,187 @@ POPULAR_STOCKS = {
     "293480.KQ": {"name": "하나제약",     "name_en": "Hana Pharm",           "sector": "제약",      "flag": "🇰🇷"},
     "200130.KQ": {"name": "비씨월드제약", "name_en": "BC World Pharm",       "sector": "제약",      "flag": "🇰🇷"},
     "049630.KQ": {"name": "재원산업",     "name_en": "Jaewon Industrial",    "sector": "제약",      "flag": "🇰🇷"},
-    "039030.KQ": {"name": "이오테크닉스","name_en": "EO Technics",           "sector": "반도체장비","flag": "🇰🇷"},
     "048870.KQ": {"name": "테스나",       "name_en": "Tesna",                "sector": "반도체검사","flag": "🇰🇷"},
     "079940.KQ": {"name": "가비아",       "name_en": "Gabia",                "sector": "IT인프라",  "flag": "🇰🇷"},
     "357550.KQ": {"name": "득템",         "name_en": "Deoktem",              "sector": "반도체장비","flag": "🇰🇷"},
     "950170.KQ": {"name": "JTC",          "name_en": "JTC",                  "sector": "반도체장비","flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 금융/증권/보험 ════════════
+    "006800.KS": {"name": "미래에셋증권",   "name_en": "Mirae Asset Sec.",     "sector": "증권",       "flag": "🇰🇷"},
+    "039490.KS": {"name": "키움증권",       "name_en": "Kiwoom Securities",    "sector": "증권",       "flag": "🇰🇷"},
+    "016360.KS": {"name": "삼성증권",       "name_en": "Samsung Securities",   "sector": "증권",       "flag": "🇰🇷"},
+    "005940.KS": {"name": "NH투자증권",     "name_en": "NH Investment Sec.",   "sector": "증권",       "flag": "🇰🇷"},
+    "003540.KS": {"name": "대신증권",       "name_en": "Daeshin Securities",   "sector": "증권",       "flag": "🇰🇷"},
+    "071050.KS": {"name": "한국금융지주",   "name_en": "Korea Investment Hld.","sector": "금융",       "flag": "🇰🇷"},
+    "138040.KS": {"name": "메리츠금융지주", "name_en": "Meritz Financial",     "sector": "금융",       "flag": "🇰🇷"},
+    "175330.KS": {"name": "JB금융지주",     "name_en": "JB Financial",         "sector": "금융",       "flag": "🇰🇷"},
+    "139130.KS": {"name": "DGB금융지주",    "name_en": "DGB Financial",        "sector": "금융",       "flag": "🇰🇷"},
+    "138930.KS": {"name": "BNK금융지주",    "name_en": "BNK Financial",        "sector": "금융",       "flag": "🇰🇷"},
+    "024110.KS": {"name": "기업은행",       "name_en": "IBK",                  "sector": "은행",       "flag": "🇰🇷"},
+    "001450.KS": {"name": "현대해상",       "name_en": "Hyundai Marine",       "sector": "보험",       "flag": "🇰🇷"},
+    "000060.KS": {"name": "메리츠화재",     "name_en": "Meritz Fire",          "sector": "보험",       "flag": "🇰🇷"},
+    "005830.KS": {"name": "DB손해보험",     "name_en": "DB Insurance",         "sector": "보험",       "flag": "🇰🇷"},
+    "088350.KS": {"name": "한화생명",       "name_en": "Hanwha Life",          "sector": "보험",       "flag": "🇰🇷"},
+    "091170.KS": {"name": "동양생명",       "name_en": "Dongyang Life",        "sector": "보험",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 반도체/전자부품 ════════════
+    "009150.KS": {"name": "삼성전기",       "name_en": "Samsung Electro-Mech.","sector": "전자부품",   "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 조선/방산 ════════════
+    "010140.KS": {"name": "삼성중공업",     "name_en": "Samsung Heavy Ind.",   "sector": "조선",       "flag": "🇰🇷"},
+    "079550.KS": {"name": "LIG넥스원",      "name_en": "LIG Nex1",             "sector": "방산",       "flag": "🇰🇷"},
+    "272210.KS": {"name": "한화시스템",     "name_en": "Hanwha Systems",       "sector": "방산",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 자동차/부품 ════════════
+    "161390.KS": {"name": "한국타이어앤테크놀로지","name_en":"Hankook Tire",    "sector": "자동차부품", "flag": "🇰🇷"},
+    "002350.KS": {"name": "넥센타이어",     "name_en": "Nexen Tire",           "sector": "자동차부품", "flag": "🇰🇷"},
+    "073240.KS": {"name": "금호타이어",     "name_en": "Kumho Tire",           "sector": "자동차부품", "flag": "🇰🇷"},
+    "011210.KS": {"name": "현대위아",       "name_en": "Hyundai Wia",          "sector": "자동차부품", "flag": "🇰🇷"},
+    "204320.KS": {"name": "만도",           "name_en": "Mando",                "sector": "자동차부품", "flag": "🇰🇷"},
+    "018880.KS": {"name": "한온시스템",     "name_en": "Hanon Systems",        "sector": "자동차부품", "flag": "🇰🇷"},
+    "042670.KS": {"name": "HD현대인프라코어","name_en":"HD Hyundai Infracore",  "sector": "기계/중장비","flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 항공/운송 ════════════
+    "003490.KS": {"name": "대한항공",       "name_en": "Korean Air",           "sector": "항공",       "flag": "🇰🇷"},
+    "020560.KS": {"name": "아시아나항공",   "name_en": "Asiana Airlines",      "sector": "항공",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 화학/소재 ════════════
+    "004020.KS": {"name": "현대제철",       "name_en": "Hyundai Steel",        "sector": "철강",       "flag": "🇰🇷"},
+    "011780.KS": {"name": "금호석유화학",   "name_en": "Kumho Petrochemical",  "sector": "화학",       "flag": "🇰🇷"},
+    "002380.KS": {"name": "KCC",            "name_en": "KCC Corp",             "sector": "화학/건자재","flag": "🇰🇷"},
+    "011790.KS": {"name": "SKC",            "name_en": "SKC",                  "sector": "화학/소재",  "flag": "🇰🇷"},
+    "010060.KS": {"name": "OCI",            "name_en": "OCI Holdings",         "sector": "화학",       "flag": "🇰🇷"},
+    "120110.KS": {"name": "코오롱인더",     "name_en": "Kolon Industries",     "sector": "화학/섬유",  "flag": "🇰🇷"},
+    "298050.KS": {"name": "효성첨단소재",   "name_en": "Hyosung Advanced Mat.","sector": "소재",       "flag": "🇰🇷"},
+    "020150.KS": {"name": "롯데에너지머티리얼즈","name_en":"Lotte Energy Mat.", "sector": "배터리소재", "flag": "🇰🇷"},
+    "001740.KS": {"name": "SK네트웍스",     "name_en": "SK Networks",          "sector": "유통/서비스","flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 에너지/유틸리티 ════════════
+    "010950.KS": {"name": "S-Oil",          "name_en": "S-Oil",                "sector": "에너지",     "flag": "🇰🇷"},
+    "036460.KS": {"name": "한국가스공사",   "name_en": "KOGAS",                "sector": "가스",       "flag": "🇰🇷"},
+    "112610.KS": {"name": "씨에스윈드",     "name_en": "CS Wind",              "sector": "풍력",       "flag": "🇰🇷"},
+    "336260.KS": {"name": "두산퓨얼셀",     "name_en": "Doosan Fuel Cell",     "sector": "수소/연료전지","flag":"🇰🇷"},
+
+    # ════════════ 코스피 추가 — IT/플랫폼/핀테크 ════════════
+    "323410.KS": {"name": "카카오뱅크",     "name_en": "KakaoBank",            "sector": "핀테크",     "flag": "🇰🇷"},
+    "377300.KS": {"name": "카카오페이",     "name_en": "Kakao Pay",            "sector": "핀테크",     "flag": "🇰🇷"},
+    "402340.KS": {"name": "SK스퀘어",       "name_en": "SK Square",            "sector": "IT지주",     "flag": "🇰🇷"},
+    "022100.KS": {"name": "포스코DX",       "name_en": "POSCO DX",             "sector": "IT서비스",   "flag": "🇰🇷"},
+    "400760.KS": {"name": "현대오토에버",   "name_en": "Hyundai AutoEver",     "sector": "IT서비스",   "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 미디어/엔터/소비재 ════════════
+    "035760.KS": {"name": "CJ ENM",         "name_en": "CJ ENM",               "sector": "미디어/엔터","flag": "🇰🇷"},
+    "079160.KS": {"name": "CJ CGV",         "name_en": "CJ CGV",               "sector": "영화/엔터",  "flag": "🇰🇷"},
+    "033780.KS": {"name": "KT&G",           "name_en": "KT&G",                 "sector": "담배/소비재","flag": "🇰🇷"},
+    "021240.KS": {"name": "코웨이",         "name_en": "Coway",                "sector": "생활가전",   "flag": "🇰🇷"},
+    "008770.KS": {"name": "호텔신라",       "name_en": "Hotel Shilla",         "sector": "면세/호텔",  "flag": "🇰🇷"},
+    "007070.KS": {"name": "GS리테일",       "name_en": "GS Retail",            "sector": "유통",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 화장품/뷰티/식품 ════════════
+    "090430.KS": {"name": "아모레퍼시픽",   "name_en": "Amorepacific",         "sector": "화장품",     "flag": "🇰🇷"},
+    "051900.KS": {"name": "LG생활건강",     "name_en": "LG H&H",               "sector": "소비재",     "flag": "🇰🇷"},
+    "192820.KS": {"name": "코스맥스",       "name_en": "Cosmax",               "sector": "화장품OEM",  "flag": "🇰🇷"},
+    "161890.KS": {"name": "한국콜마",       "name_en": "Kolmar Korea",         "sector": "화장품OEM",  "flag": "🇰🇷"},
+    "097950.KS": {"name": "CJ제일제당",     "name_en": "CJ CheilJedang",       "sector": "식품",       "flag": "🇰🇷"},
+    "004370.KS": {"name": "농심",           "name_en": "Nongshim",             "sector": "식품",       "flag": "🇰🇷"},
+    "007310.KS": {"name": "오뚜기",         "name_en": "Ottogi",               "sector": "식품",       "flag": "🇰🇷"},
+    "005300.KS": {"name": "롯데칠성음료",   "name_en": "Lotte Chilsung",       "sector": "음료",       "flag": "🇰🇷"},
+    "000080.KS": {"name": "하이트진로",     "name_en": "Hite Jinro",           "sector": "주류",       "flag": "🇰🇷"},
+    "003230.KS": {"name": "삼양식품",       "name_en": "Samyang Foods",        "sector": "식품",       "flag": "🇰🇷"},
+    "026960.KS": {"name": "동서",           "name_en": "Dongsuh",              "sector": "식품",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 건설/부동산 ════════════
+    "006360.KS": {"name": "GS건설",         "name_en": "GS Engineering",       "sector": "건설",       "flag": "🇰🇷"},
+    "375500.KS": {"name": "DL이앤씨",       "name_en": "DL E&C",               "sector": "건설",       "flag": "🇰🇷"},
+    "294870.KS": {"name": "HDC현대산업개발","name_en": "HDC Hyundai Dev.",     "sector": "건설",       "flag": "🇰🇷"},
+    "028050.KS": {"name": "삼성엔지니어링", "name_en": "Samsung Engineering",  "sector": "건설/EPC",   "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 바이오/제약 ════════════
+    "302440.KS": {"name": "SK바이오사이언스","name_en":"SK Bioscience",         "sector": "백신/바이오","flag": "🇰🇷"},
+    "326030.KS": {"name": "SK바이오팜",     "name_en": "SK Biopharmaceuticals","sector": "제약",       "flag": "🇰🇷"},
+    "145720.KS": {"name": "덴티움",         "name_en": "Dentium",              "sector": "의료기기",   "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 로봇/신산업 ════════════
+    "454910.KS": {"name": "두산로보틱스",   "name_en": "Doosan Robotics",      "sector": "로봇",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 지주/기타 ════════════
+    "004990.KS": {"name": "롯데지주",       "name_en": "Lotte Holdings",       "sector": "지주회사",   "flag": "🇰🇷"},
+    "000880.KS": {"name": "한화",           "name_en": "Hanwha Corp",          "sector": "지주회사",   "flag": "🇰🇷"},
+    "093050.KS": {"name": "LF",             "name_en": "LF Corp",              "sector": "패션/유통",  "flag": "🇰🇷"},
+    "025540.KS": {"name": "한국단자",       "name_en": "Korea Terminals",      "sector": "전자부품",   "flag": "🇰🇷"},
+    "004310.KS": {"name": "현대약품",       "name_en": "Hyundai Pharm",        "sector": "제약",       "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 반도체/장비/소재 ════════════
+    "389500.KQ": {"name": "에스비비테크",   "name_en": "SBB Tech",             "sector": "반도체",     "flag": "🇰🇷"},
+    "140860.KQ": {"name": "파크시스템스",   "name_en": "Park Systems",         "sector": "반도체장비", "flag": "🇰🇷"},
+    "166090.KQ": {"name": "하나머티리얼즈", "name_en": "Hana Materials",       "sector": "반도체소재", "flag": "🇰🇷"},
+    "222800.KQ": {"name": "심텍",           "name_en": "Simtech",              "sector": "반도체기판", "flag": "🇰🇷"},
+    "086890.KQ": {"name": "엘비세미콘",     "name_en": "LB Semicon",           "sector": "반도체",     "flag": "🇰🇷"},
+    "089030.KQ": {"name": "테크윙",         "name_en": "Techwing",             "sector": "반도체검사", "flag": "🇰🇷"},
+    "085870.KQ": {"name": "넥스틴",         "name_en": "Nextin",               "sector": "반도체검사", "flag": "🇰🇷"},
+    "095340.KQ": {"name": "ISC",            "name_en": "ISC",                  "sector": "반도체소켓", "flag": "🇰🇷"},
+    "014680.KQ": {"name": "한솔케미칼",     "name_en": "Hansol Chemical",      "sector": "반도체소재", "flag": "🇰🇷"},
+    "108320.KQ": {"name": "LX세미콘",       "name_en": "LX Semicon",           "sector": "팹리스",     "flag": "🇰🇷"},
+    "101490.KQ": {"name": "에스앤에스텍",   "name_en": "SNStek",               "sector": "반도체소재", "flag": "🇰🇷"},
+    "054090.KQ": {"name": "에이피시스템",   "name_en": "AP Systems",           "sector": "디스플레이장비","flag":"🇰🇷"},
+    "213420.KQ": {"name": "덕산네오룩스",   "name_en": "Duksan Neolux",        "sector": "OLED소재",   "flag": "🇰🇷"},
+    "336370.KQ": {"name": "솔루스첨단소재", "name_en": "Solus Advanced Mat.",  "sector": "소재",       "flag": "🇰🇷"},
+    "222080.KQ": {"name": "씨아이에스",     "name_en": "CIS",                  "sector": "배터리장비", "flag": "🇰🇷"},
+    "090460.KQ": {"name": "비에이치",       "name_en": "BH",                   "sector": "FPCB",       "flag": "🇰🇷"},
+    "098460.KQ": {"name": "고영",           "name_en": "Koh Young",            "sector": "검사장비",   "flag": "🇰🇷"},
+    "383310.KQ": {"name": "에코프로에이치엔","name_en":"EcoPro HN",             "sector": "소재",       "flag": "🇰🇷"},
+    "393890.KQ": {"name": "더블유씨피",     "name_en": "WCP",                  "sector": "배터리소재", "flag": "🇰🇷"},
+    "032500.KQ": {"name": "케이엠더블유",   "name_en": "KMW",                  "sector": "통신장비",   "flag": "🇰🇷"},
+    "138940.KQ": {"name": "오이솔루션",     "name_en": "OE Solutions",         "sector": "광부품",     "flag": "🇰🇷"},
+    "192650.KQ": {"name": "드림텍",         "name_en": "Dreamtech",            "sector": "전자부품",   "flag": "🇰🇷"},
+    "189300.KQ": {"name": "제이앤티씨",     "name_en": "JNTC",                 "sector": "유리/부품",  "flag": "🇰🇷"},
+    "104830.KQ": {"name": "원익머트리얼즈", "name_en": "Wonik Materials",      "sector": "반도체소재", "flag": "🇰🇷"},
+    "102710.KQ": {"name": "이엔에프테크놀로지","name_en":"ENF Technology",      "sector": "반도체소재", "flag": "🇰🇷"},
+    "064290.KQ": {"name": "인텍플러스",     "name_en": "Intech Plus",          "sector": "비전검사",   "flag": "🇰🇷"},
+    "039440.KQ": {"name": "에스티아이",     "name_en": "STI",                  "sector": "반도체장비", "flag": "🇰🇷"},
+    "330350.KQ": {"name": "네패스아크",     "name_en": "Nepes Arc",            "sector": "반도체",     "flag": "🇰🇷"},
+    "084850.KQ": {"name": "아이티엠반도체", "name_en": "ITM Semiconductor",    "sector": "배터리부품", "flag": "🇰🇷"},
+    "144960.KQ": {"name": "뉴파워프라즈마", "name_en": "New Power Plasma",     "sector": "반도체장비", "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 바이오/제약/의료 ════════════
+    "096530.KQ": {"name": "씨젠",           "name_en": "Seegene",              "sector": "진단",       "flag": "🇰🇷"},
+    "206650.KQ": {"name": "유바이오로직스", "name_en": "EuBiologics",          "sector": "백신",       "flag": "🇰🇷"},
+    "298380.KQ": {"name": "에이비엘바이오", "name_en": "ABL Bio",              "sector": "바이오",     "flag": "🇰🇷"},
+    "214450.KQ": {"name": "파마리서치",     "name_en": "Pharma Research",      "sector": "바이오/미용","flag": "🇰🇷"},
+    "053030.KQ": {"name": "바이넥스",       "name_en": "Binex",                "sector": "CMO",        "flag": "🇰🇷"},
+    "138610.KQ": {"name": "나이벡",         "name_en": "Naeovys",              "sector": "바이오",     "flag": "🇰🇷"},
+    "009420.KQ": {"name": "제넥신",         "name_en": "Genexine",             "sector": "바이오",     "flag": "🇰🇷"},
+    "067630.KQ": {"name": "HLB생명과학",   "name_en": "HLB Life Science",     "sector": "바이오",     "flag": "🇰🇷"},
+    "011000.KQ": {"name": "진원생명과학",   "name_en": "Jinwon Bioscience",    "sector": "바이오",     "flag": "🇰🇷"},
+    "290650.KQ": {"name": "엘앤씨바이오",   "name_en": "L&C Bio",              "sector": "의료기기",   "flag": "🇰🇷"},
+    "115450.KQ": {"name": "지트리비앤티",   "name_en": "G-treeBNT",            "sector": "바이오",     "flag": "🇰🇷"},
+    "365270.KQ": {"name": "큐라클",         "name_en": "Curacle",              "sector": "바이오",     "flag": "🇰🇷"},
+    "347551.KQ": {"name": "레고켐바이오사이언스","name_en":"LegoChem Biosci.", "sector": "바이오",     "flag": "🇰🇷"},
+    "357580.KQ": {"name": "이노테라피",     "name_en": "Innotherapeutics",     "sector": "의료기기",   "flag": "🇰🇷"},
+    "340360.KQ": {"name": "제놀루션",       "name_en": "Genolution",           "sector": "진단",       "flag": "🇰🇷"},
+    "305090.KQ": {"name": "GI이노베이션",   "name_en": "GI Innovation",        "sector": "바이오",     "flag": "🇰🇷"},
+    "378850.KQ": {"name": "CJ바이오사이언스","name_en":"CJ Bioscience",         "sector": "바이오",     "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 게임/미디어/엔터 ════════════
+    "095660.KQ": {"name": "네오위즈",       "name_en": "Neowiz",               "sector": "게임",       "flag": "🇰🇷"},
+    "253450.KQ": {"name": "스튜디오드래곤", "name_en": "Studio Dragon",        "sector": "미디어",     "flag": "🇰🇷"},
+    "192080.KQ": {"name": "위메이드맥스",   "name_en": "Wemade Max",           "sector": "게임",       "flag": "🇰🇷"},
+    "067000.KQ": {"name": "조이시티",       "name_en": "Joycity",              "sector": "게임",       "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 화장품/뷰티 ════════════
+    "078520.KQ": {"name": "에이블씨엔씨",   "name_en": "Able C&C",             "sector": "화장품",     "flag": "🇰🇷"},
+    "237880.KQ": {"name": "클리오",         "name_en": "Clio Cosmetics",       "sector": "화장품",     "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 로봇/AI/소프트웨어 ════════════
+    "108490.KQ": {"name": "로보티즈",       "name_en": "Robotis",              "sector": "로봇",       "flag": "🇰🇷"},
+    "215200.KQ": {"name": "메가스터디교육", "name_en": "Megastudy Education",  "sector": "교육",       "flag": "🇰🇷"},
+    "089600.KQ": {"name": "나스미디어",     "name_en": "Nasmedia",             "sector": "디지털광고", "flag": "🇰🇷"},
+    "950190.KQ": {"name": "대양전기공업",   "name_en": "Daeyang Electric",     "sector": "전기기기",   "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 에너지/소재 ════════════
+    "178320.KQ": {"name": "서진시스템",     "name_en": "Seojin System",        "sector": "에너지저장", "flag": "🇰🇷"},
+    "082640.KQ": {"name": "동국씨엠",       "name_en": "Dongkuk C&M",          "sector": "배터리소재", "flag": "🇰🇷"},
+
     # ════════════ 미국 빅테크 ════════════
     "AAPL":  {"name": "애플",           "name_en": "Apple",              "sector": "Technology",     "flag": "🇺🇸"},
     "MSFT":  {"name": "마이크로소프트", "name_en": "Microsoft",          "sector": "Technology",     "flag": "🇺🇸"},

@@ -2265,8 +2265,15 @@ def _build_price_history(df, n=20):
 # 개별 종목 백테스트
 # ════════════════════════════════════════════════════════════════
 def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
-    """개별 종목 백테스트: _generate_signal 스코어 로직 벡터화 적용.
-    BUY/STRONG_BUY → 보유(1x), 나머지 → 현금(0x). 거래비용 0.1%/년 반영."""
+    """개별 종목 백테스트 — 실제 전략 시뮬레이션.
+
+    진입·청산 규칙 (카드에 보여주는 전략과 동일):
+      - BUY/STRONG_BUY 시그널 → 종가 진입, calc_position_targets()로 stop/T2 설정
+      - 당일 저가 ≤ stop  → 손절가에 청산
+      - 당일 고가 ≥ T2   → 목표가에 청산
+      - SELL/STRONG_SELL → 당일 종가 청산
+      - 거래비용: 진입 0.15% + 청산 0.15% (왕복 0.3%)
+    """
     import datetime as _dt
 
     df = load_data(ticker, period=period)
@@ -2277,71 +2284,111 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
         return None
 
     close = df['Close']
-    n = len(close)
+    high  = df['High']
+    low   = df['Low']
+    n     = len(close)
 
-    # 모든 지표 한번에 계산 (vectorized)
-    ma20   = close.rolling(20).mean()
-    ma50   = close.rolling(50).mean()
-    ma200  = close.rolling(200).mean()
-    rsi_s  = calc_rsi(close)
-
-    ema12  = close.ewm(span=12, adjust=False).mean()
-    ema26  = close.ewm(span=26, adjust=False).mean()
-    _macd  = ema12 - ema26
-    _msig  = _macd.ewm(span=9, adjust=False).mean()
-    mhist  = _macd - _msig
-
-    bb_mid  = close.rolling(20).mean()
+    # 지표 사전 계산 (전체 기간 한번에)
+    ma20_s  = close.rolling(20).mean()
+    ma50_s  = close.rolling(50).mean()
+    ma200_s = close.rolling(200).mean()
+    rsi_s   = calc_rsi(close)
+    ema12   = close.ewm(span=12, adjust=False).mean()
+    ema26   = close.ewm(span=26, adjust=False).mean()
+    _macd   = ema12 - ema26
+    mhist_s = _macd - _macd.ewm(span=9, adjust=False).mean()
     bb_std  = close.rolling(20).std()
-    bb_u    = bb_mid + 2 * bb_std
-    bb_l    = bb_mid - 2 * bb_std
-    bb_pctb = (close - bb_l) / (bb_u - bb_l).replace(0, np.nan)
+    bb_l    = close.rolling(20).mean() - 2 * bb_std
+    bb_u    = close.rolling(20).mean() + 2 * bb_std
+    bpctb_s = (close - bb_l) / (bb_u - bb_l).replace(0, np.nan)
+    volr_s  = df['Volume'] / df['Volume'].rolling(20).mean().replace(0, np.nan)
+    sl50_s  = (ma50_s - ma50_s.shift(5)) / ma50_s.shift(5).replace(0, np.nan) * 100
+    atr_s   = calc_atr(df)
+    low10_s = low.rolling(10).min()
+    low20_s = low.rolling(20).min()
+    high20_s= high.rolling(20).max()
 
-    vol20  = df['Volume'].rolling(20).mean()
-    volr   = df['Volume'] / vol20.replace(0, np.nan)
-    sl50   = (ma50 - ma50.shift(5)) / ma50.shift(5).replace(0, np.nan) * 100
-
-    positions = np.zeros(n)
-    for i in range(210, n):
-        c   = float(close.iloc[i])
-        m20 = float(ma20.iloc[i])   if not pd.isna(ma20.iloc[i])  else c
-        m50 = float(ma50.iloc[i])   if not pd.isna(ma50.iloc[i])  else c
-        m200= float(ma200.iloc[i])  if not pd.isna(ma200.iloc[i]) else None
-        rsi = float(rsi_s.iloc[i])  if not pd.isna(rsi_s.iloc[i]) else 50
-        mh  = float(mhist.iloc[i])  if not pd.isna(mhist.iloc[i]) else 0
-        bpb = float(bb_pctb.iloc[i])if not pd.isna(bb_pctb.iloc[i]) else 0.5
-        vr  = float(volr.iloc[i])   if not pd.isna(volr.iloc[i])  else 1.0
-        s50 = float(sl50.iloc[i])   if not pd.isna(sl50.iloc[i])  else 0
-
+    def _sig(i):
+        c    = float(close.iloc[i])
+        m20  = float(ma20_s.iloc[i])  if not pd.isna(ma20_s.iloc[i])  else c
+        m50  = float(ma50_s.iloc[i])  if not pd.isna(ma50_s.iloc[i])  else c
+        m200 = float(ma200_s.iloc[i]) if not pd.isna(ma200_s.iloc[i]) else None
+        rsi  = float(rsi_s.iloc[i])   if not pd.isna(rsi_s.iloc[i])   else 50
+        mh   = float(mhist_s.iloc[i]) if not pd.isna(mhist_s.iloc[i]) else 0
+        bpb  = float(bpctb_s.iloc[i]) if not pd.isna(bpctb_s.iloc[i]) else 0.5
+        vr   = float(volr_s.iloc[i])  if not pd.isna(volr_s.iloc[i])  else 1.0
+        s50  = float(sl50_s.iloc[i])  if not pd.isna(sl50_s.iloc[i])  else 0
         sig, _, _ = _generate_signal(c, m20, m50, m200, rsi, mh, bpb, vr, ma50_slope=s50)
-        positions[i] = 1.0 if sig in ("STRONG_BUY", "BUY") else 0.0
+        return sig, m20, m50
 
-    # 수익률 시뮬레이션
-    close_vals = close.values.astype(float)
-    daily_ret  = np.zeros(n)
-    daily_ret[1:] = np.diff(close_vals) / close_vals[:-1]
-
-    equity = 100.0; bnh = 100.0
-    peak_eq = 100.0; peak_bh = 100.0
-    mdd = 0.0; mdd_bh = 0.0
+    equity   = 100.0;  bnh      = 100.0
+    peak_eq  = 100.0;  peak_bh  = 100.0
+    mdd      = 0.0;    mdd_bh   = 0.0
     eq_curve = [100.0]; ret_list = []
 
-    for i in range(1, n):
-        r   = float(daily_ret[i])
-        pos = float(positions[i - 1])
-        cost = (0.001 if pos > 0 else 0) / 252
-        pr = r * pos - cost
-        equity *= (1 + pr); bnh *= (1 + r)
-        peak_eq = max(peak_eq, equity); peak_bh = max(peak_bh, bnh)
-        mdd    = max(mdd,    (peak_eq - equity) / peak_eq)
-        mdd_bh = max(mdd_bh, (peak_bh - bnh)   / peak_bh)
-        eq_curve.append(equity); ret_list.append(pr)
+    in_pos   = False
+    stop_p   = 0.0
+    target_p = 0.0
+    FEE      = 0.0015   # 편도 수수료·세금
+
+    for i in range(210, n):
+        c      = float(close.iloc[i])
+        c_hi   = float(high.iloc[i])
+        c_lo   = float(low.iloc[i])
+        c_prev = float(close.iloc[i - 1]) if i > 0 else c
+        dr     = (c - c_prev) / c_prev if c_prev > 0 else 0
+
+        # Buy & Hold 추적
+        bnh    *= (1 + dr)
+        peak_bh = max(peak_bh, bnh)
+        mdd_bh  = max(mdd_bh, (peak_bh - bnh) / peak_bh)
+
+        sig, m20, m50 = _sig(i)
+        pr = 0.0  # 당일 포트폴리오 수익률 (현금 = 0)
+
+        if in_pos:
+            if c_lo <= stop_p:
+                # 손절: 당일 저가가 손절가 이하 → 손절가에 청산
+                pr = (stop_p / c_prev - 1) - FEE
+                in_pos = False
+            elif c_hi >= target_p:
+                # 목표 달성: 당일 고가가 T2 이상 → 목표가에 청산
+                pr = (target_p / c_prev - 1) - FEE
+                in_pos = False
+            elif sig in ("SELL", "STRONG_SELL"):
+                # 매도 시그널: 종가 청산
+                pr = dr - FEE
+                in_pos = False
+            else:
+                # 보유 유지: mark-to-market
+                pr = dr
+        else:
+            if sig in ("BUY", "STRONG_BUY"):
+                # 신규 진입: 종가 매수, stop/target 설정
+                atr  = float(atr_s.iloc[i])   if not pd.isna(atr_s.iloc[i])   else c * 0.02
+                l10  = float(low10_s.iloc[i])  if not pd.isna(low10_s.iloc[i])  else c * 0.97
+                l20  = float(low20_s.iloc[i])  if not pd.isna(low20_s.iloc[i])  else c * 0.95
+                h20  = float(high20_s.iloc[i]) if not pd.isna(high20_s.iloc[i]) else c * 1.05
+                tgts = calc_position_targets(c, atr, l20, h20, sig,
+                                              ma20=m20, ma50=m50, low_10d=l10)
+                if tgts and 0 < tgts["stop"] < c < tgts["t2"]:
+                    in_pos   = True
+                    stop_p   = tgts["stop"]
+                    target_p = tgts["t2"]
+                    pr = -FEE   # 진입 수수료만 당일 반영
+
+        equity  *= (1 + pr)
+        peak_eq  = max(peak_eq, equity)
+        mdd      = max(mdd, (peak_eq - equity) / peak_eq)
+        eq_curve.append(equity)
+        ret_list.append(pr)
 
     years   = n / 252
     cagr    = float((equity / 100) ** (1 / years) - 1) if years > 0 else 0
     cagr_bh = float((bnh    / 100) ** (1 / years) - 1) if years > 0 else 0
-    arr     = np.array(ret_list)
-    sharpe  = float(arr.mean() / arr.std() * np.sqrt(252)) if len(arr) > 1 and arr.std() > 0 else 0
+    active  = [r for r in ret_list if r != 0.0]
+    arr     = np.array(active)
+    sharpe  = float(arr.mean() / arr.std() * np.sqrt(252)) if len(arr) > 10 and arr.std() > 0 else 0
 
     yearly = {}
     try:

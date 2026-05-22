@@ -827,13 +827,17 @@ def calc_position_targets(price, atr_val, support, resistance, signal_type,
         target = t2
 
     return {
-        "stop":       round(stop,   2),
-        "target":     round(target, 2),   # 메인 목표 (T2)
-        "t1":         round(t1,     2),   # 1차 부분익절
-        "t2":         round(t2,     2),
-        "rr":         max(0, rr),
-        "risk_pct":   round(abs(price - stop)   / price * 100, 2),
-        "reward_pct": round(abs(target - price) / price * 100, 2),
+        "stop":        round(stop,   2),
+        "target":      round(target, 2),
+        "t1":          round(t1,     2),
+        "t2":          round(t2,     2),
+        "rr":          max(0, rr),
+        "is_long":     is_long,
+        "risk_pct":    round(abs(price - stop)   / price * 100, 2),
+        "reward_pct":  round(abs(target - price) / price * 100, 2),
+        # 목표 방향 표시용 부호 (롱=+, 숏=-)
+        "t1_pct":      round((t1 - price) / price * 100, 2),
+        "t2_pct":      round((t2 - price) / price * 100, 2),
     }
 
 

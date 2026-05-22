@@ -1552,34 +1552,39 @@ function StockResultCard({data:d,onChart,onClose}){
           </div>
         )}
         {/* 진입/출구 전략 (손절·목표·R:R·포지션) */}
-        {d.targets&&(
+        {d.targets&&(()=>{
+          const tgt=d.targets;
+          const isLong=tgt.is_long!==false;
+          const stopLbl=isLong?`손절 -${tgt.risk_pct?.toFixed(1)}%`:`손절 +${tgt.risk_pct?.toFixed(1)}%`;
+          const t1Pct=(tgt.t1_pct??((tgt.t1-d.price)/d.price*100));
+          const t2Pct=(tgt.t2_pct??((tgt.t2-d.price)/d.price*100));
+          const fmtPct=v=>`${v>=0?"+":""}${v?.toFixed(1)}%`;
+          const bdrColor=isLong?C.green:C.red;
+          return(
           <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
-            background:`${C.green}06`,border:`1px solid ${C.green}22`}}>
+            background:`${bdrColor}06`,border:`1px solid ${bdrColor}22`}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <span style={{color:C.green,fontSize:9,fontWeight:700,letterSpacing:"0.05em"}}>
-                🎯 진입·출구 전략
+              <span style={{color:bdrColor,fontSize:9,fontWeight:700,letterSpacing:"0.05em"}}>
+                🎯 {isLong?"매수 진입":"매도 진입"} 전략
               </span>
-              <span style={{color:d.targets.rr>=3?C.green:d.targets.rr>=2?C.cyan:d.targets.rr>=1?C.yellow:C.red,
-                fontSize:10,fontWeight:800}}>
-                R:R {d.targets.rr}:1
-              </span>
+              <span style={{color:tgt.rr>=3?C.green:tgt.rr>=2?C.cyan:tgt.rr>=1?C.yellow:C.red,
+                fontSize:10,fontWeight:800}}>R:R {tgt.rr}:1</span>
             </div>
-            {/* 손절 + T1/T2 목표 3열 */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginBottom:6}}>
               <div style={{textAlign:"center",padding:"5px 2px",borderRadius:6,
                 background:`${C.red}10`,border:`1px solid ${C.red}22`}}>
-                <div style={{color:C.red,fontSize:11,fontWeight:800}}>{fp(d.targets.stop,d.ticker)}</div>
-                <div style={{color:C.muted,fontSize:8,marginTop:1}}>손절 -{d.targets.risk_pct?.toFixed(1)}%</div>
+                <div style={{color:C.red,fontSize:11,fontWeight:800}}>{fp(tgt.stop,d.ticker)}</div>
+                <div style={{color:C.muted,fontSize:8,marginTop:1}}>{stopLbl}</div>
               </div>
               <div style={{textAlign:"center",padding:"5px 2px",borderRadius:6,
                 background:`${C.yellow}10`,border:`1px solid ${C.yellow}22`}}>
-                <div style={{color:C.yellow,fontSize:11,fontWeight:800}}>{fp(d.targets.t1||d.targets.target,d.ticker)}</div>
-                <div style={{color:C.muted,fontSize:8,marginTop:1}}>T1 부분익절 (1.5R)</div>
+                <div style={{color:C.yellow,fontSize:11,fontWeight:800}}>{fp(tgt.t1||tgt.target,d.ticker)}</div>
+                <div style={{color:C.muted,fontSize:8,marginTop:1}}>T1 {fmtPct(t1Pct)}</div>
               </div>
               <div style={{textAlign:"center",padding:"5px 2px",borderRadius:6,
                 background:`${C.green}10`,border:`1px solid ${C.green}22`}}>
-                <div style={{color:C.green,fontSize:11,fontWeight:800}}>{fp(d.targets.t2||d.targets.target,d.ticker)}</div>
-                <div style={{color:C.muted,fontSize:8,marginTop:1}}>T2 메인목표 +{d.targets.reward_pct?.toFixed(1)}%</div>
+                <div style={{color:C.green,fontSize:11,fontWeight:800}}>{fp(tgt.t2||tgt.target,d.ticker)}</div>
+                <div style={{color:C.muted,fontSize:8,marginTop:1}}>T2 {fmtPct(t2Pct)}</div>
               </div>
             </div>
             {d.position&&d.position.shares>0&&(
@@ -1590,7 +1595,8 @@ function StockResultCard({data:d,onChart,onClose}){
               </div>
             )}
           </div>
-        )}
+          );
+        })()}
         <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:`${C.cyan}08`,border:`1px solid ${C.cyan}22`}}>
           <div style={{color:C.cyan,fontSize:9,fontWeight:700,marginBottom:3}}>🤖 AI 분석</div>
           {d.data_unavailable&&<div style={{color:C.yellow,fontSize:10,marginBottom:4}}>⚠️ 실시간 시세 조회 불가 — 기본 정보만 표시</div>}

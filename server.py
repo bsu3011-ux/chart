@@ -40,7 +40,7 @@ CORS(app)  # 모든 도메인 허용
 OUTPUT_DIR           = os.environ.get("OUTPUT_DIR", os.path.join(BASE_DIR, "output"))
 SIGNALS_FILE         = os.path.join(OUTPUT_DIR, "signals_v4.json")
 SIGNAL_HISTORY_FILE  = os.path.join(OUTPUT_DIR, "signal_history.json")
-BACKTEST_CACHE_FILE  = os.path.join(OUTPUT_DIR, "backtest_cache.json")
+BACKTEST_CACHE_FILE  = os.path.join(OUTPUT_DIR, "backtest_cache_v2.json")  # v2: stop/target 전략 반영
 os.makedirs(OUTPUT_DIR,   exist_ok=True)
 os.makedirs(STATIC_DIR,   exist_ok=True)
 

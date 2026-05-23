@@ -1551,6 +1551,68 @@ function StockResultCard({data:d,onChart,onClose}){
               background:`${C.cyan}12`,color:C.cyan,border:`1px solid ${C.cyan}33`}}>🕯️ {d.candle_pattern}</span>}
           </div>
         )}
+        {/* ── 선행 지표 (RS / 모멘텀 / VCP) ── */}
+        {(d.rs_score!=null||d.momentum||d.vcp)&&(
+          <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
+            background:`${C.surface}`,border:`1px solid ${C.border}55`}}>
+            <div style={{color:C.muted,fontSize:9,fontWeight:700,letterSpacing:"0.06em",marginBottom:6}}>
+              🔭 선행 지표
+            </div>
+            {/* RS + VCP 배지 행 */}
+            <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}}>
+              {d.rs_score!=null&&(()=>{
+                const rs=d.rs_score;
+                const col=rs>=70?C.green:rs<=30?C.red:C.yellow;
+                return(
+                  <span style={{padding:"3px 8px",borderRadius:5,fontSize:10,fontWeight:700,
+                    background:`${col}15`,color:col,border:`1px solid ${col}33`}}>
+                    💪 RS {rs.toFixed(0)} — {d.rs_label||"보통"}
+                  </span>
+                );
+              })()}
+              {d.vcp&&d.vcp.detected&&(
+                <span style={{padding:"3px 8px",borderRadius:5,fontSize:10,fontWeight:700,
+                  background:`${C.cyan}15`,color:C.cyan,border:`1px solid ${C.cyan}33`}}>
+                  📐 VCP {d.vcp.stage}단계 · 수축 {d.vcp.tightness}%
+                </span>
+              )}
+            </div>
+            {/* 모멘텀 스코어 1M/3M/6M */}
+            {d.momentum&&(()=>{
+              const m=d.momentum;
+              const fmtM=v=>v==null?"N/A":`${v>=0?"+":""}${v.toFixed(1)}%`;
+              const colM=v=>v==null?C.muted:v>5?C.green:v>0?C.cyan:v>-5?C.yellow:C.red;
+              return(
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:4}}>
+                  {[
+                    {label:"1개월",val:m.mom_1m},
+                    {label:"3개월",val:m.mom_3m},
+                    {label:"6개월",val:m.mom_6m},
+                    {label:"복합점수",val:null,score:m.composite},
+                  ].map(({label,val,score})=>(
+                    <div key={label} style={{textAlign:"center",padding:"4px 2px",borderRadius:5,
+                      background:`${C.card}`,border:`1px solid ${C.border}33`}}>
+                      {score!=null?(
+                        <>
+                          <div style={{fontSize:11,fontWeight:800,
+                            color:score>=65?C.green:score>=50?C.cyan:score>=35?C.yellow:C.red}}>
+                            {score.toFixed(0)}
+                          </div>
+                          <div style={{color:C.muted,fontSize:8,marginTop:1}}>{label}</div>
+                        </>
+                      ):(
+                        <>
+                          <div style={{fontSize:11,fontWeight:800,color:colM(val)}}>{fmtM(val)}</div>
+                          <div style={{color:C.muted,fontSize:8,marginTop:1}}>{label}</div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        )}
         {/* 진입/출구 전략 (손절·목표·R:R·포지션) */}
         {d.targets&&(()=>{
           const tgt=d.targets;

@@ -2318,13 +2318,17 @@ def _slope(series, n=5):
     return (v_now - v_prev) / v_prev * 100 if v_prev != 0 else 0.0
 
 def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
-                       divergence=None, candle_pattern=None, ma50_slope=0):
+                       divergence=None, candle_pattern=None, ma50_slope=0,
+                       rs_score=50, momentum_composite=50, vcp_detected=False):
     """가중치 기반 신호 생성 (0~100점)
     - MA200/MA50 추세: 35점 (장기 가장 중요)
     - 모멘텀 (RSI/MACD): 25점
     - 단기 추세 (MA20·기울기): 15점
     - 변동성/거래량 (BB/Vol): 15점
     - 다이버전스·캔들 보정: ±10점
+    - 상대강도(RS): ±5점 (선행)
+    - 모멘텀 스코어: ±5점 (선행)
+    - VCP 패턴: +5점 (선행)
     """
     score = 50  # 중립 시작점
 
@@ -2366,6 +2370,22 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
     # 캔들 패턴 보정 (±5점)
     if candle_pattern in ("강세 장악형", "해머 (저점 반전)"):     score += 5
     elif candle_pattern in ("약세 장악형", "슈팅스타 (고점 반전)"): score -= 5
+
+    # ── 선행 지표 보정 ──────────────────────────────────────────
+    # 상대강도 (±5점): 시장 대비 초과 강세/약세
+    if   rs_score >= 80: score += 5
+    elif rs_score >= 65: score += 2
+    elif rs_score <= 20: score -= 5
+    elif rs_score <= 35: score -= 2
+
+    # 모멘텀 복합 스코어 (±5점): 1M/3M/6M 추세
+    if   momentum_composite >= 75: score += 5
+    elif momentum_composite >= 60: score += 2
+    elif momentum_composite <= 25: score -= 5
+    elif momentum_composite <= 40: score -= 2
+
+    # VCP 패턴 (+5점): 변동성 수축 후 돌파 임박
+    if vcp_detected:               score += 5
 
     score = max(0, min(100, score))
     if score >= 75: return "STRONG_BUY",  "🟢 강력 매수", score
@@ -2613,6 +2633,143 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
 
 
 # ════════════════════════════════════════════════════════════════
+# 선행 지표 헬퍼 함수들
+# ════════════════════════════════════════════════════════════════
+import time as _time_mod
+
+_bm_close_cache: dict = {}  # {ticker: (timestamp, Series)}
+
+def _get_benchmark_close(bm_ticker: str, period: str = "1y"):
+    """벤치마크 종가 캐시 (1시간 TTL)"""
+    now = _time_mod.time()
+    if bm_ticker in _bm_close_cache:
+        ts, series = _bm_close_cache[bm_ticker]
+        if now - ts < 3600:
+            return series
+    try:
+        df_bm = load_data(bm_ticker, period=period)
+        if df_bm.empty:
+            return None
+        series = df_bm['Close'].dropna()
+        _bm_close_cache[bm_ticker] = (now, series)
+        return series
+    except Exception:
+        return None
+
+
+def calc_relative_strength(close: pd.Series, bm_ticker: str) -> float:
+    """상대강도 점수 (0~100). 50=시장평균, >50=시장 초과, <50=시장 미달"""
+    bm_close = _get_benchmark_close(bm_ticker)
+    if bm_close is None or len(close) < 63:
+        return 50.0
+
+    n6 = min(126, len(close), len(bm_close))
+    n3 = min(63, n6)
+
+    stk = close.values.astype(float)
+    bm  = bm_close.values.astype(float)
+
+    # 인덱스 불일치 방지: 각각 뒤에서 n개 슬라이싱
+    stk_now = stk[-1];  stk_3 = stk[-n3];  stk_6 = stk[-n6]
+    bm_now  = bm[-1];   bm_3  = bm[-n3];   bm_6  = bm[-n6]
+
+    stk_ret3 = (stk_now / stk_3 - 1) if stk_3 != 0 else 0
+    bm_ret3  = (bm_now  / bm_3  - 1) if bm_3  != 0 else 0
+    stk_ret6 = (stk_now / stk_6 - 1) if stk_6 != 0 else 0
+    bm_ret6  = (bm_now  / bm_6  - 1) if bm_6  != 0 else 0
+
+    # 초과 수익률 (3개월 60%, 6개월 40% 가중)
+    raw_rs = (stk_ret3 - bm_ret3) * 0.6 + (stk_ret6 - bm_ret6) * 0.4
+
+    # ±30% 초과를 0~100으로 변환
+    rs_score = 50.0 + raw_rs / 0.30 * 50.0
+    return round(max(0.0, min(100.0, rs_score)), 1)
+
+
+def calc_momentum_scores(close: pd.Series) -> dict:
+    """1M/3M/6M 모멘텀 및 복합 점수"""
+    c = close.dropna()
+    n = len(c)
+    curr = float(c.iloc[-1])
+
+    def _ret(periods):
+        if n < periods: return None
+        base = float(c.iloc[-periods])
+        return round((curr / base - 1) * 100, 1) if base != 0 else None
+
+    mom_1m = _ret(21)
+    mom_3m = _ret(63)
+    mom_6m = _ret(126)
+
+    parts, weights = [], []
+    if mom_1m is not None: parts.append(mom_1m * 0.3); weights.append(0.3)
+    if mom_3m is not None: parts.append(mom_3m * 0.4); weights.append(0.4)
+    if mom_6m is not None: parts.append(mom_6m * 0.3); weights.append(0.3)
+
+    if parts:
+        raw = sum(parts) / sum(weights)
+        composite = round(max(0.0, min(100.0, 50.0 + raw / 30.0 * 50.0)), 1)
+    else:
+        composite = 50.0
+
+    return {"mom_1m": mom_1m, "mom_3m": mom_3m, "mom_6m": mom_6m, "composite": composite}
+
+
+def detect_vcp(df: pd.DataFrame, high_52w: float) -> dict:
+    """VCP (변동성 수축 패턴) 감지 — 미너비니 기준
+    조건: ① 변동폭 수축 ② 거래량 수축 ③ 52주 고점 25% 이내
+    """
+    close = df['Close'].dropna()
+    high  = df['High'].dropna()
+    low   = df['Low'].dropna()
+    vol   = df['Volume'].dropna()
+
+    n = len(close)
+    if n < 60:
+        return {"detected": False, "stage": 0, "tightness": None, "dist_from_high_pct": None}
+
+    current = float(close.iloc[-1])
+    dist_from_high = (high_52w - current) / high_52w if high_52w > 0 else 1.0
+
+    # 52주 고점에서 25% 이상 하락 시 VCP 미해당
+    if dist_from_high > 0.25:
+        return {"detected": False, "stage": 0, "tightness": None,
+                "dist_from_high_pct": round(dist_from_high * 100, 1)}
+
+    # 최근 60일을 3개 20일 구간으로 분할하여 range와 volume 측정
+    segs = []
+    for i in range(3):
+        s = -(60 - i * 20)
+        e = -(40 - i * 20) if i < 2 else None
+        seg_h = float(high.iloc[s:e].max())
+        seg_l = float(low.iloc[s:e].min())
+        seg_v = float(vol.iloc[s:e].mean())
+        rang  = (seg_h - seg_l) / seg_l * 100 if seg_l > 0 else 0
+        segs.append({"range": rang, "vol": seg_v})
+    # segs[0]=가장 오래된 구간 → segs[2]=최근 구간
+
+    range_contracting = segs[0]["range"] > segs[1]["range"] > segs[2]["range"]
+    vol_contracting   = segs[0]["vol"]   > segs[1]["vol"]   > segs[2]["vol"]
+
+    # 최근 5일 tight 구간 (변동폭 5% 미만)
+    last5_h = float(high.iloc[-5:].max())
+    last5_l = float(low.iloc[-5:].min())
+    last5_c = float(close.iloc[-5]) if n >= 5 else current
+    recent_range_pct = (last5_h - last5_l) / last5_c * 100 if last5_c > 0 else 99
+    very_tight = recent_range_pct < 5.0
+
+    stage = sum([range_contracting, vol_contracting, very_tight])
+    detected = stage >= 2
+
+    return {
+        "detected": detected,
+        "stage": stage,
+        "tightness": round(recent_range_pct, 1),
+        "dist_from_high_pct": round(dist_from_high * 100, 1),
+    }
+
+
+# ════════════════════════════════════════════════════════════════
 # 주식 검색 분석 — 메인 함수
 # ════════════════════════════════════════════════════════════════
 def analyze_stock(ticker: str) -> dict:
@@ -2702,10 +2859,22 @@ def analyze_stock(ticker: str) -> dict:
     # 캔들 패턴
     candle_pattern = detect_candle_pattern(df)
 
-    # 신호 생성 (가중치 + 다이버전스 + 캔들)
+    # ── 선행 지표 ────────────────────────────────────────────────
+    is_korean = ticker.endswith(".KS") or ticker.endswith(".KQ")
+    bm_ticker = "^KS11" if is_korean else "^GSPC"
+
+    rs_score = calc_relative_strength(close, bm_ticker)
+
+    momentum = calc_momentum_scores(close)
+
+    vcp = detect_vcp(df, high_52w)
+
+    # 신호 생성 (가중치 + 다이버전스 + 캔들 + 선행지표)
     signal_type, signal_text, confidence = _generate_signal(
         current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
-        divergence=divergence, candle_pattern=candle_pattern, ma50_slope=ma50_slope
+        divergence=divergence, candle_pattern=candle_pattern, ma50_slope=ma50_slope,
+        rs_score=rs_score, momentum_composite=momentum["composite"],
+        vcp_detected=vcp["detected"]
     )
 
     # 손절/목표/R:R (기술적 지지선 + MA + 스윙로우/하이 전달)
@@ -2721,7 +2890,7 @@ def analyze_stock(ticker: str) -> dict:
         ticker, current, change_pct, rsi, macd_hist, bb_pct_b,
         ma20, ma50, ma200, signal_type, vol_spike, from_high
     )
-    # 보조 텍스트 추가 (다이버전스·캔들)
+    # 보조 텍스트 추가 (다이버전스·캔들·선행지표)
     extras = []
     if divergence == "bullish":
         extras.append("⚡ RSI 상승 다이버전스 — 단기 반등 가능성")
@@ -2729,6 +2898,12 @@ def analyze_stock(ticker: str) -> dict:
         extras.append("⚠️ RSI 하락 다이버전스 — 단기 조정 가능성")
     if candle_pattern:
         extras.append(f"🕯️ 직전봉: {candle_pattern}")
+    if vcp["detected"]:
+        extras.append(f"📐 VCP 패턴 감지 — 변동성 수축 {vcp['stage']}단계, 돌파 임박 가능성")
+    if rs_score >= 70:
+        extras.append(f"💪 RS {rs_score:.0f} — 시장 대비 강세 (상위 {100-int(rs_score)}%)")
+    elif rs_score <= 30:
+        extras.append(f"📉 RS {rs_score:.0f} — 시장 대비 약세")
     if extras:
         analysis_text = analysis_text + " " + " ".join(extras)
 
@@ -2744,8 +2919,7 @@ def analyze_stock(ticker: str) -> dict:
     price_history = _build_price_history(df, n=20)
 
     # 메타 정보
-    info       = POPULAR_STOCKS.get(ticker, {})
-    is_korean  = ticker.endswith(".KS") or ticker.endswith(".KQ")
+    info = POPULAR_STOCKS.get(ticker, {})
 
     return {
         "ticker": ticker,
@@ -2802,6 +2976,11 @@ def analyze_stock(ticker: str) -> dict:
         # ── 신호 보조 ──
         "divergence": divergence,
         "candle_pattern": candle_pattern,
+        # ── 선행 지표 ──
+        "rs_score": rs_score,
+        "rs_label": "강세" if rs_score >= 70 else "약세" if rs_score <= 30 else "보통",
+        "momentum": momentum,
+        "vcp": vcp,
         "generated_at": datetime.datetime.now().isoformat(),
     }
 

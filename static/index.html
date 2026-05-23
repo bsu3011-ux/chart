@@ -1789,6 +1789,222 @@ function StockResultCard({data:d,onChart,onClose}){
 // ════════════════════════════════════════════
 // 스크리너 페이지
 // ════════════════════════════════════════════
+// ════════════════════════════════════════════
+// 🏆 종목 랭킹 페이지
+// ════════════════════════════════════════════
+function RankingPage(){
+  const [data,setData]=React.useState(null);
+  const [loading,setLoading]=React.useState(true);
+  const [sigFilter,setSigFilter]=React.useState("all");
+  const [polling,setPolling]=React.useState(false);
+
+  const fetchRanking=(refresh=false)=>{
+    setLoading(true);
+    fetch(`/api/top_stocks?n=50${refresh?"&refresh=1":""}`)
+      .then(r=>r.json())
+      .then(d=>{
+        setData(d);
+        setLoading(false);
+        if(d.status==="analyzing"){
+          setPolling(true);
+        } else {
+          setPolling(false);
+        }
+      })
+      .catch(()=>setLoading(false));
+  };
+
+  React.useEffect(()=>{fetchRanking();},[]);
+
+  // 분석 중일 때 15초마다 폴링
+  React.useEffect(()=>{
+    if(!polling) return;
+    const id=setInterval(()=>{
+      fetch("/api/top_stocks?n=50")
+        .then(r=>r.json())
+        .then(d=>{
+          setData(d);
+          if(d.status==="ok"){setPolling(false);}
+        }).catch(()=>{});
+    },15000);
+    return ()=>clearInterval(id);
+  },[polling]);
+
+  const medals=["🥇","🥈","🥉"];
+  const sigColor=s=>s&&s.includes("BUY")?C.green:s&&s.includes("SELL")?C.red:C.muted;
+
+  const ranking=(data?.ranking||[]).filter(r=>{
+    if(sigFilter==="buy")  return r.signal_type&&r.signal_type.includes("BUY");
+    if(sigFilter==="sell") return r.signal_type&&r.signal_type.includes("SELL");
+    return true;
+  });
+
+  const fp=(v,ticker)=>{
+    if(v==null) return "-";
+    const isKR=ticker&&(ticker.endsWith(".KS")||ticker.endsWith(".KQ"));
+    if(isKR) return Math.round(v).toLocaleString()+"원";
+    return "$"+v.toFixed(2);
+  };
+
+  return(
+    <div style={{paddingBottom:80}}>
+      {/* 헤더 */}
+      <div style={{padding:"16px 16px 8px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{color:C.text,fontSize:18,fontWeight:900}}>🏆 종목 랭킹</div>
+          {data?.updated&&<div style={{color:C.muted,fontSize:10,marginTop:2}}>
+            기준: {new Date(data.updated).toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}
+            {" · "}{data.total_analyzed||0}개 분석
+            {data.analyzing&&" · 갱신 중..."}
+          </div>}
+        </div>
+        <button onClick={()=>fetchRanking(true)} style={{
+          padding:"6px 12px",borderRadius:8,border:`1px solid ${C.cyan}44`,
+          background:`${C.cyan}12`,color:C.cyan,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+          🔄 새로고침
+        </button>
+      </div>
+
+      {/* 필터 탭 */}
+      <div style={{display:"flex",gap:6,padding:"0 16px 10px"}}>
+        {[["all","전체"],["buy","매수"],["sell","매도"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setSigFilter(v)} style={{
+            padding:"5px 14px",borderRadius:20,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
+            background:sigFilter===v?C.cyan:C.card,
+            color:sigFilter===v?"#000":C.dim}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* 분석 중 */}
+      {data?.status==="analyzing"&&(
+        <div style={{margin:"40px 16px",textAlign:"center",color:C.muted}}>
+          <div style={{fontSize:32,marginBottom:12}}>⏳</div>
+          <div style={{fontSize:14,fontWeight:700,color:C.cyan,marginBottom:6}}>종목 분석 중...</div>
+          <div style={{fontSize:11}}>{data.message}</div>
+          <div style={{fontSize:10,marginTop:8,color:C.muted}}>15초마다 자동 갱신됩니다</div>
+        </div>
+      )}
+
+      {/* 로딩 */}
+      {loading&&data===null&&(
+        <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:13}}>불러오는 중...</div>
+      )}
+
+      {/* 랭킹 카드 */}
+      {ranking.map((r,i)=>{
+        const conf=r.confidence||0;
+        const confCol=conf>=75?C.green:conf>=60?C.cyan:conf>=40?C.yellow:C.red;
+        const chgCol=(r.change_pct||0)>=0?C.green:C.red;
+        const rsCol=(r.rs_score||50)>=70?C.green:(r.rs_score||50)<=30?C.red:C.yellow;
+        return(
+          <div key={r.ticker} style={{
+            margin:"0 12px 10px",padding:"12px 14px",borderRadius:12,
+            background:C.card,border:`1px solid ${i<3?confCol+"44":C.border+"33"}`,
+            position:"relative"}}>
+
+            {/* 순위 + 종목명 */}
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <span style={{fontSize:i<3?22:14,fontWeight:900,minWidth:28,textAlign:"center",
+                color:i<3?confCol:C.muted}}>
+                {i<3?medals[i]:`#${i+1}`}
+              </span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                  <span style={{fontSize:13}}>{r.flag}</span>
+                  <span style={{color:C.text,fontWeight:800,fontSize:13,
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</span>
+                  <span style={{color:C.muted,fontSize:9}}>{r.sector}</span>
+                </div>
+                <div style={{color:C.dim,fontSize:9,marginTop:1}}>{r.ticker}</div>
+              </div>
+              {/* 신호 배지 */}
+              <span style={{padding:"3px 8px",borderRadius:6,fontSize:10,fontWeight:800,
+                background:`${sigColor(r.signal_type)}18`,color:sigColor(r.signal_type),
+                border:`1px solid ${sigColor(r.signal_type)}33`,whiteSpace:"nowrap"}}>
+                {r.signal_text||r.signal_type}
+              </span>
+            </div>
+
+            {/* 가격 + 신뢰도 */}
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                  <span style={{color:C.text,fontWeight:800,fontSize:14}}>{fp(r.price,r.ticker)}</span>
+                  <span style={{color:chgCol,fontSize:11,fontWeight:700}}>
+                    {(r.change_pct>=0?"+":"")+r.change_pct?.toFixed(2)+"%"}
+                  </span>
+                </div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{color:confCol,fontSize:16,fontWeight:900}}>{conf}</div>
+                <div style={{color:C.muted,fontSize:8}}>신뢰도</div>
+              </div>
+            </div>
+
+            {/* 신뢰도 바 */}
+            <div style={{height:4,background:C.border,borderRadius:2,overflow:"hidden",marginBottom:8}}>
+              <div style={{width:`${conf}%`,height:"100%",background:confCol,borderRadius:2,
+                transition:"width .4s"}}/>
+            </div>
+
+            {/* RS + 모멘텀 */}
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              {r.rs_score!=null&&(
+                <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,fontWeight:700,
+                  background:`${rsCol}15`,color:rsCol,border:`1px solid ${rsCol}22`}}>
+                  RS {r.rs_score?.toFixed(0)}
+                </span>
+              )}
+              {r.mom_1m!=null&&(
+                <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,fontWeight:700,
+                  background:`${r.mom_1m>=0?C.green:C.red}12`,
+                  color:r.mom_1m>=0?C.green:C.red}}>
+                  1M {r.mom_1m>=0?"+":""}{r.mom_1m?.toFixed(1)}%
+                </span>
+              )}
+              {r.mom_3m!=null&&(
+                <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,fontWeight:700,
+                  background:`${r.mom_3m>=0?C.green:C.red}12`,
+                  color:r.mom_3m>=0?C.green:C.red}}>
+                  3M {r.mom_3m>=0?"+":""}{r.mom_3m?.toFixed(1)}%
+                </span>
+              )}
+              {r.mom_6m!=null&&(
+                <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,fontWeight:700,
+                  background:`${r.mom_6m>=0?C.green:C.red}12`,
+                  color:r.mom_6m>=0?C.green:C.red}}>
+                  6M {r.mom_6m>=0?"+":""}{r.mom_6m?.toFixed(1)}%
+                </span>
+              )}
+              {r.regime_label&&r.regime_label!=="데이터 부족"&&(
+                <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,
+                  color:C.muted,background:C.surface,border:`1px solid ${C.border}33`}}>
+                  {r.regime_label}
+                </span>
+              )}
+              {r.fundamental_label&&r.fundamental_adj!=null&&r.fundamental_adj!==0&&(
+                <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,
+                  color:r.fundamental_adj>=2?C.green:r.fundamental_adj<=-2?C.red:C.muted,
+                  background:C.surface,border:`1px solid ${C.border}33`}}>
+                  {r.fundamental_label}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+
+      {data?.status==="ok"&&ranking.length===0&&(
+        <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:13}}>
+          해당 조건의 종목이 없습니다
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ScreenerPage({markets,onChart}){
   const [sigFilter,setSigFilter]=useState("all");
   const [stratFilter,setStratFilter]=useState("all");
@@ -2235,6 +2451,7 @@ function SideNav({tab,setTab}){
   const tabs=[
     {id:"market",icon:"🏠",label:"마켓"},
     {id:"screener",icon:"🔍",label:"스크리너"},
+    {id:"ranking",icon:"🏆",label:"랭킹"},
     {id:"portfolio",icon:"💼",label:"포트폴리오"},
     {id:"calendar",icon:"📅",label:"캘린더"},
     {id:"settings",icon:"⚙️",label:"설정"},
@@ -2267,6 +2484,7 @@ function BottomTabBar({tab,setTab}){
   const tabs=[
     {id:"market",icon:"🏠",label:"마켓"},
     {id:"screener",icon:"🔍",label:"스크리너"},
+    {id:"ranking",icon:"🏆",label:"랭킹"},
     {id:"portfolio",icon:"💼",label:"포트폴리오"},
     {id:"calendar",icon:"📅",label:"캘린더"},
     {id:"settings",icon:"⚙️",label:"설정"},
@@ -2554,6 +2772,7 @@ function App(){
           data={data} fetchSignals={fetchSignals} runAnalysis={runAnalysis}
           loading={loading} apiConnected={apiConnected} clock={clock}/>}
         {tab==="screener"&&<ScreenerPage markets={markets} onChart={setChartMarket}/>}
+        {tab==="ranking"&&<RankingPage/>}
         {tab==="portfolio"&&<PortfolioPage/>}
         {tab==="calendar"&&<CalendarPage/>}
         {tab==="settings"&&<SettingsPage/>}

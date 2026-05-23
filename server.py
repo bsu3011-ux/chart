@@ -905,6 +905,134 @@ def get_backtest():
     return jsonify(result)
 
 
+RANKING_CACHE_FILE = os.path.join(OUTPUT_DIR, "ranking_cache.json")
+_ranking_in_progress = False
+_ranking_lock = threading.Lock()
+
+
+def _analyze_for_ranking(ticker: str):
+    """랭킹용 단일 종목 분석 — 실패 시 None"""
+    try:
+        r = analyze_stock(ticker)
+        if r.get("price") is None:
+            return None
+        info = POPULAR_STOCKS.get(ticker, {})
+        return {
+            "ticker":     ticker,
+            "name":       info.get("name", r.get("name", ticker)),
+            "name_en":    info.get("name_en", ""),
+            "sector":     info.get("sector", ""),
+            "flag":       info.get("flag", "🌐"),
+            "price":      r.get("price"),
+            "change_pct": r.get("change_pct"),
+            "confidence": r.get("confidence"),
+            "signal_type": r.get("signal_type"),
+            "signal_text": r.get("signal_text"),
+            "rs_score":   r.get("rs_score"),
+            "rs_label":   r.get("rs_label"),
+            "mom_1m":     (r.get("momentum") or {}).get("mom_1m"),
+            "mom_3m":     (r.get("momentum") or {}).get("mom_3m"),
+            "mom_6m":     (r.get("momentum") or {}).get("mom_6m"),
+            "regime_label":      (r.get("market_regime") or {}).get("label"),
+            "liquidity_label":   (r.get("liquidity") or {}).get("label"),
+            "liquidity_tv":      (r.get("liquidity") or {}).get("trading_value_display"),
+            "fundamental_label": (r.get("fundamental_score") or {}).get("label"),
+            "fundamental_adj":   (r.get("fundamental_score") or {}).get("score_adj"),
+            "targets":    r.get("targets"),
+            "from_high_pct": r.get("from_high_pct"),
+        }
+    except Exception:
+        return None
+
+
+def _build_ranking_cache():
+    """POPULAR_STOCKS 전체 병렬 분석 → 신뢰도순 캐시 저장"""
+    global _ranking_in_progress
+    with _ranking_lock:
+        if _ranking_in_progress:
+            return
+        _ranking_in_progress = True
+
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        tickers = list(POPULAR_STOCKS.keys())
+        results = []
+        print(f"[ranking] 분석 시작: {len(tickers)}개 종목")
+
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            futures = {ex.submit(_analyze_for_ranking, t): t for t in tickers}
+            for fut in as_completed(futures, timeout=600):
+                try:
+                    r = fut.result(timeout=30)
+                    if r and r.get("confidence") is not None:
+                        results.append(r)
+                except Exception:
+                    pass
+
+        results.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+        cache = {
+            "updated": datetime.datetime.now().isoformat(),
+            "total_analyzed": len(results),
+            "ranking": results[:100],
+        }
+        with open(RANKING_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_clean(cache), f, ensure_ascii=False)
+        print(f"[ranking] 완료: {len(results)}개 분석, 상위 100개 저장")
+    except Exception as e:
+        print(f"[ranking] 오류: {e}")
+    finally:
+        global _ranking_in_progress
+        _ranking_in_progress = False
+
+
+@app.route('/api/top_stocks')
+def get_top_stocks():
+    """신뢰도 기준 종목 랭킹
+    GET /api/top_stocks          → 상위 10개
+    GET /api/top_stocks?n=20     → 상위 20개
+    GET /api/top_stocks?signal=BUY → 매수 신호만
+    GET /api/top_stocks?refresh=1  → 강제 재분석
+    """
+    n             = min(int(request.args.get("n", 10)), 100)
+    signal_filter = request.args.get("signal", "")
+    refresh       = request.args.get("refresh", "0") == "1"
+    cache_ttl     = 3600  # 1시간
+
+    cache_data = None
+    if os.path.exists(RANKING_CACHE_FILE) and not refresh:
+        try:
+            with open(RANKING_CACHE_FILE, encoding="utf-8") as f:
+                cache_data = json.load(f)
+            updated  = datetime.datetime.fromisoformat(cache_data["updated"])
+            age_sec  = (datetime.datetime.now() - updated).total_seconds()
+            if age_sec > cache_ttl:
+                cache_data = None
+        except Exception:
+            cache_data = None
+
+    if cache_data is None or refresh:
+        threading.Thread(target=_build_ranking_cache, daemon=True).start()
+        if cache_data is None:
+            return jsonify({
+                "status":  "analyzing",
+                "message": f"{len(POPULAR_STOCKS)}개 종목 분석 중... (약 3~5분 소요)",
+                "ranking": [],
+                "total_analyzed": 0,
+            })
+
+    ranking = cache_data.get("ranking", [])
+    if signal_filter:
+        ranking = [r for r in ranking if signal_filter.upper() in (r.get("signal_type") or "")]
+
+    return jsonify({
+        "status":         "ok",
+        "updated":        cache_data.get("updated"),
+        "total_analyzed": cache_data.get("total_analyzed", 0),
+        "analyzing":      _ranking_in_progress,
+        "ranking":        ranking[:n],
+    })
+
+
 @app.route('/guide')
 def guide():
     return send_from_directory(STATIC_DIR, 'guide.html')

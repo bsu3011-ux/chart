@@ -3022,6 +3022,33 @@ def analyze_stock(ticker: str) -> dict:
         fundamental_adj=fundamental["score_adj"],
     )
 
+    # ── KIS Open API: 외국인·기관 순매수 + 체결강도 (한국 종목만) ──
+    kis_investor: dict = {}
+    kis_trade:    dict = {}
+    kis_conf_adj: int  = 0
+    if is_korean:
+        try:
+            from kis_api import get_investor_trend, get_trade_strength, is_available as _kis_ok
+            if _kis_ok():
+                krx_code     = ticker.split(".")[0]
+                kis_investor = get_investor_trend(krx_code)
+                kis_trade    = get_trade_strength(krx_code)
+                # 외국인·기관 신호 → 신뢰도 보정 (±8점)
+                sig = kis_investor.get("signal", "neutral")
+                if   sig == "strong_buy":  kis_conf_adj += 8
+                elif sig == "buy":         kis_conf_adj += 4
+                elif sig == "sell":        kis_conf_adj -= 4
+                elif sig == "strong_sell": kis_conf_adj -= 8
+                # 체결강도 → 신뢰도 보정 (±4점)
+                cttr = kis_trade.get("cttr", 0)
+                if   cttr >= 70: kis_conf_adj += 4
+                elif cttr >= 60: kis_conf_adj += 2
+                elif cttr <= 30: kis_conf_adj -= 4
+                elif cttr <= 40: kis_conf_adj -= 2
+                confidence = max(0, min(100, confidence + kis_conf_adj))
+        except (ImportError, Exception):
+            pass
+
     # 손절/목표/R:R (기술적 지지선 + MA + 스윙로우/하이 전달)
     targets = calc_position_targets(
         current, atr_val, support, resistance, signal_type,
@@ -3059,6 +3086,17 @@ def analyze_stock(ticker: str) -> dict:
         extras.append(f"⚠️ 펀더멘털 부진 — 적자 또는 고평가 우려")
     elif fundamental["available"] and fundamental["score_adj"] >= 5:
         extras.append(f"🏅 펀더멘털 우량 — 저PER·고ROE·EPS성장 동반")
+    # KIS 외국인·기관 순매수 코멘트 (한국 종목)
+    if kis_investor:
+        sig     = kis_investor.get("signal", "neutral")
+        frgn_3d = kis_investor.get("frgn_3d", 0)
+        inst_3d = kis_investor.get("inst_3d", 0)
+        if sig in ("strong_buy", "buy") and frgn_3d > 0:
+            parts = [f"외국인 3일 {frgn_3d:+,}주"]
+            if inst_3d > 0: parts.append(f"기관 {inst_3d:+,}주")
+            extras.append(f"🏦 KIS {' · '.join(parts)} 순매수")
+        elif sig in ("strong_sell", "sell") and frgn_3d < 0:
+            extras.append(f"🏦 KIS 외국인 3일 {frgn_3d:+,}주 순매도")
     if extras:
         analysis_text = analysis_text + " " + " ".join(extras)
 
@@ -3140,6 +3178,9 @@ def analyze_stock(ticker: str) -> dict:
         "market_regime": regime,
         "liquidity": liquidity,
         "fundamental_score": fundamental,
+        # ── KIS 외국인·기관·체결강도 ──
+        "kis_investor": kis_investor,
+        "kis_trade":    kis_trade,
         "generated_at": datetime.datetime.now().isoformat(),
     }
 

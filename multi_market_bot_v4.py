@@ -2321,11 +2321,11 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
                        divergence=None, candle_pattern=None, ma50_slope=0,
                        rs_score=50, momentum_composite=50, vcp_detected=False,
                        regime_adj=0, liquidity_adj=0, fundamental_adj=0):
-    """가중치 기반 신호 생성 (0~100점)
-    - MA200/MA50 추세: 35점 (장기 가장 중요)
-    - 모멘텀 (RSI/MACD): 25점
+    """가중치 기반 신호 생성 (0~100점, 기본점수 25)
+    - MA200/MA50 추세: 30점 (장기 가장 중요)
+    - 모멘텀 (RSI/MACD): 25점 (MACD 최대 ±8점)
     - 단기 추세 (MA20·기울기): 15점
-    - 변동성/거래량 (BB/Vol): 15점
+    - 변동성/거래량 (BB/Vol): 10점
     - 다이버전스·캔들 보정: ±10점
     - 상대강도(RS): ±5점 (선행)
     - 모멘텀 복합 스코어: ±3점 (선행, 이중카운팅 축소)
@@ -2333,12 +2333,13 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
     - 시장 환경(벤치마크 추세): ±10점
     - 유동성(거래대금): ±5점
     - 펀더멘털(PER/ROE/EPS): ±8점
+    신호 기준: STRONG_BUY≥80, BUY≥63, SELL≤40, STRONG_SELL≤20
     """
-    score = 50  # 중립 시작점
+    score = 25  # 낮은 기본점수 — 조건 충족 시만 상승
 
-    # 장기 추세 (35점)
-    if ma200 and price > ma200: score += 20
-    elif ma200:                  score -= 20
+    # 장기 추세 (30점)
+    if ma200 and price > ma200: score += 15
+    elif ma200:                  score -= 15
     if price > ma50:             score += 10
     else:                        score -= 10
     if ma50_slope > 0.5:         score += 5
@@ -2346,14 +2347,16 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
 
     # 모멘텀 (25점)
     if   50 < rsi < 70:          score += 10
-    elif rsi >= 70:              score -= 5   # 과매수 경계
+    elif rsi >= 80:              score -= 12  # 극단 과매수
+    elif rsi >= 70:              score -= 8   # 과매수 경계
+    elif rsi <= 20:              score += 7   # 극단 과매도 반등
     elif rsi <= 30:              score += 5   # 과매도 반등 가능
     else:                        score -= 5
-    # MACD 히스토그램: 크기 비례 점수 (최대 ±12점)
+    # MACD 히스토그램: 크기 비례 점수 (최대 ±8점, 이중카운팅 방지)
     if macd_hist != 0:
-        # 가격 대비 히스토그램 비율로 정규화 (0.5% 기준 ±8점, 최대 ±12점)
+        # 가격 대비 히스토그램 비율로 정규화 (0.5% 기준 ±6점, 최대 ±8점)
         _macd_norm = (macd_hist / price) * 100 if price else 0
-        _macd_pts = max(-12, min(12, _macd_norm / 0.5 * 8))
+        _macd_pts = max(-8, min(8, _macd_norm / 0.5 * 6))
         score += int(_macd_pts)
 
     # 단기 추세 (15점)
@@ -2398,9 +2401,9 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
     score += fundamental_adj
 
     score = max(0, min(100, score))
-    if score >= 75: return "STRONG_BUY",  "🟢 강력 매수", score
-    if score >= 60: return "BUY",         "🟢 매수",     score
-    if score <= 25: return "STRONG_SELL", "🔴 강력 매도", score
+    if score >= 80: return "STRONG_BUY",  "🟢 강력 매수", score
+    if score >= 63: return "BUY",         "🟢 매수",     score
+    if score <= 20: return "STRONG_SELL", "🔴 강력 매도", score
     if score <= 40: return "SELL",        "🔴 매도",     score
     return "NEUTRAL", "⚪ 중립", score
 

@@ -917,12 +917,14 @@ def _analyze_for_ranking(ticker: str):
         if r.get("price") is None:
             return None
         info = POPULAR_STOCKS.get(ticker, {})
+        krx  = _krx_cache.get(ticker, {})
+        is_kr = ticker.endswith(".KS") or ticker.endswith(".KQ")
         return {
             "ticker":     ticker,
-            "name":       info.get("name", r.get("name", ticker)),
+            "name":       info.get("name") or krx.get("name") or r.get("name", ticker),
             "name_en":    info.get("name_en", ""),
-            "sector":     info.get("sector", ""),
-            "flag":       info.get("flag", "🌐"),
+            "sector":     info.get("sector") or krx.get("market", ""),
+            "flag":       info.get("flag") or ("🇰🇷" if is_kr else "🌐"),
             "price":      r.get("price"),
             "change_pct": r.get("change_pct"),
             "confidence": r.get("confidence"),
@@ -946,7 +948,7 @@ def _analyze_for_ranking(ticker: str):
 
 
 def _build_ranking_cache():
-    """POPULAR_STOCKS 전체 병렬 분석 → 신뢰도순 캐시 저장"""
+    """POPULAR_STOCKS + KRX 전종목(코스피·코스닥) 병렬 분석 → 신뢰도순 캐시 저장"""
     global _ranking_in_progress
     with _ranking_lock:
         if _ranking_in_progress:
@@ -955,15 +957,21 @@ def _build_ranking_cache():
 
     try:
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        tickers = list(POPULAR_STOCKS.keys())
+        # POPULAR_STOCKS(미국 포함) + KRX 전종목 합집합 (중복 제거)
+        tickers = set(POPULAR_STOCKS.keys())
+        if _krx_cache:
+            tickers.update(_krx_cache.keys())
+        tickers = list(tickers)
         results = []
-        print(f"[ranking] 분석 시작: {len(tickers)}개 종목")
+        print(f"[ranking] 분석 시작: {len(tickers)}개 종목 "
+              f"(POPULAR {len(POPULAR_STOCKS)} + KRX {len(_krx_cache)} 합집합)")
 
-        with ThreadPoolExecutor(max_workers=10) as ex:
+        # KRX 전종목 분석은 시간이 오래 걸리므로 워커 수↑, 타임아웃↑
+        with ThreadPoolExecutor(max_workers=20) as ex:
             futures = {ex.submit(_analyze_for_ranking, t): t for t in tickers}
-            for fut in as_completed(futures, timeout=600):
+            for fut in as_completed(futures, timeout=1800):
                 try:
-                    r = fut.result(timeout=30)
+                    r = fut.result(timeout=45)
                     if r and r.get("confidence") is not None:
                         results.append(r)
                 except Exception:
@@ -973,15 +981,14 @@ def _build_ranking_cache():
         cache = {
             "updated": datetime.datetime.now().isoformat(),
             "total_analyzed": len(results),
-            "ranking": results[:100],
+            "ranking": results[:200],   # 상위 200개 저장 (전종목 확장)
         }
         with open(RANKING_CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(_clean(cache), f, ensure_ascii=False)
-        print(f"[ranking] 완료: {len(results)}개 분석, 상위 100개 저장")
+        print(f"[ranking] 완료: {len(results)}개 분석, 상위 200개 저장")
     except Exception as e:
         print(f"[ranking] 오류: {e}")
     finally:
-        global _ranking_in_progress
         _ranking_in_progress = False
 
 
@@ -996,7 +1003,7 @@ def get_top_stocks():
     n             = min(int(request.args.get("n", 10)), 100)
     signal_filter = request.args.get("signal", "")
     refresh       = request.args.get("refresh", "0") == "1"
-    cache_ttl     = 3600  # 1시간
+    cache_ttl     = 7200  # 2시간 (전종목 분석은 5~10분 소요되므로 캐시 수명 연장)
 
     cache_data = None
     if os.path.exists(RANKING_CACHE_FILE) and not refresh:
@@ -1013,9 +1020,10 @@ def get_top_stocks():
     if cache_data is None or refresh:
         threading.Thread(target=_build_ranking_cache, daemon=True).start()
         if cache_data is None:
+            total_count = len(POPULAR_STOCKS) + len(_krx_cache)
             return jsonify({
                 "status":  "analyzing",
-                "message": f"{len(POPULAR_STOCKS)}개 종목 분석 중... (약 3~5분 소요)",
+                "message": f"코스피·코스닥 전종목 포함 {total_count}개 분석 중... (약 5~10분 소요)",
                 "ranking": [],
                 "total_analyzed": 0,
             })

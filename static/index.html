@@ -404,10 +404,10 @@ function Card({m,open,onToggle,onChart}){
                 <span style={{color:C.muted,fontSize:10,minWidth:46}}>신뢰도</span>
                 <div style={{flex:1,height:6,background:C.border,borderRadius:3,overflow:"hidden"}}>
                   <div style={{width:`${m.confidence}%`,height:"100%",
-                    background:m.confidence>=70?C.green:m.confidence>=50?C.cyan:m.confidence>=30?C.yellow:C.red,
+                    background:m.confidence>=80?C.green:m.confidence>=63?C.cyan:m.confidence>=41?C.yellow:C.red,
                     transition:"width .3s ease"}}></div>
                 </div>
-                <span style={{color:m.confidence>=70?C.green:m.confidence>=50?C.cyan:m.confidence>=30?C.yellow:C.red,
+                <span style={{color:m.confidence>=80?C.green:m.confidence>=63?C.cyan:m.confidence>=41?C.yellow:C.red,
                   fontSize:11,fontWeight:700,minWidth:28,textAlign:"right"}}>{m.confidence}</span>
               </div>
             )}
@@ -1534,7 +1534,7 @@ function StockResultCard({data:d,onChart,onClose}){
             <span style={{color:C.muted,fontSize:10,minWidth:46}}>신뢰도</span>
             <div style={{flex:1,height:6,background:C.border,borderRadius:3,overflow:"hidden"}}>
               <div style={{width:`${d.confidence}%`,height:"100%",
-                background:d.confidence>=70?C.green:d.confidence>=50?C.cyan:d.confidence>=30?C.yellow:C.red,
+                background:d.confidence>=80?C.green:d.confidence>=63?C.cyan:d.confidence>=41?C.yellow:C.red,
                 transition:"width .3s"}}/>
             </div>
             <span style={{color:C.dim,fontSize:11,fontWeight:700,minWidth:24,textAlign:"right"}}>{d.confidence}</span>
@@ -1895,7 +1895,7 @@ function RankingPage(){
       {/* 랭킹 카드 */}
       {ranking.map((r,i)=>{
         const conf=r.confidence||0;
-        const confCol=conf>=75?C.green:conf>=60?C.cyan:conf>=40?C.yellow:C.red;
+        const confCol=conf>=80?C.green:conf>=63?C.cyan:conf>=41?C.yellow:C.red;
         const chgCol=(r.change_pct||0)>=0?C.green:C.red;
         const rsCol=(r.rs_score||50)>=70?C.green:(r.rs_score||50)<=30?C.red:C.yellow;
         return(

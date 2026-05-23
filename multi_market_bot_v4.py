@@ -2319,7 +2319,8 @@ def _slope(series, n=5):
 
 def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
                        divergence=None, candle_pattern=None, ma50_slope=0,
-                       rs_score=50, momentum_composite=50, vcp_detected=False):
+                       rs_score=50, momentum_composite=50, vcp_detected=False,
+                       regime_adj=0, liquidity_adj=0, fundamental_adj=0):
     """가중치 기반 신호 생성 (0~100점)
     - MA200/MA50 추세: 35점 (장기 가장 중요)
     - 모멘텀 (RSI/MACD): 25점
@@ -2327,8 +2328,11 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
     - 변동성/거래량 (BB/Vol): 15점
     - 다이버전스·캔들 보정: ±10점
     - 상대강도(RS): ±5점 (선행)
-    - 모멘텀 스코어: ±5점 (선행)
+    - 모멘텀 복합 스코어: ±3점 (선행, 이중카운팅 축소)
     - VCP 패턴: +5점 (선행)
+    - 시장 환경(벤치마크 추세): ±10점
+    - 유동성(거래대금): ±5점
+    - 펀더멘털(PER/ROE/EPS): ±8점
     """
     score = 50  # 중립 시작점
 
@@ -2378,14 +2382,20 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
     elif rs_score <= 20: score -= 5
     elif rs_score <= 35: score -= 2
 
-    # 모멘텀 복합 스코어 (±5점): 1M/3M/6M 추세
-    if   momentum_composite >= 75: score += 5
-    elif momentum_composite >= 60: score += 2
-    elif momentum_composite <= 25: score -= 5
-    elif momentum_composite <= 40: score -= 2
+    # 모멘텀 복합 (±3점, 이중카운팅 축소): RSI/MACD/MA기울기와 정보 중복 → 극단값에서만 보정
+    if   momentum_composite >= 80: score += 3
+    elif momentum_composite <= 20: score -= 3
 
     # VCP 패턴 (+5점): 변동성 수축 후 돌파 임박
     if vcp_detected:               score += 5
+
+    # ── 매크로/품질 필터 ────────────────────────────────────────
+    # 시장 환경 (±10점): 벤치마크가 약세장이면 매수 신호 약화
+    score += regime_adj
+    # 유동성 (±5점): 거래대금 부족 종목은 신호 신뢰도 하락
+    score += liquidity_adj
+    # 펀더멘털 (±8점): 저PER·고ROE·EPS성장 보너스, 적자·고PER 패널티
+    score += fundamental_adj
 
     score = max(0, min(100, score))
     if score >= 75: return "STRONG_BUY",  "🟢 강력 매수", score
@@ -2769,6 +2779,132 @@ def detect_vcp(df: pd.DataFrame, high_52w: float) -> dict:
     }
 
 
+def calc_market_regime(bm_ticker: str) -> dict:
+    """벤치마크 추세로 시장 환경 평가
+    - bull (강세장): 벤치마크가 MA200·MA50 모두 위 → +5점 (매수 신호 신뢰도 강화)
+    - bear (약세장): 벤치마크가 MA200·MA50 모두 아래 → -10점 (역추세 매매 위험)
+    - correction (상승장 조정): MA200 위 · MA50 아래 → 0점
+    - rebound (약세장 반등): MA200 아래 · MA50 위 → -3점 (속임수 가능)
+    """
+    bm_close = _get_benchmark_close(bm_ticker, period="2y")
+    if bm_close is None or len(bm_close) < 200:
+        return {"regime": "unknown", "score_adj": 0,
+                "bm_above_ma200": None, "bm_above_ma50": None,
+                "bm_ticker": bm_ticker, "label": "데이터 부족"}
+
+    bm_ma200 = float(bm_close.rolling(200).mean().iloc[-1])
+    bm_ma50  = float(bm_close.rolling(50).mean().iloc[-1])
+    bm_curr  = float(bm_close.iloc[-1])
+
+    above_200 = bm_curr > bm_ma200
+    above_50  = bm_curr > bm_ma50
+
+    if above_200 and above_50:
+        regime, adj, label = "bull",       +5,  "🟢 강세장"
+    elif (not above_200) and (not above_50):
+        regime, adj, label = "bear",       -10, "🔴 약세장"
+    elif above_200 and (not above_50):
+        regime, adj, label = "correction",  0,  "🟡 상승장 조정"
+    else:
+        regime, adj, label = "rebound",    -3,  "🟠 약세장 반등"
+
+    return {
+        "regime": regime, "score_adj": adj, "label": label,
+        "bm_above_ma200": above_200, "bm_above_ma50": above_50,
+        "bm_ticker": bm_ticker,
+    }
+
+
+def calc_liquidity_score(current_vol: int, price: float, is_korean: bool) -> dict:
+    """거래대금(원화/달러) 기준 유동성 평가
+    - 한국: 5억 미만 -5점 / 5억~20억 0점 / 20억 이상 +2점
+    - 미국: $5M 미만 -5점 / $5M~$50M 0점 / $50M 이상 +2점
+    """
+    if current_vol is None or price is None or current_vol <= 0 or price <= 0:
+        return {"score_adj": 0, "trading_value": 0, "label": "데이터 부족"}
+
+    trading_value = current_vol * price  # 원화 또는 달러 단위
+
+    if is_korean:
+        low_th  = 500_000_000        # 5억 원
+        high_th = 2_000_000_000      # 20억 원
+        unit    = "억원"
+        divisor = 1e8
+    else:
+        low_th  = 5_000_000          # $5M
+        high_th = 50_000_000         # $50M
+        unit    = "M$"
+        divisor = 1e6
+
+    if trading_value < low_th:
+        adj, label = -5, f"⚠️ 저유동성"
+    elif trading_value < high_th:
+        adj, label = 0,  "보통"
+    else:
+        adj, label = 2,  "충분"
+
+    return {
+        "score_adj": adj,
+        "trading_value": float(trading_value),
+        "trading_value_display": f"{trading_value/divisor:.1f}{unit}",
+        "label": label,
+    }
+
+
+def calc_fundamental_score(pe_ratio, roe, eps_growth) -> dict:
+    """펀더멘털 점수 (±8점 캡)
+    PER:      <10 +3, 10~25 +1, 25~50 0, ≥50 -2, None/음수 0
+    ROE:      >20% +3, 15~20% +2, 10~15% +1, 0~10% 0, <0% -3
+    EPS성장:  >30% +3, 15~30% +2, 0~15% +1, <0% -3
+    """
+    parts = []
+    details = {}
+
+    # PER
+    if pe_ratio is not None:
+        if   pe_ratio <= 0:   pe_pts = 0     # 적자기업 (PER 의미 없음)
+        elif pe_ratio < 10:   pe_pts = 3
+        elif pe_ratio < 25:   pe_pts = 1
+        elif pe_ratio < 50:   pe_pts = 0
+        else:                 pe_pts = -2
+        parts.append(pe_pts); details["per"] = pe_pts
+    else:
+        details["per"] = None
+
+    # ROE
+    if roe is not None:
+        if   roe >= 20:  roe_pts = 3
+        elif roe >= 15:  roe_pts = 2
+        elif roe >= 10:  roe_pts = 1
+        elif roe >= 0:   roe_pts = 0
+        else:            roe_pts = -3
+        parts.append(roe_pts); details["roe"] = roe_pts
+    else:
+        details["roe"] = None
+
+    # EPS 성장
+    if eps_growth is not None:
+        if   eps_growth >= 30: eps_pts = 3
+        elif eps_growth >= 15: eps_pts = 2
+        elif eps_growth >= 0:  eps_pts = 1
+        else:                  eps_pts = -3
+        parts.append(eps_pts); details["eps_growth"] = eps_pts
+    else:
+        details["eps_growth"] = None
+
+    total = sum(parts) if parts else 0
+    total = max(-8, min(8, total))   # 캡 ±8
+
+    if   total >= 5:  label = "🟢 우량"
+    elif total >= 2:  label = "🟢 양호"
+    elif total >= -1: label = "🟡 보통"
+    elif total >= -4: label = "🟠 부진"
+    else:             label = "🔴 위험"
+
+    return {"score_adj": total, "details": details, "label": label,
+            "available": len(parts) > 0}
+
+
 # ════════════════════════════════════════════════════════════════
 # 주식 검색 분석 — 메인 함수
 # ════════════════════════════════════════════════════════════════
@@ -2864,17 +3000,23 @@ def analyze_stock(ticker: str) -> dict:
     bm_ticker = "^KS11" if is_korean else "^GSPC"
 
     rs_score = calc_relative_strength(close, bm_ticker)
-
     momentum = calc_momentum_scores(close)
+    vcp      = detect_vcp(df, high_52w)
 
-    vcp = detect_vcp(df, high_52w)
+    # ── 매크로/품질 필터 ─────────────────────────────────────────
+    regime      = calc_market_regime(bm_ticker)
+    liquidity   = calc_liquidity_score(current_vol, current, is_korean)
+    fundamental = calc_fundamental_score(pe_ratio, roe, eps_growth)
 
-    # 신호 생성 (가중치 + 다이버전스 + 캔들 + 선행지표)
+    # 신호 생성 (가중치 + 다이버전스 + 캔들 + 선행지표 + 매크로 + 품질)
     signal_type, signal_text, confidence = _generate_signal(
         current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
         divergence=divergence, candle_pattern=candle_pattern, ma50_slope=ma50_slope,
         rs_score=rs_score, momentum_composite=momentum["composite"],
-        vcp_detected=vcp["detected"]
+        vcp_detected=vcp["detected"],
+        regime_adj=regime["score_adj"],
+        liquidity_adj=liquidity["score_adj"],
+        fundamental_adj=fundamental["score_adj"],
     )
 
     # 손절/목표/R:R (기술적 지지선 + MA + 스윙로우/하이 전달)
@@ -2890,7 +3032,7 @@ def analyze_stock(ticker: str) -> dict:
         ticker, current, change_pct, rsi, macd_hist, bb_pct_b,
         ma20, ma50, ma200, signal_type, vol_spike, from_high
     )
-    # 보조 텍스트 추가 (다이버전스·캔들·선행지표)
+    # 보조 텍스트 추가 (다이버전스·캔들·선행지표·매크로)
     extras = []
     if divergence == "bullish":
         extras.append("⚡ RSI 상승 다이버전스 — 단기 반등 가능성")
@@ -2904,6 +3046,16 @@ def analyze_stock(ticker: str) -> dict:
         extras.append(f"💪 RS {rs_score:.0f} — 시장 대비 강세 (상위 {100-int(rs_score)}%)")
     elif rs_score <= 30:
         extras.append(f"📉 RS {rs_score:.0f} — 시장 대비 약세")
+    if regime["regime"] == "bear":
+        extras.append(f"🌧️ 시장 환경 약세장 — 매수 신호 신뢰도 하향 조정")
+    elif regime["regime"] == "bull":
+        extras.append(f"☀️ 시장 환경 강세장 — 매수 신호 신뢰도 가중")
+    if liquidity["score_adj"] < 0:
+        extras.append(f"💧 거래대금 {liquidity.get('trading_value_display','')} — 저유동성 주의")
+    if fundamental["available"] and fundamental["score_adj"] <= -4:
+        extras.append(f"⚠️ 펀더멘털 부진 — 적자 또는 고평가 우려")
+    elif fundamental["available"] and fundamental["score_adj"] >= 5:
+        extras.append(f"🏅 펀더멘털 우량 — 저PER·고ROE·EPS성장 동반")
     if extras:
         analysis_text = analysis_text + " " + " ".join(extras)
 
@@ -2981,6 +3133,10 @@ def analyze_stock(ticker: str) -> dict:
         "rs_label": "강세" if rs_score >= 70 else "약세" if rs_score <= 30 else "보통",
         "momentum": momentum,
         "vcp": vcp,
+        # ── 매크로/품질 필터 ──
+        "market_regime": regime,
+        "liquidity": liquidity,
+        "fundamental_score": fundamental,
         "generated_at": datetime.datetime.now().isoformat(),
     }
 

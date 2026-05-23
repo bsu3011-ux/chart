@@ -1613,6 +1613,56 @@ function StockResultCard({data:d,onChart,onClose}){
             })()}
           </div>
         )}
+        {/* ── 매크로/품질 필터 (시장환경 + 유동성 + 펀더멘털 점수) ── */}
+        {(d.market_regime||d.liquidity||d.fundamental_score)&&(
+          <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
+            background:`${C.surface}`,border:`1px solid ${C.border}55`}}>
+            <div style={{color:C.muted,fontSize:9,fontWeight:700,letterSpacing:"0.06em",marginBottom:6}}>
+              🛡️ 매크로 · 품질 필터
+            </div>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {/* 시장 환경 */}
+              {d.market_regime&&d.market_regime.regime!=="unknown"&&(()=>{
+                const r=d.market_regime;
+                const adj=r.score_adj||0;
+                const col=adj>0?C.green:adj<-5?C.red:adj<0?C.yellow:C.muted;
+                return(
+                  <span style={{padding:"3px 8px",borderRadius:5,fontSize:10,fontWeight:700,
+                    background:`${col}15`,color:col,border:`1px solid ${col}33`}}
+                    title={`벤치마크 ${r.bm_ticker} 기준`}>
+                    {r.label} {adj>=0?"+":""}{adj}점
+                  </span>
+                );
+              })()}
+              {/* 유동성 */}
+              {d.liquidity&&d.liquidity.trading_value>0&&(()=>{
+                const l=d.liquidity;
+                const adj=l.score_adj||0;
+                const col=adj>0?C.green:adj<0?C.red:C.muted;
+                return(
+                  <span style={{padding:"3px 8px",borderRadius:5,fontSize:10,fontWeight:700,
+                    background:`${col}15`,color:col,border:`1px solid ${col}33`}}
+                    title="당일 거래대금 (주식수 × 가격)">
+                    💧 거래대금 {l.trading_value_display} · {l.label} {adj>=0?"+":""}{adj}점
+                  </span>
+                );
+              })()}
+              {/* 펀더멘털 */}
+              {d.fundamental_score&&d.fundamental_score.available&&(()=>{
+                const f=d.fundamental_score;
+                const adj=f.score_adj||0;
+                const col=adj>=2?C.green:adj<=-2?C.red:C.yellow;
+                return(
+                  <span style={{padding:"3px 8px",borderRadius:5,fontSize:10,fontWeight:700,
+                    background:`${col}15`,color:col,border:`1px solid ${col}33`}}
+                    title={`PER ${f.details.per??"·"} · ROE ${f.details.roe??"·"} · EPS성장 ${f.details.eps_growth??"·"}`}>
+                    🏛️ 펀더멘털 {f.label} {adj>=0?"+":""}{adj}점
+                  </span>
+                );
+              })()}
+            </div>
+          </div>
+        )}
         {/* 진입/출구 전략 (손절·목표·R:R·포지션) */}
         {d.targets&&(()=>{
           const tgt=d.targets;

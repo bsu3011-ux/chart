@@ -24,9 +24,10 @@ def _clean(obj):
     return obj
 
 # ── 봇 임포트 ──
+import time
 from multi_market_bot_v4 import (
     main as run_bot, MARKETS, load_data, analyze_market, save_json,
-    analyze_stock, POPULAR_STOCKS,
+    analyze_stock, POPULAR_STOCKS, backtest_strategy, backtest_stock,
 )
 
 # ── 절대 경로 기준 설정 ──
@@ -36,10 +37,224 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 app = Flask(__name__, static_folder=STATIC_DIR)
 CORS(app)  # 모든 도메인 허용
 
-OUTPUT_DIR   = os.environ.get("OUTPUT_DIR", os.path.join(BASE_DIR, "output"))
-SIGNALS_FILE = os.path.join(OUTPUT_DIR, "signals_v4.json")
+OUTPUT_DIR           = os.environ.get("OUTPUT_DIR", os.path.join(BASE_DIR, "output"))
+SIGNALS_FILE         = os.path.join(OUTPUT_DIR, "signals_v4.json")
+SIGNAL_HISTORY_FILE  = os.path.join(OUTPUT_DIR, "signal_history.json")
+BACKTEST_CACHE_FILE  = os.path.join(OUTPUT_DIR, "backtest_cache_v2.json")  # v2: stop/target 전략 반영
 os.makedirs(OUTPUT_DIR,   exist_ok=True)
+
+# ── KRX 전종목 캐시 ──
+KRX_CACHE_FILE = os.path.join(OUTPUT_DIR, "krx_stocks.json")
+_krx_cache: dict = {}   # ticker → {name, market}
+
+def _load_krx_cache():
+    """파일 캐시에서 KRX 전종목 로드"""
+    global _krx_cache
+    if os.path.exists(KRX_CACHE_FILE):
+        try:
+            with open(KRX_CACHE_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            _krx_cache = data.get("stocks", {})
+            return True
+        except Exception:
+            pass
+    return False
+
+def _build_krx_cache():
+    """KRX 전종목 목록 수집 (FinanceDataReader → pykrx 순으로 시도)"""
+    global _krx_cache
+    stocks: dict = {}
+    try:
+        import FinanceDataReader as fdr
+        for market, suffix in (("KOSPI", ".KS"), ("KOSDAQ", ".KQ")):
+            df = fdr.StockListing(market)
+            code_col  = next((c for c in df.columns if c in ("Code","Symbol","Ticker")), None)
+            name_col  = next((c for c in df.columns if c in ("Name","ShortName","CompanyName")), None)
+            if code_col is None or name_col is None:
+                continue
+            for _, row in df.iterrows():
+                code = str(row[code_col]).zfill(6)
+                name = str(row[name_col])
+                stocks[code + suffix] = {"name": name, "market": market, "krx_code": code}
+    except Exception as e1:
+        print(f"[KRX] FDR 실패: {e1} — pykrx 시도")
+        try:
+            from pykrx import stock as krx_stock
+            import datetime as dt
+            today = dt.date.today().strftime("%Y%m%d")
+            for market, suffix in (("KOSPI", ".KS"), ("KOSDAQ", ".KQ")):
+                try:
+                    tickers = krx_stock.get_market_ticker_list(today, market=market)
+                except Exception:
+                    tickers = krx_stock.get_market_ticker_list(
+                        (dt.date.today()-dt.timedelta(days=1)).strftime("%Y%m%d"), market=market)
+                for t in tickers:
+                    name = krx_stock.get_market_ticker_name(t)
+                    stocks[t + suffix] = {"name": name, "market": market, "krx_code": t}
+        except Exception as e2:
+            print(f"[KRX] pykrx도 실패: {e2}")
+
+    if not stocks:
+        print("[KRX] 전종목 캐시 빌드 불가 (네트워크 제한). 6자리 코드 직접 검색은 여전히 작동합니다.")
+        return
+
+    _krx_cache = stocks
+    with open(KRX_CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump({"updated": datetime.datetime.now().isoformat(), "stocks": stocks}, f,
+                  ensure_ascii=False)
+    print(f"[KRX] 전종목 캐시 완료: {len(stocks)}개")
+
+def _init_krx_cache():
+    """서버 시작 시 캐시 로드 (없거나 7일 초과면 백그라운드 갱신)"""
+    loaded = _load_krx_cache()
+    needs_refresh = True
+    if loaded and _krx_cache:
+        try:
+            with open(KRX_CACHE_FILE, encoding="utf-8") as f:
+                meta = json.load(f)
+            updated = datetime.datetime.fromisoformat(meta.get("updated", "2000-01-01"))
+            age_days = (datetime.datetime.now() - updated).days
+            needs_refresh = age_days >= 7
+        except Exception:
+            needs_refresh = True
+    if needs_refresh:
+        threading.Thread(target=_build_krx_cache, daemon=True).start()
 os.makedirs(STATIC_DIR,   exist_ok=True)
+
+_backtest_mem_cache: dict = {}   # { ticker: {ts, data} }
+
+# ── 텔레그램 설정 (환경변수로 주입) ──
+TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+
+def send_telegram(text: str) -> bool:
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        url     = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}).encode()
+        req     = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+        return True
+    except Exception as e:
+        print(f"[telegram] 전송 실패: {e}")
+        return False
+
+
+def _signal_group(signal_type: str) -> str:
+    """신호를 3개 그룹으로 분류: buy / neutral / sell"""
+    if signal_type in ("STRONG_BUY", "BUY"):
+        return "buy"
+    if signal_type in ("SELL", "STRONG_SELL", "CASH", "CASH_VOL"):
+        return "sell"
+    return "neutral"
+
+
+def _save_signal_history(new_data: dict) -> list:
+    """신호 저장 + 그룹 방향 전환 시에만 Telegram 알림. 변경 목록 반환."""
+    history = []
+    if os.path.exists(SIGNAL_HISTORY_FILE):
+        try:
+            with open(SIGNAL_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+
+    markets = new_data.get("markets", [])
+    cur_map = {m["ticker"]: m for m in markets}
+    changes = []   # signal_type 변경 (히스토리 기록용)
+    alerts  = []   # 그룹 전환 (텔레그램 발송용)
+
+    if history:
+        prev_map = {m["ticker"]: m for m in history[-1].get("markets", [])}
+        for ticker, m in cur_map.items():
+            prev = prev_map.get(ticker, {})
+            if not prev:
+                continue
+            old_type = prev.get("signal_type", "")
+            new_type = m.get("signal_type", "")
+            if old_type == new_type:
+                continue
+            change = {
+                "ticker":     ticker,
+                "name":       m.get("name", ticker),
+                "flag":       m.get("flag", ""),
+                "old_signal": prev.get("signal", "?"),
+                "new_signal": m.get("signal", "?"),
+                "price":      m.get("price"),
+            }
+            changes.append(change)
+            # 그룹이 달라질 때만 텔레그램 발송
+            if _signal_group(old_type) != _signal_group(new_type):
+                alerts.append(change)
+
+    entry = {
+        "timestamp": new_data.get("generated_at", datetime.datetime.now().isoformat()),
+        "changes":   changes,
+        "markets": [{
+            "ticker":      m.get("ticker"),
+            "name":        m.get("name"),
+            "flag":        m.get("flag"),
+            "signal_type": m.get("signal_type"),
+            "signal":      m.get("signal"),
+            "price":       m.get("price"),
+            "change_pct":  m.get("change_pct"),
+        } for m in markets],
+    }
+    history.append(entry)
+    history = history[-90:]  # 최근 90회 보관
+
+    with open(SIGNAL_HISTORY_FILE, 'w', encoding='utf-8') as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+    if alerts:
+        ts    = datetime.datetime.now().strftime("%m/%d %H:%M")
+        lines = [f"📊 <b>시그널 방향 전환</b> ({ts})"]
+        for c in alerts:
+            lines.append(f"{c['flag']} {c['name']}: {c['old_signal']} → {c['new_signal']}")
+        send_telegram("\n".join(lines))
+
+    return changes
+
+
+def _run_bot_background():
+    """백그라운드에서 봇 분석 → 히스토리 저장 → 텔레그램 알림"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(run_bot())
+        loop.close()
+        print("[bot] 분석 완료 → signals_v4.json 갱신")
+        if os.path.exists(SIGNALS_FILE):
+            with open(SIGNALS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            changes = _save_signal_history(data)
+            if changes:
+                print(f"[bot] 신호 변경 {len(changes)}개 → Telegram 알림 전송")
+    except Exception as e:
+        print(f"[bot] 분석 오류: {e}")
+
+
+def _daily_scheduler():
+    """매일 오전 8시·오후 4시 (KST = UTC+9) 자동 분석"""
+    import time
+    run_hours   = {8, 16}
+    _last_fired = set()
+    while True:
+        try:
+            kst  = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+            key  = (kst.date(), kst.hour)
+            if kst.hour in run_hours and key not in _last_fired:
+                _last_fired.add(key)
+                # 오래된 key 정리
+                today = kst.date()
+                _last_fired = {k for k in _last_fired if k[0] >= today}
+                print(f"[scheduler] KST {kst.hour}시 자동 분석 시작")
+                _run_bot_background()
+        except Exception as e:
+            print(f"[scheduler] 오류: {e}")
+        time.sleep(60)
 
 
 @app.route('/api/signals')
@@ -71,6 +286,23 @@ def run_analysis():
             return jsonify({"status": "error", "message": "분석 완료했지만 파일 생성 실패"}), 500
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/signal_history')
+def get_signal_history():
+    """신호 히스토리 및 변경 이력"""
+    if not os.path.exists(SIGNAL_HISTORY_FILE):
+        return jsonify({"history": [], "message": "아직 기록이 없습니다"})
+    with open(SIGNAL_HISTORY_FILE, 'r', encoding='utf-8') as f:
+        history = json.load(f)
+    return jsonify({"history": history[-30:]})
+
+
+@app.route('/api/telegram_test')
+def telegram_test():
+    """텔레그램 연결 테스트"""
+    ok = send_telegram("✅ 멀티마켓 봇 텔레그램 연결 테스트 성공!")
+    return jsonify({"ok": ok, "token_set": bool(TELEGRAM_TOKEN), "chat_id_set": bool(TELEGRAM_CHAT_ID)})
 
 
 @app.route('/api/status')
@@ -144,25 +376,74 @@ def get_stock_analysis():
         return jsonify({"error": f"분석 실패: {str(e)}"}), 500
 
 
+def _yf_lookup_kr_code(code6: str):
+    """6자리 KRX 코드 → yfinance로 이름·시장 조회 (.KS 먼저, 실패 시 .KQ)"""
+    import yfinance as yf
+    for suffix, market in ((".KS", "KOSPI"), (".KQ", "KOSDAQ")):
+        ticker = code6 + suffix
+        try:
+            t = yf.Ticker(ticker)
+            info = t.fast_info
+            # fast_info에 last_price가 있으면 유효한 티커
+            price = getattr(info, "last_price", None)
+            if price and price > 0:
+                full_info = t.info
+                name = full_info.get("longName") or full_info.get("shortName") or ticker
+                return {"ticker": ticker, "name": name, "name_en": name,
+                        "sector": market, "flag": "🇰🇷"}
+        except Exception:
+            pass
+    return None
+
+
 @app.route('/api/search_stocks')
 def search_stocks():
-    """인기 주식 검색 (이름/티커 매칭)
+    """주식 검색 — POPULAR_STOCKS + KRX 캐시 + 6자리 코드 실시간 조회
     GET /api/search_stocks?q=삼성
-    GET /api/search_stocks?q=Apple
+    GET /api/search_stocks?q=에스비비
+    GET /api/search_stocks?q=389500
     """
     q = request.args.get('q', '').strip().lower()
     results = []
+    seen = set()
+
+    # 1) POPULAR_STOCKS 우선 검색 (섹터·영문명 포함)
     for ticker, info in POPULAR_STOCKS.items():
         if not q:
             results.append({"ticker": ticker, **info})
+            seen.add(ticker)
         else:
             if (q in ticker.lower()
                     or q in info.get("name", "").lower()
                     or q in info.get("name_en", "").lower()
                     or q in info.get("sector", "").lower()):
                 results.append({"ticker": ticker, **info})
+                seen.add(ticker)
         if len(results) >= 15:
             break
+
+    # 2) KRX 전종목 캐시에서 추가 검색 (미등록 종목 보완)
+    if q and len(results) < 15 and _krx_cache:
+        for ticker, info in _krx_cache.items():
+            if ticker in seen:
+                continue
+            name = info.get("name", "")
+            krx_code = info.get("krx_code", "")
+            if q in ticker.lower() or q in name.lower() or q in krx_code:
+                results.append({
+                    "ticker": ticker, "name": name, "name_en": "",
+                    "sector": info.get("market", ""), "flag": "🇰🇷",
+                })
+                seen.add(ticker)
+            if len(results) >= 15:
+                break
+
+    # 3) 6자리 숫자 코드 직접 입력 → yfinance 실시간 조회
+    if q and len(results) == 0 and q.isdigit() and len(q) == 6:
+        found = _yf_lookup_kr_code(q)
+        if found and found["ticker"] not in seen:
+            results.append(found)
+
     return jsonify({"results": results})
 
 
@@ -170,7 +451,7 @@ def search_stocks():
 def get_chart_data():
     """캔들스틱 차트 데이터 (일봉/주봉/월봉)
     GET /api/chart?ticker=^KS11&interval=1d
-    interval: 1d (일봉/1년), 1wk (주봉/3년), 1mo (월봉/5년)
+    interval: 1d (일봉/2년), 1wk (주봉/5년), 1mo (월봉/전체)
     """
     import yfinance as yf
     import pandas as pd
@@ -180,7 +461,7 @@ def get_chart_data():
     if not ticker:
         return jsonify({"error": "ticker 파라미터 필요"}), 400
 
-    period_map = {'1d': '1y', '1wk': '3y', '1mo': '5y'}
+    period_map = {'1d': '2y', '1wk': '5y', '1mo': 'max'}
     if interval not in period_map:
         interval = '1d'
     period = period_map[interval]
@@ -272,41 +553,78 @@ def get_fear_greed():
 
 @app.route('/api/forex')
 def get_forex():
-    """주요 환율 데이터"""
+    """주요 환율 데이터 — 모두 원화 기준으로 환산"""
     import yfinance as yf
     import pandas as pd
 
-    pairs = [
-        ("USDKRW=X",  "USD/KRW",  "🇰🇷", "원"),
-        ("USDJPY=X",  "USD/JPY",  "🇯🇵", "엔"),
-        ("EURUSD=X",  "EUR/USD",  "🇪🇺", "유로"),
-        ("GBPUSD=X",  "GBP/USD",  "🇬🇧", "파운드"),
-        ("USDCNY=X",  "USD/CNY",  "🇨🇳", "위안"),
-        ("USDINR=X",  "USD/INR",  "🇮🇳", "루피"),
-        ("USDAUD=X",  "USD/AUD",  "🇦🇺", "호주달러"),
-        ("BTC-USD",   "BTC/USD",  "₿",   "비트코인"),
-    ]
-    results = []
-    for ticker, name, flag, unit in pairs:
+    def fetch(ticker):
         try:
             df = yf.download(ticker, period="5d", interval="1d",
                              auto_adjust=True, progress=False, threads=False)
-            if df is None or df.empty: continue
+            if df is None or df.empty: return None, None
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
             cur  = float(df['Close'].iloc[-1])
             prev = float(df['Close'].iloc[-2]) if len(df) > 1 else cur
-            chg  = (cur - prev) / prev * 100
-            # 소수점 자리수 조절
-            dec = 0 if cur > 100 else (2 if cur > 1 else 4)
-            results.append({
-                "ticker": ticker, "name": name, "flag": flag, "unit": unit,
-                "rate": round(cur, dec),
-                "change_pct": round(chg, 3),
-                "prev": round(prev, dec),
-            })
+            return cur, prev
         except Exception:
-            pass
+            return None, None
+
+    usd_cur, usd_prev = fetch("USDKRW=X")
+    if not usd_cur:
+        return jsonify({"rates": [], "generated_at": datetime.datetime.now().isoformat()})
+
+    results = []
+
+    def add(key, name, flag, label, krw_cur, krw_prev):
+        if krw_cur is None: return
+        chg = (krw_cur - krw_prev) / krw_prev * 100 if krw_prev else 0
+        dec = 0 if krw_cur >= 10 else 2
+        results.append({
+            "ticker": key, "name": name, "flag": flag, "label": label,
+            "rate": round(krw_cur, dec),
+            "change_pct": round(chg, 3),
+            "unit": "원",
+        })
+
+    # USD: 1달러 = USDKRW원
+    add("USDKRW", "USD", "🇺🇸", "1달러", usd_cur, usd_prev)
+
+    # EUR: 1유로 = EURUSD × USDKRW
+    eur, eur_p = fetch("EURUSD=X")
+    if eur:
+        add("EURKRW", "EUR", "🇪🇺", "1유로", eur * usd_cur, eur_p * usd_prev)
+
+    # JPY: 100엔 = (USDKRW / USDJPY) × 100
+    jpy, jpy_p = fetch("USDJPY=X")
+    if jpy:
+        add("JPYKRW", "JPY", "🇯🇵", "100엔", (usd_cur / jpy) * 100, (usd_prev / jpy_p) * 100)
+
+    # GBP: 1파운드 = GBPUSD × USDKRW
+    gbp, gbp_p = fetch("GBPUSD=X")
+    if gbp:
+        add("GBPKRW", "GBP", "🇬🇧", "1파운드", gbp * usd_cur, gbp_p * usd_prev)
+
+    # CNY: 1위안 = USDKRW / USDCNY
+    cny, cny_p = fetch("USDCNY=X")
+    if cny:
+        add("CNYKRW", "CNY", "🇨🇳", "1위안", usd_cur / cny, usd_prev / cny_p)
+
+    # INR: 1루피 = USDKRW / USDINR
+    inr, inr_p = fetch("USDINR=X")
+    if inr:
+        add("INRKRW", "INR", "🇮🇳", "1루피", usd_cur / inr, usd_prev / inr_p)
+
+    # AUD: 1호주달러 = USDKRW / USDAUD  (USDAUD=X: AUD per 1 USD)
+    aud, aud_p = fetch("USDAUD=X")
+    if aud:
+        add("AUDKRW", "AUD", "🇦🇺", "1호주달러", usd_cur / aud, usd_prev / aud_p)
+
+    # BTC: 1BTC = BTC-USD × USDKRW
+    btc, btc_p = fetch("BTC-USD")
+    if btc:
+        add("BTCKRW", "BTC", "₿", "1BTC", btc * usd_cur, btc_p * usd_prev)
+
     return jsonify({"rates": results, "generated_at": datetime.datetime.now().isoformat()})
 
 
@@ -485,6 +803,235 @@ def get_sectors():
     })
 
 
+@app.route('/api/stock_backtest')
+def get_stock_backtest():
+    """GET /api/stock_backtest?ticker=AAPL
+    개별 종목 백테스트 (7일 캐시)."""
+    ticker = request.args.get('ticker', '').strip().upper()
+    if not ticker:
+        return jsonify({"error": "ticker 필요"}), 400
+    if ticker.isdigit() and len(ticker) == 6:
+        ticker = ticker + ".KS"
+
+    now       = time.time()
+    cache_ttl = 7 * 24 * 3600
+    cache_key = f"stock_{ticker}"
+
+    mem = _backtest_mem_cache.get(cache_key)
+    if mem and now - mem["ts"] < cache_ttl:
+        return jsonify(mem["data"])
+
+    try:
+        if os.path.exists(BACKTEST_CACHE_FILE):
+            with open(BACKTEST_CACHE_FILE, encoding="utf-8") as f:
+                file_cache = json.load(f)
+            if cache_key in file_cache:
+                entry = file_cache[cache_key]
+                if now - entry.get("ts", 0) < cache_ttl:
+                    _backtest_mem_cache[cache_key] = entry
+                    return jsonify(entry["data"])
+    except Exception:
+        pass
+
+    result = backtest_stock(ticker)
+    if result is None:
+        return jsonify({"error": "데이터 부족 (최소 1년 이상 상장 종목만 지원)"}), 404
+
+    entry = {"ts": now, "data": result}
+    _backtest_mem_cache[cache_key] = entry
+    try:
+        file_cache = {}
+        if os.path.exists(BACKTEST_CACHE_FILE):
+            with open(BACKTEST_CACHE_FILE, encoding="utf-8") as f:
+                file_cache = json.load(f)
+        file_cache[cache_key] = entry
+        with open(BACKTEST_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(file_cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+    return jsonify(result)
+
+
+@app.route('/api/backtest')
+def get_backtest():
+    """GET /api/backtest?ticker=^KS11
+    전략 백테스트 결과 (CAGR, MDD, Sharpe, BnH 비교).
+    7일 파일 캐시 → 메모리 캐시 순으로 서빙."""
+    ticker = request.args.get('ticker', '').strip()
+    if not ticker or ticker not in MARKETS:
+        return jsonify({"error": "잘못된 ticker"}), 400
+
+    now      = time.time()
+    cache_ttl = 7 * 24 * 3600  # 7일
+
+    # 메모리 캐시 확인
+    mem = _backtest_mem_cache.get(ticker)
+    if mem and now - mem["ts"] < cache_ttl:
+        return jsonify(mem["data"])
+
+    # 파일 캐시 확인
+    try:
+        if os.path.exists(BACKTEST_CACHE_FILE):
+            with open(BACKTEST_CACHE_FILE, encoding="utf-8") as f:
+                file_cache = json.load(f)
+            if ticker in file_cache:
+                entry = file_cache[ticker]
+                if now - entry.get("ts", 0) < cache_ttl:
+                    _backtest_mem_cache[ticker] = entry
+                    return jsonify(entry["data"])
+    except Exception:
+        pass
+
+    # 백테스트 실행 (yfinance 10y 다운로드 포함, 5~30초 소요)
+    result = backtest_strategy(ticker, MARKETS[ticker])
+    if result is None:
+        return jsonify({"error": "데이터 부족"}), 404
+
+    entry = {"ts": now, "data": result}
+    _backtest_mem_cache[ticker] = entry
+
+    try:
+        file_cache = {}
+        if os.path.exists(BACKTEST_CACHE_FILE):
+            with open(BACKTEST_CACHE_FILE, encoding="utf-8") as f:
+                file_cache = json.load(f)
+        file_cache[ticker] = entry
+        with open(BACKTEST_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(file_cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+    return jsonify(result)
+
+
+RANKING_CACHE_FILE = os.path.join(OUTPUT_DIR, "ranking_cache.json")
+_ranking_in_progress = False
+_ranking_lock = threading.Lock()
+
+
+def _analyze_for_ranking(ticker: str):
+    """랭킹용 단일 종목 분석 — 실패 시 None"""
+    try:
+        r = analyze_stock(ticker)
+        if r.get("price") is None:
+            return None
+        info = POPULAR_STOCKS.get(ticker, {})
+        return {
+            "ticker":     ticker,
+            "name":       info.get("name", r.get("name", ticker)),
+            "name_en":    info.get("name_en", ""),
+            "sector":     info.get("sector", ""),
+            "flag":       info.get("flag", "🌐"),
+            "price":      r.get("price"),
+            "change_pct": r.get("change_pct"),
+            "confidence": r.get("confidence"),
+            "signal_type": r.get("signal_type"),
+            "signal_text": r.get("signal_text"),
+            "rs_score":   r.get("rs_score"),
+            "rs_label":   r.get("rs_label"),
+            "mom_1m":     (r.get("momentum") or {}).get("mom_1m"),
+            "mom_3m":     (r.get("momentum") or {}).get("mom_3m"),
+            "mom_6m":     (r.get("momentum") or {}).get("mom_6m"),
+            "regime_label":      (r.get("market_regime") or {}).get("label"),
+            "liquidity_label":   (r.get("liquidity") or {}).get("label"),
+            "liquidity_tv":      (r.get("liquidity") or {}).get("trading_value_display"),
+            "fundamental_label": (r.get("fundamental_score") or {}).get("label"),
+            "fundamental_adj":   (r.get("fundamental_score") or {}).get("score_adj"),
+            "targets":    r.get("targets"),
+            "from_high_pct": r.get("from_high_pct"),
+        }
+    except Exception:
+        return None
+
+
+def _build_ranking_cache():
+    """POPULAR_STOCKS 전체 병렬 분석 → 신뢰도순 캐시 저장"""
+    global _ranking_in_progress
+    with _ranking_lock:
+        if _ranking_in_progress:
+            return
+        _ranking_in_progress = True
+
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        tickers = list(POPULAR_STOCKS.keys())
+        results = []
+        print(f"[ranking] 분석 시작: {len(tickers)}개 종목")
+
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            futures = {ex.submit(_analyze_for_ranking, t): t for t in tickers}
+            for fut in as_completed(futures, timeout=600):
+                try:
+                    r = fut.result(timeout=30)
+                    if r and r.get("confidence") is not None:
+                        results.append(r)
+                except Exception:
+                    pass
+
+        results.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+        cache = {
+            "updated": datetime.datetime.now().isoformat(),
+            "total_analyzed": len(results),
+            "ranking": results[:100],
+        }
+        with open(RANKING_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_clean(cache), f, ensure_ascii=False)
+        print(f"[ranking] 완료: {len(results)}개 분석, 상위 100개 저장")
+    except Exception as e:
+        print(f"[ranking] 오류: {e}")
+    finally:
+        _ranking_in_progress = False
+
+
+@app.route('/api/top_stocks')
+def get_top_stocks():
+    """신뢰도 기준 종목 랭킹
+    GET /api/top_stocks          → 상위 10개
+    GET /api/top_stocks?n=20     → 상위 20개
+    GET /api/top_stocks?signal=BUY → 매수 신호만
+    GET /api/top_stocks?refresh=1  → 강제 재분석
+    """
+    n             = min(int(request.args.get("n", 10)), 100)
+    signal_filter = request.args.get("signal", "")
+    refresh       = request.args.get("refresh", "0") == "1"
+    cache_ttl     = 3600  # 1시간
+
+    cache_data = None
+    if os.path.exists(RANKING_CACHE_FILE) and not refresh:
+        try:
+            with open(RANKING_CACHE_FILE, encoding="utf-8") as f:
+                cache_data = json.load(f)
+            updated  = datetime.datetime.fromisoformat(cache_data["updated"])
+            age_sec  = (datetime.datetime.now() - updated).total_seconds()
+            if age_sec > cache_ttl:
+                cache_data = None
+        except Exception:
+            cache_data = None
+
+    if cache_data is None or refresh:
+        threading.Thread(target=_build_ranking_cache, daemon=True).start()
+        if cache_data is None:
+            return jsonify({
+                "status":  "analyzing",
+                "message": f"{len(POPULAR_STOCKS)}개 종목 분석 중... (약 3~5분 소요)",
+                "ranking": [],
+                "total_analyzed": 0,
+            })
+
+    ranking = cache_data.get("ranking", [])
+    if signal_filter:
+        ranking = [r for r in ranking if signal_filter.upper() in (r.get("signal_type") or "")]
+
+    return jsonify({
+        "status":         "ok",
+        "updated":        cache_data.get("updated"),
+        "total_analyzed": cache_data.get("total_analyzed", 0),
+        "analyzing":      _ranking_in_progress,
+        "ranking":        ranking[:n],
+    })
+
+
 @app.route('/guide')
 def guide():
     return send_from_directory(STATIC_DIR, 'guide.html')
@@ -528,6 +1075,7 @@ def deploy():
         except Exception as e:
             print(f"[deploy] git pull error: {e}")
         # run.sh 루프가 서버를 감시하므로 pkill만 하면 자동 재시작됨
+        # (재시작 후 서버가 뜨면서 _run_bot_background가 자동 실행됨)
         subprocess.Popen(
             'sleep 2 && pkill -f "python3 server.py"',
             shell=True,
@@ -542,7 +1090,9 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     print(f"\n  🚀 멀티마켓 봇 API 서버 시작")
     print(f"  http://localhost:{port}")
-    print(f"  /api/signals — 시그널 조회")
-    print(f"  /api/run     — 수동 분석 실행")
-    print(f"  /api/status  — 서버 상태\n")
+    print(f"  텔레그램: {'설정됨' if TELEGRAM_TOKEN else '미설정 (TELEGRAM_TOKEN 환경변수 필요)'}\n")
+    # 일일 스케줄러 (KST 08:00, 16:00) — 시작 시 자동 분석은 하지 않음
+    threading.Thread(target=_daily_scheduler, daemon=True).start()
+    # KRX 전종목 캐시 초기화 (없거나 7일 초과면 백그라운드 갱신)
+    _init_krx_cache()
     app.run(host='0.0.0.0', port=port, debug=False)

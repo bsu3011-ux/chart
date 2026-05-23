@@ -38,20 +38,74 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 시장 정의 + 시장별 최적 전략 매핑
 # ════════════════════════════════════════════════════════════════
 MARKETS = {
-    # ── BTC 현물: 위기방어형 (5년 실데이터 +112%, MDD -38%, 승률80%, PF 4.3) ──
+    # ── BTC 현물: 레버리지 스위칭 (BITX 2x, MSTR 등) ──
     "BTC-USD": {
         "name": "비트코인", "symbol": "BTC", "flag": "₿",
-        "strategy": "risk_defense",
+        "strategy": "leverage",
         "params": {"check_interval":5, "is_crypto":True},
         "period": "1y",
     },
-    # ── ETH 현물: 미너비니 타이트 (5년 실데이터 +135%, MDD -48%, PF 1.9) ──
+    # ── ETH 현물: 미너비니 타이트 ──
     "ETH-USD": {
         "name": "이더리움", "symbol": "ETH", "flag": "Ξ",
         "strategy": "minervini",
         "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
                    "exit_buffer_atr":1.0,"trailing_atr":3.0,
-                   "hard_stop_pct":0.10,"cooldown_days":2},
+                   "hard_stop_pct":0.12,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── SOL: 미너비니 (고변동성 알트, 타이트 스탑) ──
+    "SOL-USD": {
+        "name": "솔라나", "symbol": "SOL", "flag": "◎",
+        "strategy": "minervini",
+        "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.2,"trailing_atr":3.5,
+                   "hard_stop_pct":0.15,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── XRP: 미너비니 ──
+    "XRP-USD": {
+        "name": "리플", "symbol": "XRP", "flag": "✕",
+        "strategy": "minervini",
+        "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.0,"trailing_atr":3.0,
+                   "hard_stop_pct":0.15,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── BNB: 미너비니 ──
+    "BNB-USD": {
+        "name": "바이낸스코인", "symbol": "BNB", "flag": "🟡",
+        "strategy": "minervini",
+        "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.0,"trailing_atr":3.0,
+                   "hard_stop_pct":0.12,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── DOGE: 미너비니 (고변동성, 넓은 스탑) ──
+    "DOGE-USD": {
+        "name": "도지코인", "symbol": "DOGE", "flag": "🐕",
+        "strategy": "minervini",
+        "params": {"ma_fast":7,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.5,"trailing_atr":4.0,
+                   "hard_stop_pct":0.20,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── ADA: 미너비니 ──
+    "ADA-USD": {
+        "name": "에이다", "symbol": "ADA", "flag": "🔵",
+        "strategy": "minervini",
+        "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.2,"trailing_atr":3.5,
+                   "hard_stop_pct":0.15,"cooldown_days":2},
+        "period": "1y",
+    },
+    # ── AVAX: 미너비니 ──
+    "AVAX-USD": {
+        "name": "아발란체", "symbol": "AVAX", "flag": "🔺",
+        "strategy": "minervini",
+        "params": {"ma_fast":10,"ma_slow":21,"entry_rsi":40,
+                   "exit_buffer_atr":1.2,"trailing_atr":3.5,
+                   "hard_stop_pct":0.15,"cooldown_days":2},
         "period": "1y",
     },
     # ── 한국 지수 2x ETF: 레버리지 스위칭 (KOSPI +230%, KOSDAQ +74%) ──
@@ -80,45 +134,45 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 일본/홍콩: 이중필터 모멘텀 (NIKKEI +103%, 항셍 +25%) ──
+    # ── 일본/홍콩: 레버리지 스위칭 (1570.T 2x, YINN 3x) ──
     "^N225": {
         "name": "Nikkei 225", "symbol": "NKI", "flag": "🇯🇵",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
     "^HSI": {
         "name": "항셍지수", "symbol": "HSI", "flag": "🇭🇰",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 유럽: 위기방어형 (DAX +58%) ──
+    # ── 유럽: 레버리지 (LDAX 2x DAX 가능) ──
     "^GDAXI": {
         "name": "DAX", "symbol": "DAX", "flag": "🇩🇪",
-        "strategy": "risk_defense",
+        "strategy": "leverage",
         "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 미국: DOW (위기방어형, MDD 관리) ──
+    # ── 미국: DOW 레버리지 (DDM 2x) ──
     "^DJI": {
         "name": "다우존스", "symbol": "DJI", "flag": "🇺🇸",
-        "strategy": "risk_defense",
+        "strategy": "leverage",
         "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 중국: 상해종합 (이중필터 모멘텀) ──
+    # ── 중국: 상해종합 레버리지 (CHAU 2x, YINN 3x) ──
     "000001.SS": {
         "name": "상해종합", "symbol": "SSE", "flag": "🇨🇳",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 중국: 심천성분 (이중필터 모멘텀) ──
+    # ── 중국: 심천성분 레버리지 (YINN 3x) ──
     "399001.SZ": {
         "name": "심천성분", "symbol": "SZSE", "flag": "🇨🇳",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
     # ── 인도: NIFTY 50 (레버리지 — 강한 성장 시장) ──
@@ -128,24 +182,24 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 인도: Sensex (이중필터 모멘텀) ──
+    # ── 인도: Sensex (레버리지 — 강한 성장 시장, NIFTY와 동일) ──
     "^BSESN": {
         "name": "Sensex", "symbol": "BSE", "flag": "🇮🇳",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 대만: 가권지수 (이중필터 모멘텀) ──
+    # ── 대만: 가권지수 (레버리지 — TSMC/AI 반도체 사이클, NASDAQ과 동조) ──
     "^TWII": {
         "name": "대만 가권", "symbol": "TWI", "flag": "🇹🇼",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 호주: ASX 200 (위기방어형) ──
+    # ── 호주: ASX 200 레버리지 (GEAR 2x) ──
     "^AXJO": {
         "name": "ASX 200", "symbol": "ASX", "flag": "🇦🇺",
-        "strategy": "risk_defense",
+        "strategy": "leverage",
         "params": {"check_interval":5},
         "period": "2y",
     },
@@ -163,11 +217,11 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "2y",
     },
-    # ── 브라질: Bovespa (이중필터 모멘텀) ──
+    # ── 브라질: Bovespa 레버리지 (BRZU 3x) ──
     "^BVSP": {
         "name": "Bovespa", "symbol": "BVSP", "flag": "🇧🇷",
-        "strategy": "dual_filter",
-        "params": {"rebal_days":21},
+        "strategy": "leverage",
+        "params": {"check_interval":5},
         "period": "2y",
     },
     # ── 싱가포르: STI (위기방어형) ──
@@ -184,10 +238,10 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "1y",
     },
-    # ── 유로 스탁스 50 ──
+    # ── 유로 스탁스 50 레버리지 (UPV 2x) ──
     "^STOXX50E": {
         "name": "Euro Stoxx 50", "symbol": "SX5E", "flag": "🇪🇺",
-        "strategy": "risk_defense",
+        "strategy": "leverage",
         "params": {"check_interval":5},
         "period": "2y",
     },
@@ -240,6 +294,83 @@ MARKETS = {
         "params": {"check_interval":5},
         "period": "2y",
     },
+    # ── 유럽 추가 ──
+    "^IBEX": {
+        "name": "IBEX 35", "symbol": "IBEX", "flag": "🇪🇸",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    "FTSEMIB.MI": {
+        "name": "FTSE MIB", "symbol": "MIB", "flag": "🇮🇹",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    "^AEX": {
+        "name": "AEX", "symbol": "AEX", "flag": "🇳🇱",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    "^OMXSPI": {
+        "name": "OMX Stockholm", "symbol": "OMX", "flag": "🇸🇪",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    "^OSEBX": {
+        "name": "Oslo Bors", "symbol": "OBX", "flag": "🇳🇴",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    "^ATX": {
+        "name": "ATX", "symbol": "ATX", "flag": "🇦🇹",
+        "strategy": "risk_defense",
+        "params": {"check_interval":5},
+        "period": "2y",
+    },
+    # ── 동유럽 / 터키 ──
+    "^WIG20": {
+        "name": "WIG20", "symbol": "WIG20", "flag": "🇵🇱",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    "XU100.IS": {
+        "name": "BIST 100", "symbol": "XU100", "flag": "🇹🇷",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    # ── 아프리카 ──
+    "^J203.JO": {
+        "name": "JSE All Share", "symbol": "JSE", "flag": "🇿🇦",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    # ── 동남아 ──
+    "^SET.BK": {
+        "name": "SET Index", "symbol": "SET", "flag": "🇹🇭",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    "PSEi.PS": {
+        "name": "PSEi", "symbol": "PSEi", "flag": "🇵🇭",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
+    # ── 남미 ──
+    "^MERV": {
+        "name": "MERVAL", "symbol": "MERV", "flag": "🇦🇷",
+        "strategy": "dual_filter",
+        "params": {"rebal_days":21},
+        "period": "2y",
+    },
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -288,8 +419,27 @@ POPULAR_STOCKS = {
     "036570.KS": {"name": "엔씨소프트",    "name_en": "NCSoft",               "sector": "게임",      "flag": "🇰🇷"},
     "251270.KS": {"name": "넷마블",        "name_en": "Netmarble",            "sector": "게임",      "flag": "🇰🇷"},
     "011170.KS": {"name": "롯데케미칼",    "name_en": "Lotte Chemical",       "sector": "화학",      "flag": "🇰🇷"},
+    # ════ 제약 ════
     "000100.KS": {"name": "유한양행",      "name_en": "Yuhan Corp",           "sector": "제약",      "flag": "🇰🇷"},
     "128940.KS": {"name": "한미약품",      "name_en": "Hanmi Pharm",          "sector": "제약",      "flag": "🇰🇷"},
+    "170900.KS": {"name": "동아에스티",    "name_en": "Dong-A ST",            "sector": "제약",      "flag": "🇰🇷"},
+    "185750.KS": {"name": "종근당",        "name_en": "Chong Kun Dang",       "sector": "제약",      "flag": "🇰🇷"},
+    "069620.KS": {"name": "대웅제약",      "name_en": "Daewoong Pharm",       "sector": "제약",      "flag": "🇰🇷"},
+    "006280.KS": {"name": "GC녹십자",      "name_en": "GC Biopharma",         "sector": "제약/바이오","flag": "🇰🇷"},
+    "003850.KS": {"name": "보령",          "name_en": "Boryung",              "sector": "제약",      "flag": "🇰🇷"},
+    "009290.KS": {"name": "광동제약",      "name_en": "Kwangdong Pharm",      "sector": "제약",      "flag": "🇰🇷"},
+    "001060.KS": {"name": "JW중외제약",    "name_en": "JW Pharmaceutical",    "sector": "제약",      "flag": "🇰🇷"},
+    "000020.KS": {"name": "동화약품",      "name_en": "Dong Wha Pharm",       "sector": "제약",      "flag": "🇰🇷"},
+    "008930.KS": {"name": "한미사이언스",  "name_en": "Hanmi Science",        "sector": "제약/지주",  "flag": "🇰🇷"},
+    "007570.KS": {"name": "일양약품",      "name_en": "Ilyang Pharm",         "sector": "제약",      "flag": "🇰🇷"},
+    "019170.KS": {"name": "신풍제약",      "name_en": "Shinpoong Pharm",      "sector": "제약",      "flag": "🇰🇷"},
+    "002390.KS": {"name": "한독",          "name_en": "Handok",               "sector": "제약",      "flag": "🇰🇷"},
+    "016580.KS": {"name": "환인제약",      "name_en": "Hwan In Pharm",        "sector": "제약",      "flag": "🇰🇷"},
+    "003000.KS": {"name": "부광약품",      "name_en": "Bukwang Pharm",        "sector": "제약",      "flag": "🇰🇷"},
+    "002210.KS": {"name": "동성제약",      "name_en": "Dongsung Pharm",       "sector": "제약",      "flag": "🇰🇷"},
+    "005500.KS": {"name": "삼진제약",      "name_en": "Samjin Pharm",         "sector": "제약",      "flag": "🇰🇷"},
+    "002020.KS": {"name": "코오롱",        "name_en": "Kolon",                "sector": "제약/화학",  "flag": "🇰🇷"},
+    "243070.KS": {"name": "휴온스글로벌",  "name_en": "Huons Global",         "sector": "제약",      "flag": "🇰🇷"},
     "373220.KS": {"name": "LG에너지솔루션","name_en": "LG Energy Solution",   "sector": "배터리",    "flag": "🇰🇷"},
     "247540.KS": {"name": "에코프로비엠",  "name_en": "EcoPro BM",            "sector": "소재",      "flag": "🇰🇷"},
     # ════ 전선/전력 테마 ════
@@ -356,10 +506,200 @@ POPULAR_STOCKS = {
     "237690.KQ": {"name": "에스티팜",     "name_en": "ST Pharm",             "sector": "CMO",       "flag": "🇰🇷"},
     "065660.KQ": {"name": "에이프로젠",   "name_en": "Aprogen",              "sector": "바이오",    "flag": "🇰🇷"},
     "145020.KQ": {"name": "휴젤",         "name_en": "Hugel",                "sector": "바이오/미용","flag": "🇰🇷"},
+    # ════ 코스닥 제약/바이오 추가 ════
+    "086900.KQ": {"name": "메디톡스",     "name_en": "Medytox",              "sector": "바이오/미용","flag": "🇰🇷"},
+    "108860.KQ": {"name": "셀바스AI",     "name_en": "Selvas AI",            "sector": "AI/헬스",   "flag": "🇰🇷"},
+    "214370.KQ": {"name": "케어젠",       "name_en": "Caregen",              "sector": "바이오/미용","flag": "🇰🇷"},
+    "016670.KQ": {"name": "신화인터텍",   "name_en": "Shinhwa Intertek",     "sector": "소재",      "flag": "🇰🇷"},
+    "115180.KQ": {"name": "큐리언트",     "name_en": "Qurient",              "sector": "바이오",    "flag": "🇰🇷"},
+    "187790.KQ": {"name": "레고켐바이오", "name_en": "LegoChem Biosciences", "sector": "바이오",    "flag": "🇰🇷"},
+    "255410.KQ": {"name": "에스엔바이오", "name_en": "SN Bioscience",        "sector": "바이오",    "flag": "🇰🇷"},
+    "226490.KQ": {"name": "바이오니아",   "name_en": "Bioneer",              "sector": "바이오",    "flag": "🇰🇷"},
+    "222980.KQ": {"name": "뉴젠팜",       "name_en": "Newgen Pharm",         "sector": "제약",      "flag": "🇰🇷"},
+    "293480.KQ": {"name": "하나제약",     "name_en": "Hana Pharm",           "sector": "제약",      "flag": "🇰🇷"},
+    "200130.KQ": {"name": "비씨월드제약", "name_en": "BC World Pharm",       "sector": "제약",      "flag": "🇰🇷"},
+    "049630.KQ": {"name": "재원산업",     "name_en": "Jaewon Industrial",    "sector": "제약",      "flag": "🇰🇷"},
     "048870.KQ": {"name": "테스나",       "name_en": "Tesna",                "sector": "반도체검사","flag": "🇰🇷"},
     "079940.KQ": {"name": "가비아",       "name_en": "Gabia",                "sector": "IT인프라",  "flag": "🇰🇷"},
     "357550.KQ": {"name": "득템",         "name_en": "Deoktem",              "sector": "반도체장비","flag": "🇰🇷"},
     "950170.KQ": {"name": "JTC",          "name_en": "JTC",                  "sector": "반도체장비","flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 금융/증권/보험 ════════════
+    "006800.KS": {"name": "미래에셋증권",   "name_en": "Mirae Asset Sec.",     "sector": "증권",       "flag": "🇰🇷"},
+    "039490.KS": {"name": "키움증권",       "name_en": "Kiwoom Securities",    "sector": "증권",       "flag": "🇰🇷"},
+    "016360.KS": {"name": "삼성증권",       "name_en": "Samsung Securities",   "sector": "증권",       "flag": "🇰🇷"},
+    "005940.KS": {"name": "NH투자증권",     "name_en": "NH Investment Sec.",   "sector": "증권",       "flag": "🇰🇷"},
+    "003540.KS": {"name": "대신증권",       "name_en": "Daeshin Securities",   "sector": "증권",       "flag": "🇰🇷"},
+    "071050.KS": {"name": "한국금융지주",   "name_en": "Korea Investment Hld.","sector": "금융",       "flag": "🇰🇷"},
+    "138040.KS": {"name": "메리츠금융지주", "name_en": "Meritz Financial",     "sector": "금융",       "flag": "🇰🇷"},
+    "175330.KS": {"name": "JB금융지주",     "name_en": "JB Financial",         "sector": "금융",       "flag": "🇰🇷"},
+    "139130.KS": {"name": "DGB금융지주",    "name_en": "DGB Financial",        "sector": "금융",       "flag": "🇰🇷"},
+    "138930.KS": {"name": "BNK금융지주",    "name_en": "BNK Financial",        "sector": "금융",       "flag": "🇰🇷"},
+    "024110.KS": {"name": "기업은행",       "name_en": "IBK",                  "sector": "은행",       "flag": "🇰🇷"},
+    "001450.KS": {"name": "현대해상",       "name_en": "Hyundai Marine",       "sector": "보험",       "flag": "🇰🇷"},
+    "000060.KS": {"name": "메리츠화재",     "name_en": "Meritz Fire",          "sector": "보험",       "flag": "🇰🇷"},
+    "005830.KS": {"name": "DB손해보험",     "name_en": "DB Insurance",         "sector": "보험",       "flag": "🇰🇷"},
+    "088350.KS": {"name": "한화생명",       "name_en": "Hanwha Life",          "sector": "보험",       "flag": "🇰🇷"},
+    "091170.KS": {"name": "동양생명",       "name_en": "Dongyang Life",        "sector": "보험",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 반도체/전자부품 ════════════
+    "009150.KS": {"name": "삼성전기",       "name_en": "Samsung Electro-Mech.","sector": "전자부품",   "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 조선/방산 ════════════
+    "010140.KS": {"name": "삼성중공업",     "name_en": "Samsung Heavy Ind.",   "sector": "조선",       "flag": "🇰🇷"},
+    "079550.KS": {"name": "LIG넥스원",      "name_en": "LIG Nex1",             "sector": "방산",       "flag": "🇰🇷"},
+    "272210.KS": {"name": "한화시스템",     "name_en": "Hanwha Systems",       "sector": "방산",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 자동차/부품 ════════════
+    "161390.KS": {"name": "한국타이어앤테크놀로지","name_en":"Hankook Tire",    "sector": "자동차부품", "flag": "🇰🇷"},
+    "002350.KS": {"name": "넥센타이어",     "name_en": "Nexen Tire",           "sector": "자동차부품", "flag": "🇰🇷"},
+    "073240.KS": {"name": "금호타이어",     "name_en": "Kumho Tire",           "sector": "자동차부품", "flag": "🇰🇷"},
+    "011210.KS": {"name": "현대위아",       "name_en": "Hyundai Wia",          "sector": "자동차부품", "flag": "🇰🇷"},
+    "204320.KS": {"name": "만도",           "name_en": "Mando",                "sector": "자동차부품", "flag": "🇰🇷"},
+    "018880.KS": {"name": "한온시스템",     "name_en": "Hanon Systems",        "sector": "자동차부품", "flag": "🇰🇷"},
+    "042670.KS": {"name": "HD현대인프라코어","name_en":"HD Hyundai Infracore",  "sector": "기계/중장비","flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 항공/운송 ════════════
+    "003490.KS": {"name": "대한항공",       "name_en": "Korean Air",           "sector": "항공",       "flag": "🇰🇷"},
+    "020560.KS": {"name": "아시아나항공",   "name_en": "Asiana Airlines",      "sector": "항공",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 화학/소재 ════════════
+    "004020.KS": {"name": "현대제철",       "name_en": "Hyundai Steel",        "sector": "철강",       "flag": "🇰🇷"},
+    "011780.KS": {"name": "금호석유화학",   "name_en": "Kumho Petrochemical",  "sector": "화학",       "flag": "🇰🇷"},
+    "002380.KS": {"name": "KCC",            "name_en": "KCC Corp",             "sector": "화학/건자재","flag": "🇰🇷"},
+    "011790.KS": {"name": "SKC",            "name_en": "SKC",                  "sector": "화학/소재",  "flag": "🇰🇷"},
+    "010060.KS": {"name": "OCI",            "name_en": "OCI Holdings",         "sector": "화학",       "flag": "🇰🇷"},
+    "120110.KS": {"name": "코오롱인더",     "name_en": "Kolon Industries",     "sector": "화학/섬유",  "flag": "🇰🇷"},
+    "298050.KS": {"name": "효성첨단소재",   "name_en": "Hyosung Advanced Mat.","sector": "소재",       "flag": "🇰🇷"},
+    "020150.KS": {"name": "롯데에너지머티리얼즈","name_en":"Lotte Energy Mat.", "sector": "배터리소재", "flag": "🇰🇷"},
+    "001740.KS": {"name": "SK네트웍스",     "name_en": "SK Networks",          "sector": "유통/서비스","flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 에너지/유틸리티 ════════════
+    "010950.KS": {"name": "S-Oil",          "name_en": "S-Oil",                "sector": "에너지",     "flag": "🇰🇷"},
+    "036460.KS": {"name": "한국가스공사",   "name_en": "KOGAS",                "sector": "가스",       "flag": "🇰🇷"},
+    "112610.KS": {"name": "씨에스윈드",     "name_en": "CS Wind",              "sector": "풍력",       "flag": "🇰🇷"},
+    "336260.KS": {"name": "두산퓨얼셀",     "name_en": "Doosan Fuel Cell",     "sector": "수소/연료전지","flag":"🇰🇷"},
+
+    # ════════════ 코스피 추가 — IT/플랫폼/핀테크 ════════════
+    "323410.KS": {"name": "카카오뱅크",     "name_en": "KakaoBank",            "sector": "핀테크",     "flag": "🇰🇷"},
+    "377300.KS": {"name": "카카오페이",     "name_en": "Kakao Pay",            "sector": "핀테크",     "flag": "🇰🇷"},
+    "402340.KS": {"name": "SK스퀘어",       "name_en": "SK Square",            "sector": "IT지주",     "flag": "🇰🇷"},
+    "022100.KS": {"name": "포스코DX",       "name_en": "POSCO DX",             "sector": "IT서비스",   "flag": "🇰🇷"},
+    "400760.KS": {"name": "현대오토에버",   "name_en": "Hyundai AutoEver",     "sector": "IT서비스",   "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 미디어/엔터/소비재 ════════════
+    "035760.KS": {"name": "CJ ENM",         "name_en": "CJ ENM",               "sector": "미디어/엔터","flag": "🇰🇷"},
+    "079160.KS": {"name": "CJ CGV",         "name_en": "CJ CGV",               "sector": "영화/엔터",  "flag": "🇰🇷"},
+    "033780.KS": {"name": "KT&G",           "name_en": "KT&G",                 "sector": "담배/소비재","flag": "🇰🇷"},
+    "021240.KS": {"name": "코웨이",         "name_en": "Coway",                "sector": "생활가전",   "flag": "🇰🇷"},
+    "008770.KS": {"name": "호텔신라",       "name_en": "Hotel Shilla",         "sector": "면세/호텔",  "flag": "🇰🇷"},
+    "007070.KS": {"name": "GS리테일",       "name_en": "GS Retail",            "sector": "유통",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 화장품/뷰티/식품 ════════════
+    "090430.KS": {"name": "아모레퍼시픽",   "name_en": "Amorepacific",         "sector": "화장품",     "flag": "🇰🇷"},
+    "051900.KS": {"name": "LG생활건강",     "name_en": "LG H&H",               "sector": "소비재",     "flag": "🇰🇷"},
+    "192820.KS": {"name": "코스맥스",       "name_en": "Cosmax",               "sector": "화장품OEM",  "flag": "🇰🇷"},
+    "161890.KS": {"name": "한국콜마",       "name_en": "Kolmar Korea",         "sector": "화장품OEM",  "flag": "🇰🇷"},
+    "097950.KS": {"name": "CJ제일제당",     "name_en": "CJ CheilJedang",       "sector": "식품",       "flag": "🇰🇷"},
+    "004370.KS": {"name": "농심",           "name_en": "Nongshim",             "sector": "식품",       "flag": "🇰🇷"},
+    "007310.KS": {"name": "오뚜기",         "name_en": "Ottogi",               "sector": "식품",       "flag": "🇰🇷"},
+    "005300.KS": {"name": "롯데칠성음료",   "name_en": "Lotte Chilsung",       "sector": "음료",       "flag": "🇰🇷"},
+    "000080.KS": {"name": "하이트진로",     "name_en": "Hite Jinro",           "sector": "주류",       "flag": "🇰🇷"},
+    "003230.KS": {"name": "삼양식품",       "name_en": "Samyang Foods",        "sector": "식품",       "flag": "🇰🇷"},
+    "026960.KS": {"name": "동서",           "name_en": "Dongsuh",              "sector": "식품",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 건설/부동산 ════════════
+    "006360.KS": {"name": "GS건설",         "name_en": "GS Engineering",       "sector": "건설",       "flag": "🇰🇷"},
+    "375500.KS": {"name": "DL이앤씨",       "name_en": "DL E&C",               "sector": "건설",       "flag": "🇰🇷"},
+    "294870.KS": {"name": "HDC현대산업개발","name_en": "HDC Hyundai Dev.",     "sector": "건설",       "flag": "🇰🇷"},
+    "028050.KS": {"name": "삼성엔지니어링", "name_en": "Samsung Engineering",  "sector": "건설/EPC",   "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 바이오/제약 ════════════
+    "302440.KS": {"name": "SK바이오사이언스","name_en":"SK Bioscience",         "sector": "백신/바이오","flag": "🇰🇷"},
+    "326030.KS": {"name": "SK바이오팜",     "name_en": "SK Biopharmaceuticals","sector": "제약",       "flag": "🇰🇷"},
+    "145720.KS": {"name": "덴티움",         "name_en": "Dentium",              "sector": "의료기기",   "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 로봇/신산업 ════════════
+    "454910.KS": {"name": "두산로보틱스",   "name_en": "Doosan Robotics",      "sector": "로봇",       "flag": "🇰🇷"},
+
+    # ════════════ 코스피 추가 — 지주/기타 ════════════
+    "004990.KS": {"name": "롯데지주",       "name_en": "Lotte Holdings",       "sector": "지주회사",   "flag": "🇰🇷"},
+    "000880.KS": {"name": "한화",           "name_en": "Hanwha Corp",          "sector": "지주회사",   "flag": "🇰🇷"},
+    "093050.KS": {"name": "LF",             "name_en": "LF Corp",              "sector": "패션/유통",  "flag": "🇰🇷"},
+    "025540.KS": {"name": "한국단자",       "name_en": "Korea Terminals",      "sector": "전자부품",   "flag": "🇰🇷"},
+    "004310.KS": {"name": "현대약품",       "name_en": "Hyundai Pharm",        "sector": "제약",       "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 반도체/장비/소재 ════════════
+    "389500.KQ": {"name": "에스비비테크",   "name_en": "SBB Tech",             "sector": "반도체",     "flag": "🇰🇷"},
+    "140860.KQ": {"name": "파크시스템스",   "name_en": "Park Systems",         "sector": "반도체장비", "flag": "🇰🇷"},
+    "166090.KQ": {"name": "하나머티리얼즈", "name_en": "Hana Materials",       "sector": "반도체소재", "flag": "🇰🇷"},
+    "222800.KQ": {"name": "심텍",           "name_en": "Simtech",              "sector": "반도체기판", "flag": "🇰🇷"},
+    "086890.KQ": {"name": "엘비세미콘",     "name_en": "LB Semicon",           "sector": "반도체",     "flag": "🇰🇷"},
+    "089030.KQ": {"name": "테크윙",         "name_en": "Techwing",             "sector": "반도체검사", "flag": "🇰🇷"},
+    "085870.KQ": {"name": "넥스틴",         "name_en": "Nextin",               "sector": "반도체검사", "flag": "🇰🇷"},
+    "095340.KQ": {"name": "ISC",            "name_en": "ISC",                  "sector": "반도체소켓", "flag": "🇰🇷"},
+    "014680.KQ": {"name": "한솔케미칼",     "name_en": "Hansol Chemical",      "sector": "반도체소재", "flag": "🇰🇷"},
+    "108320.KQ": {"name": "LX세미콘",       "name_en": "LX Semicon",           "sector": "팹리스",     "flag": "🇰🇷"},
+    "101490.KQ": {"name": "에스앤에스텍",   "name_en": "SNStek",               "sector": "반도체소재", "flag": "🇰🇷"},
+    "054090.KQ": {"name": "에이피시스템",   "name_en": "AP Systems",           "sector": "디스플레이장비","flag":"🇰🇷"},
+    "213420.KQ": {"name": "덕산네오룩스",   "name_en": "Duksan Neolux",        "sector": "OLED소재",   "flag": "🇰🇷"},
+    "336370.KQ": {"name": "솔루스첨단소재", "name_en": "Solus Advanced Mat.",  "sector": "소재",       "flag": "🇰🇷"},
+    "222080.KQ": {"name": "씨아이에스",     "name_en": "CIS",                  "sector": "배터리장비", "flag": "🇰🇷"},
+    "090460.KQ": {"name": "비에이치",       "name_en": "BH",                   "sector": "FPCB",       "flag": "🇰🇷"},
+    "098460.KQ": {"name": "고영",           "name_en": "Koh Young",            "sector": "검사장비",   "flag": "🇰🇷"},
+    "383310.KQ": {"name": "에코프로에이치엔","name_en":"EcoPro HN",             "sector": "소재",       "flag": "🇰🇷"},
+    "393890.KQ": {"name": "더블유씨피",     "name_en": "WCP",                  "sector": "배터리소재", "flag": "🇰🇷"},
+    "032500.KQ": {"name": "케이엠더블유",   "name_en": "KMW",                  "sector": "통신장비",   "flag": "🇰🇷"},
+    "138940.KQ": {"name": "오이솔루션",     "name_en": "OE Solutions",         "sector": "광부품",     "flag": "🇰🇷"},
+    "192650.KQ": {"name": "드림텍",         "name_en": "Dreamtech",            "sector": "전자부품",   "flag": "🇰🇷"},
+    "189300.KQ": {"name": "제이앤티씨",     "name_en": "JNTC",                 "sector": "유리/부품",  "flag": "🇰🇷"},
+    "104830.KQ": {"name": "원익머트리얼즈", "name_en": "Wonik Materials",      "sector": "반도체소재", "flag": "🇰🇷"},
+    "102710.KQ": {"name": "이엔에프테크놀로지","name_en":"ENF Technology",      "sector": "반도체소재", "flag": "🇰🇷"},
+    "064290.KQ": {"name": "인텍플러스",     "name_en": "Intech Plus",          "sector": "비전검사",   "flag": "🇰🇷"},
+    "039440.KQ": {"name": "에스티아이",     "name_en": "STI",                  "sector": "반도체장비", "flag": "🇰🇷"},
+    "330350.KQ": {"name": "네패스아크",     "name_en": "Nepes Arc",            "sector": "반도체",     "flag": "🇰🇷"},
+    "084850.KQ": {"name": "아이티엠반도체", "name_en": "ITM Semiconductor",    "sector": "배터리부품", "flag": "🇰🇷"},
+    "144960.KQ": {"name": "뉴파워프라즈마", "name_en": "New Power Plasma",     "sector": "반도체장비", "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 바이오/제약/의료 ════════════
+    "096530.KQ": {"name": "씨젠",           "name_en": "Seegene",              "sector": "진단",       "flag": "🇰🇷"},
+    "206650.KQ": {"name": "유바이오로직스", "name_en": "EuBiologics",          "sector": "백신",       "flag": "🇰🇷"},
+    "298380.KQ": {"name": "에이비엘바이오", "name_en": "ABL Bio",              "sector": "바이오",     "flag": "🇰🇷"},
+    "214450.KQ": {"name": "파마리서치",     "name_en": "Pharma Research",      "sector": "바이오/미용","flag": "🇰🇷"},
+    "053030.KQ": {"name": "바이넥스",       "name_en": "Binex",                "sector": "CMO",        "flag": "🇰🇷"},
+    "138610.KQ": {"name": "나이벡",         "name_en": "Naeovys",              "sector": "바이오",     "flag": "🇰🇷"},
+    "009420.KQ": {"name": "제넥신",         "name_en": "Genexine",             "sector": "바이오",     "flag": "🇰🇷"},
+    "067630.KQ": {"name": "HLB생명과학",   "name_en": "HLB Life Science",     "sector": "바이오",     "flag": "🇰🇷"},
+    "011000.KQ": {"name": "진원생명과학",   "name_en": "Jinwon Bioscience",    "sector": "바이오",     "flag": "🇰🇷"},
+    "290650.KQ": {"name": "엘앤씨바이오",   "name_en": "L&C Bio",              "sector": "의료기기",   "flag": "🇰🇷"},
+    "115450.KQ": {"name": "지트리비앤티",   "name_en": "G-treeBNT",            "sector": "바이오",     "flag": "🇰🇷"},
+    "365270.KQ": {"name": "큐라클",         "name_en": "Curacle",              "sector": "바이오",     "flag": "🇰🇷"},
+    "347551.KQ": {"name": "레고켐바이오사이언스","name_en":"LegoChem Biosci.", "sector": "바이오",     "flag": "🇰🇷"},
+    "357580.KQ": {"name": "이노테라피",     "name_en": "Innotherapeutics",     "sector": "의료기기",   "flag": "🇰🇷"},
+    "340360.KQ": {"name": "제놀루션",       "name_en": "Genolution",           "sector": "진단",       "flag": "🇰🇷"},
+    "305090.KQ": {"name": "GI이노베이션",   "name_en": "GI Innovation",        "sector": "바이오",     "flag": "🇰🇷"},
+    "378850.KQ": {"name": "CJ바이오사이언스","name_en":"CJ Bioscience",         "sector": "바이오",     "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 게임/미디어/엔터 ════════════
+    "095660.KQ": {"name": "네오위즈",       "name_en": "Neowiz",               "sector": "게임",       "flag": "🇰🇷"},
+    "253450.KQ": {"name": "스튜디오드래곤", "name_en": "Studio Dragon",        "sector": "미디어",     "flag": "🇰🇷"},
+    "192080.KQ": {"name": "위메이드맥스",   "name_en": "Wemade Max",           "sector": "게임",       "flag": "🇰🇷"},
+    "067000.KQ": {"name": "조이시티",       "name_en": "Joycity",              "sector": "게임",       "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 화장품/뷰티 ════════════
+    "078520.KQ": {"name": "에이블씨엔씨",   "name_en": "Able C&C",             "sector": "화장품",     "flag": "🇰🇷"},
+    "237880.KQ": {"name": "클리오",         "name_en": "Clio Cosmetics",       "sector": "화장품",     "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 로봇/AI/소프트웨어 ════════════
+    "108490.KQ": {"name": "로보티즈",       "name_en": "Robotis",              "sector": "로봇",       "flag": "🇰🇷"},
+    "215200.KQ": {"name": "메가스터디교육", "name_en": "Megastudy Education",  "sector": "교육",       "flag": "🇰🇷"},
+    "089600.KQ": {"name": "나스미디어",     "name_en": "Nasmedia",             "sector": "디지털광고", "flag": "🇰🇷"},
+    "950190.KQ": {"name": "대양전기공업",   "name_en": "Daeyang Electric",     "sector": "전기기기",   "flag": "🇰🇷"},
+
+    # ════════════ 코스닥 추가 — 에너지/소재 ════════════
+    "178320.KQ": {"name": "서진시스템",     "name_en": "Seojin System",        "sector": "에너지저장", "flag": "🇰🇷"},
+    "082640.KQ": {"name": "동국씨엠",       "name_en": "Dongkuk C&M",          "sector": "배터리소재", "flag": "🇰🇷"},
+
     # ════════════ 미국 빅테크 ════════════
     "AAPL":  {"name": "애플",           "name_en": "Apple",              "sector": "Technology",     "flag": "🇺🇸"},
     "MSFT":  {"name": "마이크로소프트", "name_en": "Microsoft",          "sector": "Technology",     "flag": "🇺🇸"},
@@ -531,18 +871,630 @@ def calc_volume_analysis(df):
     trend  = "증가" if avg20 > avg60 else "감소"
     return round(ratio, 2), spike, trend
 
-def calc_stoch_rsi(close, rsi_period=14, stoch_period=14, smooth_k=3, smooth_d=3):
-    """Stochastic RSI (K%, D%) 반환 — 일반 RSI보다 민감한 과매수/과매도 감지"""
-    rsi_s   = calc_rsi(close, rsi_period)
-    rsi_min = rsi_s.rolling(stoch_period).min()
-    rsi_max = rsi_s.rolling(stoch_period).max()
-    denom   = (rsi_max - rsi_min).replace(0, float('nan'))
-    stoch_k = 100 * (rsi_s - rsi_min) / denom
-    k = stoch_k.rolling(smooth_k).mean()
-    d = k.rolling(smooth_d).mean()
-    k_val = float(k.iloc[-1]) if not pd.isna(k.iloc[-1]) else 50.0
-    d_val = float(d.iloc[-1]) if not pd.isna(d.iloc[-1]) else 50.0
-    return round(k_val, 1), round(d_val, 1)
+
+def detect_rsi_divergence(close, rsi_series, lookback=20):
+    """RSI 다이버전스 감지
+    Bullish: 가격은 새 저점이지만 RSI는 더 높은 저점 (반등 신호)
+    Bearish: 가격은 새 고점이지만 RSI는 더 낮은 고점 (반전 신호)
+    반환: 'bullish', 'bearish', or None
+    """
+    if len(close) < lookback * 2:
+        return None
+    recent_price = close.iloc[-lookback:]
+    recent_rsi   = rsi_series.iloc[-lookback:].dropna()
+    prev_price   = close.iloc[-lookback*2:-lookback]
+    prev_rsi     = rsi_series.iloc[-lookback*2:-lookback].dropna()
+    if recent_rsi.empty or prev_rsi.empty:
+        return None
+    # 가격 신저점인데 RSI는 더 높은 저점
+    if recent_price.min() < prev_price.min() and recent_rsi.min() > prev_rsi.min() + 2:
+        return "bullish"
+    # 가격 신고점인데 RSI는 더 낮은 고점
+    if recent_price.max() > prev_price.max() and recent_rsi.max() < prev_rsi.max() - 2:
+        return "bearish"
+    return None
+
+
+def detect_candle_pattern(df):
+    """최근 1~2봉 주요 캔들 패턴 감지. 반환: 패턴명 or None"""
+    if len(df) < 3: return None
+    o1, h1, l1, c1 = float(df['Open'].iloc[-1]), float(df['High'].iloc[-1]), float(df['Low'].iloc[-1]), float(df['Close'].iloc[-1])
+    o2, h2, l2, c2 = float(df['Open'].iloc[-2]), float(df['High'].iloc[-2]), float(df['Low'].iloc[-2]), float(df['Close'].iloc[-2])
+    body1, range1 = abs(c1 - o1), max(h1 - l1, 1e-9)
+    body2, range2 = abs(c2 - o2), max(h2 - l2, 1e-9)
+    upper_wick1 = h1 - max(c1, o1)
+    lower_wick1 = min(c1, o1) - l1
+
+    # 강세형 장악 (Bullish Engulfing)
+    if c2 < o2 and c1 > o1 and c1 >= o2 and o1 <= c2 and body1 > body2 * 0.8:
+        return "강세 장악형"
+    # 약세형 장악 (Bearish Engulfing)
+    if c2 > o2 and c1 < o1 and o1 >= c2 and c1 <= o2 and body1 > body2 * 0.8:
+        return "약세 장악형"
+    # 해머 (Hammer) — 하락추세 끝에서 반전 신호
+    if lower_wick1 > body1 * 2 and upper_wick1 < body1 * 0.3 and body1 / range1 < 0.4:
+        return "해머 (저점 반전)"
+    # 슈팅스타 (Shooting Star)
+    if upper_wick1 > body1 * 2 and lower_wick1 < body1 * 0.3 and body1 / range1 < 0.4:
+        return "슈팅스타 (고점 반전)"
+    # 도지 (Doji) — 매수·매도 균형
+    if body1 / range1 < 0.1:
+        return "도지 (방향 결정 임박)"
+    return None
+
+
+def calc_position_targets(price, atr_val, support, resistance, signal_type,
+                           ma20=None, ma50=None, low_10d=None, high_10d=None):
+    """손절가·목표가·R:R 계산 (기술적 지지/저항 + ATR 기반)
+
+    손절 우선순위 (매수):
+      1) 10일 스윙로우 + ATR×0.2 버퍼
+      2) 20일 지지선 + ATR×0.2 버퍼
+      3) MA20 - ATR×0.3
+      4) MA50 - ATR×0.3
+      5) 폴백: 현재가 - ATR×2
+      → ATR×0.8 ~ ATR×3 범위로 클램핑
+
+    손절 우선순위 (매도):
+      1) 10일 스윙하이 + ATR×0.2 버퍼
+      2) 20일 저항선 + ATR×0.2 버퍼
+      3) MA20 + ATR×0.3 (MA20이 현재가 위일 때)
+      4) MA50 + ATR×0.3 (MA50이 현재가 위일 때)
+      5) 폴백: 현재가 + ATR×1.5
+      → ATR×0.5 ~ ATR×3 범위로 클램핑
+
+    목표 (신호 강도 반응):
+      STRONG_BUY/STRONG_SELL = 3.5R / BUY/SELL = 3.0R
+      T1 = 1.5R (1차 부분익절)
+      T2 = 메인 목표
+
+    NEUTRAL/CASH 등 방향 없는 시그널은 None 반환.
+    """
+    if not atr_val or atr_val <= 0 or price <= 0:
+        return None
+
+    LONG_SIGNALS  = {"STRONG_BUY", "BUY", "LEVERAGE_2X", "HOLD_1X", "INVESTED"}
+    SHORT_SIGNALS = {"STRONG_SELL", "SELL"}
+    is_long  = signal_type in LONG_SIGNALS
+    is_short = signal_type in SHORT_SIGNALS
+    if not is_long and not is_short:
+        return None  # NEUTRAL/CASH 등 비방향 시그널 — 진입 전략 없음
+
+    # 신호 강도 → 목표 배수
+    mult = {"STRONG_BUY": 3.5, "BUY": 3.0}.get(signal_type, 2.5) if is_long \
+      else {"STRONG_SELL": 3.5, "SELL": 3.0}.get(signal_type, 2.5)
+
+    if is_long:
+        # ── 손절 후보 ──
+        cands = []
+        if low_10d  and low_10d  < price: cands.append(low_10d  - atr_val * 0.2)
+        if support  and support  < price: cands.append(support  - atr_val * 0.2)
+        if ma20     and ma20     < price: cands.append(ma20     - atr_val * 0.3)
+        if ma50     and ma50     < price: cands.append(ma50     - atr_val * 0.3)
+        # ATR×0.8 ~ ATR×3 사이의 후보만 유효
+        valid = [c for c in cands if atr_val * 0.8 < price - c < atr_val * 3.0]
+        stop = max(valid) if valid else price - atr_val * 2.0  # 가장 가까운 유효 지지선
+        # 클램핑
+        stop = max(stop, price - atr_val * 3.0)
+        stop = min(stop, price - atr_val * 0.8)
+
+        risk = price - stop
+        if risk <= 0: return None
+
+        # ── 목표가 ──
+        t1     = price + risk * 1.5
+        t2_base= price + risk * mult
+        # 저항선이 현재가 1% 이상 위이고 T2 기본값 아래 있으면 t2에 반영
+        if resistance and resistance > price * 1.01:
+            t2 = max(t2_base, min(resistance, price + risk * 5))
+        else:
+            t2 = t2_base
+
+        reward = t2 - price
+        rr     = round(reward / risk, 2) if risk > 0 else 0
+        target = t2
+
+    else:  # 매도 시그널
+        cands = []
+        if high_10d  and high_10d  > price: cands.append(high_10d  + atr_val * 0.2)
+        if resistance and resistance > price: cands.append(resistance + atr_val * 0.2)
+        if ma20 and ma20 > price: cands.append(ma20 + atr_val * 0.3)
+        if ma50 and ma50 > price: cands.append(ma50 + atr_val * 0.3)
+        # 유효 범위: ATR×0.5 ~ ATR×3 (롱보다 하한 완화 — 주가 위 저항이 가까울 수 있음)
+        valid = [c for c in cands if atr_val * 0.5 < c - price < atr_val * 3.0]
+        stop = min(valid) if valid else price + atr_val * 1.5  # 폴백 ATR×2→ATR×1.5
+        stop = min(stop, price + atr_val * 3.0)
+        stop = max(stop, price + atr_val * 0.5)
+
+        risk = stop - price
+        if risk <= 0: return None
+
+        t1     = price - risk * 1.5
+        t2_base= price - risk * mult
+        if support and support < price * 0.99:
+            t2 = min(t2_base, max(support, price - risk * 5))
+        else:
+            t2 = t2_base
+
+        reward = price - t2
+        rr     = round(reward / risk, 2) if risk > 0 else 0
+        target = t2
+
+    return {
+        "stop":        round(stop,   2),
+        "target":      round(target, 2),
+        "t1":          round(t1,     2),
+        "t2":          round(t2,     2),
+        "rr":          max(0, rr),
+        "is_long":     is_long,
+        "risk_pct":    round(abs(price - stop)   / price * 100, 2),
+        "reward_pct":  round(abs(target - price) / price * 100, 2),
+        # 목표 방향 표시용 부호 (롱=+, 숏=-)
+        "t1_pct":      round((t1 - price) / price * 100, 2),
+        "t2_pct":      round((t2 - price) / price * 100, 2),
+    }
+
+
+def calc_position_size(price, stop, account_size=10_000_000, risk_pct=1.0):
+    """1% 룰 기반 포지션 사이즈 계산
+    risk_pct: 계좌 대비 손실 허용 % (기본 1%)
+    반환: 권장 매수 수량, 투자금액"""
+    if not stop or price <= 0:
+        return None
+    risk_per_share = abs(price - stop)
+    if risk_per_share <= 0:
+        return None
+    max_loss = account_size * (risk_pct / 100)
+    shares = int(max_loss / risk_per_share)
+    invest = shares * price
+    return {
+        "shares":      shares,
+        "invest":      int(invest),
+        "invest_pct":  round(invest / account_size * 100, 1),
+        "max_loss":    int(max_loss),
+        "account":     account_size,
+        "risk_pct":    risk_pct,
+    }
+
+
+def calc_adx(df, period=14):
+    """ADX 추세강도 지표 (0-100, >25=강한 추세, <20=횡보)"""
+    h, l, c = df['High'], df['Low'], df['Close']
+    tr = pd.concat([h-l, (h-c.shift()).abs(), (l-c.shift()).abs()], axis=1).max(axis=1)
+    plus_dm  = (h.diff()).where((h.diff() > l.diff().abs()) & (h.diff() > 0), 0)
+    minus_dm = (l.diff().abs()).where((l.diff().abs() > h.diff()) & (l.diff() < 0), 0)
+    atr = tr.rolling(period).mean()
+    plus_di  = 100 * (plus_dm.rolling(period).mean() / atr.replace(0, float('nan')))
+    minus_di = 100 * (minus_dm.rolling(period).mean() / atr.replace(0, float('nan')))
+    dx  = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, float('nan'))
+    adx = dx.rolling(period).mean()
+    return adx, plus_di, minus_di
+
+
+def calc_stochastic(df, k_period=14, d_period=3):
+    """스토캐스틱 %K, %D (0-100, >80=과매수, <20=과매도)"""
+    low_min  = df['Low'].rolling(k_period).min()
+    high_max = df['High'].rolling(k_period).max()
+    k = 100 * (df['Close'] - low_min) / (high_max - low_min).replace(0, float('nan'))
+    d = k.rolling(d_period).mean()
+    return k, d
+
+
+def calc_mfi(df, period=14):
+    """MFI 자금흐름지수 (RSI + 거래량, >80=과매수, <20=과매도)"""
+    tp = (df['High'] + df['Low'] + df['Close']) / 3
+    mf = tp * df['Volume']
+    delta = tp.diff()
+    pos_mf = mf.where(delta > 0, 0).rolling(period).sum()
+    neg_mf = mf.where(delta < 0, 0).rolling(period).sum().abs()
+    mfr = pos_mf / neg_mf.replace(0, float('nan'))
+    return 100 - (100 / (1 + mfr))
+
+
+def calc_obv_slope(df, period=20):
+    """OBV 누적 거래량의 최근 추세 (양수=매집, 음수=분산)"""
+    obv = ((df['Close'].diff() > 0).astype(int) - (df['Close'].diff() < 0).astype(int)) * df['Volume']
+    obv = obv.cumsum()
+    if len(obv) < period: return 0
+    recent = obv.iloc[-period:]
+    norm = recent.mean() if recent.mean() != 0 else 1
+    slope = (recent.iloc[-1] - recent.iloc[0]) / abs(norm) * 100
+    return float(slope) if not pd.isna(slope) else 0
+
+
+# ════════════════════════════════════════════════════════════════
+# 국가별 투자 성향 프로파일 (전략 파라미터 + 시장 특성)
+# ════════════════════════════════════════════════════════════════
+COUNTRY_PROFILES = {
+    "KR": {
+        "name": "한국",
+        "tendency": "반도체·외인 주도 고변동성 추세장. 원화 약세시 수출주 강세, 외국인 매수세가 단기 방향 결정.",
+        "ma_periods": (20, 50, 120),       # 한국은 200일보다 120일이 더 의미있음
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),
+        "vol_regime_mult": 1.4,
+        "momentum_windows": (21, 63, 126),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -6,
+        "use_volume": True,
+    },
+    "US": {
+        "name": "미국",
+        "tendency": "장기 추세 추종이 가장 잘 통하는 시장. 기관 자금이 MA200 기준선 역할. VIX>25에서 변동성 급증.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (35, 70),
+        "rsi_extreme": (30, 75),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 25,
+        "vol_drop_threshold": -5,
+        "use_volume": True,
+    },
+    "JP": {
+        "name": "일본",
+        "tendency": "엔화 약세 = 수출주 강세 (USD/JPY 상승시 닛케이 상승). BoJ 금리인상 전환(2024~)으로 엔화 강세 시 수출주 압박 주의. 외국인 자금 유입 지속.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 75),               # 일본 강세장에서 RSI 75 자주 돌파
+        "rsi_extreme": (25, 80),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -5,
+        "use_volume": False,
+    },
+    "CN": {
+        "name": "중국",
+        "tendency": "정책 주도 평균회귀형. 추세 지속력 약하고 RSI 극단(<25,>75)에서 반전 자주 발생. 정부 부양책 발표가 단기 반등 트리거.",
+        "ma_periods": (10, 30, 100),       # 중국은 짧은 사이클
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),            # 더 극단적 RSI 신호
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (10, 30, 90),  # 짧은 momentum
+        "trend_strength_min": 25,
+        "vol_drop_threshold": -7,
+        "use_volume": True,
+    },
+    "HK": {
+        "name": "홍콩",
+        "tendency": "본토 대비 외국인 접근 용이. 중국 정책 + 글로벌 자금흐름 이중 영향. 텐센트·알리바바 등 빅테크 비중↑.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),
+        "vol_regime_mult": 1.6,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -7,
+        "use_volume": True,
+    },
+    "IN": {
+        "name": "인도",
+        "tendency": "강한 장기 성장 추세. 내수자금(국내 SIP)이 외인 매도를 상쇄. 추세 지속력 높으나 고점 대비 낙폭 클 때 추세 이탈 주의.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (35, 75),               # 강세장 RSI 70+ 흔함
+        "rsi_extreme": (30, 80),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -5,
+        "use_volume": True,
+    },
+    "TW": {
+        "name": "대만",
+        "tendency": "TSMC가 시총 30% 차지하는 반도체 프록시. AI/반도체 사이클 = 가권지수 사이클. 미국 SOX 지수와 강한 연동.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -6,
+        "use_volume": True,
+    },
+    "EU": {
+        "name": "유럽",
+        "tendency": "낮은 변동성·고배당 시장. ECB 금리정책에 민감, 에너지·금융 비중 큼. 미국 대비 베타 0.7 수준.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (35, 70),
+        "rsi_extreme": (30, 75),
+        "vol_regime_mult": 1.3,             # 유럽은 변동성 임계값 낮춤
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -4,
+        "use_volume": False,
+    },
+    "AU": {
+        "name": "호주·뉴질랜드",
+        "tendency": "원자재(철광석·석탄·금) 비중↑, 중국 수요와 강한 상관. 호주달러는 리스크온 통화.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -5,
+        "use_volume": True,
+    },
+    "EM": {
+        "name": "신흥국",
+        "tendency": "USD 강세시 약세, 원자재 가격 민감. Fed 금리·달러지수(DXY) 방향이 핵심 변수.",
+        "ma_periods": (15, 50, 200),
+        "rsi_band": (25, 70),
+        "rsi_extreme": (20, 75),
+        "vol_regime_mult": 1.6,
+        "momentum_windows": (21, 63, 126),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -8,
+        "use_volume": True,
+    },
+    "ME": {
+        "name": "중동",
+        "tendency": "유가 변동에 직접 노출, 지정학 리스크↑. 사우디는 OPEC+ 정책, 이스라엘은 테크/방산 비중↑.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 70),
+        "rsi_extreme": (25, 75),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (21, 63, 210),
+        "trend_strength_min": 20,
+        "vol_drop_threshold": -6,
+        "use_volume": False,
+    },
+    "CRYPTO": {
+        "name": "크립토",
+        "tendency": "24시간 거래·고변동성·4년 반감기 사이클. 비트코인 도미넌스가 알트코인 흐름 결정.",
+        "ma_periods": (20, 50, 200),
+        "rsi_band": (30, 75),
+        "rsi_extreme": (25, 80),
+        "vol_regime_mult": 1.5,
+        "momentum_windows": (7, 30, 90),
+        "trend_strength_min": 25,
+        "vol_drop_threshold": -10,
+        "use_volume": False,
+    },
+}
+
+TICKER_COUNTRY = {
+    "^KS11": "KR", "^KQ11": "KR",
+    "^GSPC": "US", "^IXIC": "US", "^DJI": "US",
+    "^N225": "JP",
+    "^HSI": "HK",
+    "000001.SS": "CN", "399001.SZ": "CN",
+    "^NSEI": "IN", "^BSESN": "IN",
+    "^TWII": "TW",
+    "^GDAXI": "EU", "^FCHI": "EU", "^FTSE": "EU", "^STOXX50E": "EU", "^SSMI": "EU",
+    "^IBEX": "EU", "FTSEMIB.MI": "EU", "^AEX": "EU", "^OMXSPI": "EU", "^OSEBX": "EU", "^ATX": "EU",
+    "^AXJO": "AU", "^NZ50": "AU",
+    "^BVSP": "EM", "^JKSE": "EM", "^KLSE": "EM", "^MXX": "EM", "^STI": "EM",
+    "^WIG20": "EM", "XU100.IS": "EM", "^SET.BK": "EM", "PSEi.PS": "EM", "^MERV": "EM",
+    "^J203.JO": "EM",
+    "^TA125.TA": "ME", "^TASI.SR": "ME",
+    "BTC-USD": "CRYPTO", "ETH-USD": "CRYPTO",
+    "SOL-USD": "CRYPTO", "XRP-USD": "CRYPTO", "BNB-USD": "CRYPTO",
+    "DOGE-USD": "CRYPTO", "ADA-USD": "CRYPTO", "AVAX-USD": "CRYPTO",
+}
+
+# ════════════════════════════════════════════════════════════════
+# 추천 ETF 가이드 (ticker → 전략별 상품)
+# ════════════════════════════════════════════════════════════════
+MARKET_ETF = {
+    # ── 한국 ──
+    "^KS11": {
+        "2x":  "KODEX 레버리지 (122630) · TIGER 200레버리지 (243890)",
+        "1x":  "KODEX 200 (069500) · TIGER 200 (102110)",
+        "inv": "KODEX 인버스 (114800) · KODEX 200선물인버스2X (252670)",
+    },
+    "^KQ11": {
+        "2x":  "KODEX 코스닥150레버리지 (233740)",
+        "1x":  "KODEX 코스닥150 (229200) · TIGER 코스닥150 (232080)",
+        "inv": "KODEX 코스닥150인버스(H) (251340)",
+    },
+    # ── 미국 ──
+    "^GSPC": {
+        "2x":  "KODEX 미국S&P500레버리지(H) (214980) · SSO",
+        "1x":  "TIGER 미국S&P500 (360750) · SPY · VOO",
+        "inv": "KODEX 미국S&P500선물인버스(H) (219480) · SH",
+    },
+    "^IXIC": {
+        "2x":  "TIGER 미국나스닥100레버리지(H) (433580) · QLD",
+        "1x":  "TIGER 미국나스닥100 (133690) · QQQ",
+        "inv": "KODEX 미국나스닥100선물인버스(H) (314250) · PSQ",
+    },
+    "^DJI": {
+        "2x":  "DDM (ProShares Ultra Dow30)",
+        "1x":  "DIA (SPDR Dow Jones ETF)",
+        "inv": "DOG (ProShares Short Dow30) · SDOW(3x)",
+    },
+    # ── 일본 (레버리지 전환) ──
+    "^N225": {
+        "2x":  "1570.T (NEXT FUNDS Nikkei 2x) · EZJ",
+        "1x":  "TIGER 일본니케이225 (241180) · EWJ",
+        "inv": "1357.T (일본인버스 2x) · 현금",
+    },
+    # ── 홍콩 (레버리지 전환) ──
+    "^HSI": {
+        "2x":  "YINN (Direxion China Bull 3x) · XPP",
+        "1x":  "TIGER 차이나항셍테크 (371460) · EWH",
+        "inv": "YANG (Direxion China Bear 3x) · 현금",
+    },
+    # ── 유럽 DAX (레버리지 전환) ──
+    "^GDAXI": {
+        "2x":  "LDAX (Lyxor DAX 2x) · DBX0BV (DAX 2x 유럽 상장)",
+        "1x":  "EWG (iShares Germany) · DAXEX",
+        "inv": "SDAX 인버스 ETF · 현금",
+    },
+    "^FCHI": {
+        "1x":   "EWQ (iShares France) · VGK",
+        "exit": "현금 보유",
+    },
+    "^FTSE": {
+        "1x":   "EWU (iShares UK)",
+        "exit": "현금 보유",
+    },
+    "^STOXX50E": {
+        "2x":  "UPV (ProShares Ultra FTSE Europe)",
+        "1x":  "TIGER 유럽STOXX50(H) (195930) · VGK · EZU",
+        "inv": "EPV (ProShares UltraShort) · 현금",
+    },
+    "^SSMI": {
+        "1x":   "EWL (iShares Switzerland)",
+        "exit": "현금 보유",
+    },
+    "^IBEX": {
+        "1x":   "EWP (iShares Spain) · VGK",
+        "exit": "현금 보유",
+    },
+    "FTSEMIB.MI": {
+        "1x":   "EWI (iShares Italy) · VGK",
+        "exit": "현금 보유",
+    },
+    "^AEX": {
+        "1x":   "EWN (iShares Netherlands) · VGK",
+        "exit": "현금 보유",
+    },
+    "^OMXSPI": {
+        "1x":   "EWD (iShares Sweden) · VGK",
+        "exit": "현금 보유",
+    },
+    "^OSEBX": {
+        "1x":   "NORW (Global X Norway)",
+        "exit": "현금 보유",
+    },
+    "^ATX": {
+        "1x":   "EWO (iShares Austria) · VGK",
+        "exit": "현금 보유",
+    },
+    # ── 중국 (레버리지 전환) ──
+    "000001.SS": {
+        "2x":  "CHAU (Direxion CSI300 Bull 2x) · YINN(3x)",
+        "1x":  "TIGER 차이나CSI300 (192090) · FXI · MCHI",
+        "inv": "YANG (Direxion China Bear 3x) · 현금",
+    },
+    "399001.SZ": {
+        "2x":  "YINN (Direxion China Bull 3x) · CHAU",
+        "1x":  "MCHI (iShares China) · KWEB",
+        "inv": "YANG (Direxion China Bear 3x) · 현금",
+    },
+    # ── 인도 ──
+    "^NSEI": {
+        "2x":  "INDL (Direxion India Bull 2x)",
+        "1x":  "TIGER 인도니프티50 (437080) · INDA · EPI",
+        "inv": "현금 보유",
+    },
+    "^BSESN": {
+        "2x":  "INDL (Direxion India Bull 2x)",
+        "1x":  "TIGER 인도니프티50 (437080) · EPI",
+        "inv": "현금 보유",
+    },
+    # ── 대만 ──
+    "^TWII": {
+        "2x":  "현지 00631L (Yuanta 2x) · FTXS",
+        "1x":  "EWT (iShares Taiwan) · CQQQ",
+        "inv": "현금 보유",
+    },
+    # ── 호주 (레버리지 전환) ──
+    "^AXJO": {
+        "2x":  "GEAR (BetaShares Aus Equities 2x)",
+        "1x":  "EWA (iShares Australia) · IAF",
+        "inv": "BBOZ (BetaShares Aus Bear 2x) · 현금",
+    },
+    "^NZ50": {
+        "1x":   "ENZL (iShares New Zealand)",
+        "exit": "현금 보유",
+    },
+    # ── 신흥국 (브라질 레버리지 전환) ──
+    "^BVSP": {
+        "2x":  "BRZU (Direxion Brazil Bull 3x)",
+        "1x":  "EWZ (iShares Brazil)",
+        "inv": "BRZS (Direxion Brazil Bear 3x) · 현금",
+    },
+    "^JKSE": {
+        "1x":   "EIDO (iShares Indonesia)",
+        "exit": "현금 보유",
+    },
+    "^KLSE": {
+        "1x":   "EWM (iShares Malaysia)",
+        "exit": "현금 보유",
+    },
+    "^MXX": {
+        "1x":   "EWW (iShares Mexico)",
+        "exit": "현금 보유",
+    },
+    "^STI": {
+        "1x":   "EWS (iShares Singapore)",
+        "exit": "현금 보유",
+    },
+    "^WIG20": {
+        "1x":   "EPOL (iShares Poland)",
+        "exit": "현금 보유",
+    },
+    "XU100.IS": {
+        "1x":   "TUR (iShares Turkey)",
+        "exit": "현금 보유",
+    },
+    "^J203.JO": {
+        "1x":   "EZA (iShares South Africa)",
+        "exit": "현금 보유",
+    },
+    "^SET.BK": {
+        "1x":   "THD (iShares Thailand)",
+        "exit": "현금 보유",
+    },
+    "PSEi.PS": {
+        "1x":   "EPHE (iShares Philippines)",
+        "exit": "현금 보유",
+    },
+    "^MERV": {
+        "1x":   "ARGT (Global X Argentina)",
+        "exit": "현금 보유",
+    },
+    # ── 중동 ──
+    "^TA125.TA": {
+        "1x":   "EIS (iShares Israel)",
+        "exit": "현금 보유",
+    },
+    "^TASI.SR": {
+        "1x":   "KSA (iShares Saudi Arabia)",
+        "exit": "현금 보유",
+    },
+    # ── 크립토 ──
+    "BTC-USD": {
+        "2x":  "BITX (ProShares Ultra Bitcoin 2x) · MSTU",
+        "1x":  "IBIT (BlackRock BTC Spot) · FBTC · 현물 직접 보유",
+        "inv": "SBIT (ProShares Short Bitcoin) · USDT 전환",
+    },
+    "ETH-USD": {
+        "1x":   "ETHA (iShares ETH Spot) · ETHW · 현물 직접 보유",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "SOL-USD": {
+        "1x":   "SOLS (Bitwise Solana) · BSOL · 현물 직접 보유",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "XRP-USD": {
+        "1x":   "XRPH (ProShares XRP) · 현물 직접 보유",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "BNB-USD": {
+        "1x":   "현물 직접 보유 (바이낸스)",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "DOGE-USD": {
+        "1x":   "현물 직접 보유 (업비트·바이낸스)",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "ADA-USD": {
+        "1x":   "현물 직접 보유",
+        "exit": "USDT 스테이블코인 전환",
+    },
+    "AVAX-USD": {
+        "1x":   "현물 직접 보유",
+        "exit": "USDT 스테이블코인 전환",
+    },
+}
+
+
+def get_country_profile(ticker):
+    code = TICKER_COUNTRY.get(ticker, "US")
+    return code, COUNTRY_PROFILES[code]
 
 
 # ════════════════════════════════════════════════════════════════
@@ -592,14 +1544,23 @@ def analyze_minervini(df, params):
     ma_exit = _ms - _atr * p['exit_buffer_atr']
     hard_stop = current * (1 - p['hard_stop_pct'])
     stoploss = max(trailing_stop, ma_exit, hard_stop)
-    target = current + _atr * (3.0 if is_stage2 else 2.0)
+
+    # ATR 배수 기반 목표: stage2=3x, 일반=2x ATR
+    atr_mult = 3.0 if is_stage2 else 2.0
+    target_atr = current + _atr * atr_mult
 
     risk = current - stoploss
-    reward = target - current
+    reward = target_atr - current
     rr = reward / risk if risk > 0 else 0
+
+    # R:R이 2.0 미만이면 목표를 ATR 배수로 늘리되, 최대 5x ATR까지만 허용
     if rr < 2.0 and risk > 0:
-        target = current + risk * 2.0
-        rr = 2.0
+        target_atr = current + risk * 2.0
+        # 단, ATR×5 상한으로 비현실적인 목표 방지
+        target_atr = min(target_atr, current + _atr * 5.0)
+        rr = (target_atr - current) / risk
+
+    target = target_atr
 
     if is_stage2:
         signal = "🟢 매수 (Stage2)"
@@ -628,186 +1589,291 @@ def analyze_minervini(df, params):
 # ════════════════════════════════════════════════════════════════
 # 전략 2: 레버리지 스위칭 (한국/미국 지수용)
 # ════════════════════════════════════════════════════════════════
-def analyze_leverage(df, params):
+def analyze_leverage(df, params, profile=None):
+    """레버리지 스위칭: MA50/200 + ADX 추세강도 + 변동성 필터.
+    국가 프로파일이 있으면 MA 기간·RSI 임계·변동성 임계값 조정."""
+    p = profile or COUNTRY_PROFILES["US"]
+    ma_s, ma_m, ma_l = p["ma_periods"]
+    rsi_lo, rsi_hi = p["rsi_band"]
+    vol_mult = p["vol_regime_mult"]
+    adx_min = p["trend_strength_min"]
+
     close = df['Close']
-    ma50 = close.rolling(50).mean()
-    ma200 = close.rolling(200).mean()
-    rsi = calc_rsi(close)
+    ma_mid  = close.rolling(ma_m).mean()
+    ma_long = close.rolling(ma_l).mean()
+    rsi  = calc_rsi(close)
+    adx, plus_di, minus_di = calc_adx(df, period=14)
+    stoch_k, stoch_d = calc_stochastic(df, k_period=14, d_period=3)
     vol20 = close.pct_change().rolling(20).std()
     vol60 = close.pct_change().rolling(60).std()
-    macd_l, macd_s, macd_h = calc_macd(close)
 
     i = len(df) - 1
     current = float(close.iloc[-1])
     prev = float(close.iloc[-2]) if len(close) > 1 else current
-    _ma50 = float(ma50.iloc[-1]) if not pd.isna(ma50.iloc[-1]) else current
-    _ma200 = float(ma200.iloc[-1]) if not pd.isna(ma200.iloc[-1]) else current
-    _rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50
-    _v20 = float(vol20.iloc[-1]) if not pd.isna(vol20.iloc[-1]) else 0.01
-    _v60 = float(vol60.iloc[-1]) if not pd.isna(vol60.iloc[-1]) else 0.01
+    _ma_m = float(ma_mid.iloc[-1])  if not pd.isna(ma_mid.iloc[-1])  else current
+    _ma_l = float(ma_long.iloc[-1]) if not pd.isna(ma_long.iloc[-1]) else current
+    _rsi  = float(rsi.iloc[-1])     if not pd.isna(rsi.iloc[-1])     else 50
+    _adx  = float(adx.iloc[-1])     if not pd.isna(adx.iloc[-1])     else 15
+    _pdi  = float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0
+    _mdi  = float(minus_di.iloc[-1])if not pd.isna(minus_di.iloc[-1])else 0
+    _stk  = float(stoch_k.iloc[-1]) if not pd.isna(stoch_k.iloc[-1]) else 50
+    _v20  = float(vol20.iloc[-1])   if not pd.isna(vol20.iloc[-1])   else 0.01
+    _v60  = float(vol60.iloc[-1])   if not pd.isna(vol60.iloc[-1])   else 0.01
 
-    # 10일 윈도우 기울기 (5일 대비 노이즈 감소)
-    slope50 = 0
-    if i >= 10 and not pd.isna(ma50.iloc[i-10]):
-        slope50 = (float(ma50.iloc[i]) - float(ma50.iloc[i-10])) / float(ma50.iloc[i-10]) * 100
+    slope_mid = 0
+    if i >= 5 and not pd.isna(ma_mid.iloc[i-5]):
+        slope_mid = (float(ma_mid.iloc[i]) - float(ma_mid.iloc[i-5])) / float(ma_mid.iloc[i-5]) * 100
 
-    vol_spike = _v20 > _v60 * 1.5 if _v60 > 0 else False
-    macd_bullish = macd_h > 0
+    vol_spike = _v20 > _v60 * vol_mult if _v60 > 0 else False
+    trend_strong = _adx >= adx_min
+    trend_up     = _pdi > _mdi
 
-    # 골든크로스 / 데드크로스 감지
+    # 골든/데드크로스 감지
     cross_signal = "none"
-    if i >= 1 and not pd.isna(ma50.iloc[-2]) and not pd.isna(ma200.iloc[-2]):
-        prev_ma50  = float(ma50.iloc[-2])
-        prev_ma200 = float(ma200.iloc[-2])
-        if prev_ma50 < prev_ma200 and _ma50 >= _ma200:
-            cross_signal = "golden"
-        elif prev_ma50 > prev_ma200 and _ma50 <= _ma200:
-            cross_signal = "dead"
-        elif _ma50 > _ma200:
-            cross_signal = "bull"
-        else:
-            cross_signal = "bear"
+    if i >= 1 and not pd.isna(ma_mid.iloc[-2]) and not pd.isna(ma_long.iloc[-2]):
+        prev_m = float(ma_mid.iloc[-2]);  prev_l = float(ma_long.iloc[-2])
+        if prev_m < prev_l and _ma_m >= _ma_l:   cross_signal = "golden"
+        elif prev_m > prev_l and _ma_m <= _ma_l: cross_signal = "dead"
+        elif _ma_m > _ma_l:                       cross_signal = "bull"
+        else:                                     cross_signal = "bear"
 
-    # 레버리지 결정 — MACD 확인 포함
-    if current > _ma50 and slope50 > 0 and _rsi > 50 and not vol_spike and macd_bullish:
-        lev = 2.0
-        signal = "🟢 2x 레버리지"
-        signal_type = "LEVERAGE_2X"
-    elif current > _ma50 and slope50 > 0 and _rsi > 45 and not vol_spike:
-        # MA50 상회 + 상승 추세지만 MACD 미확인 → 1x 보수적 유지
-        lev = 1.0
-        signal = "🔵 1x 원물 (MACD 대기)"
-        signal_type = "HOLD_1X"
-    elif current > _ma200:
-        lev = 1.0
-        signal = "🔵 1x 원물"
-        signal_type = "HOLD_1X"
-    elif current < _ma200:
+    # ── 신뢰도 (confidence) 산출 0-100 ──
+    confidence = 50
+    if current > _ma_m: confidence += 10
+    if current > _ma_l: confidence += 10
+    if slope_mid > 0:   confidence += 10
+    if trend_strong:    confidence += 10
+    if trend_up:        confidence += 5
+    if rsi_lo < _rsi < rsi_hi: confidence += 5
+    if vol_spike: confidence -= 15
+    if cross_signal == "golden": confidence += 10
+    if cross_signal == "dead":   confidence -= 15
+    confidence = max(0, min(100, confidence))
+
+    # ── 레버리지 결정 (점수제: 6개 조건 → 2x/1x/0x) ──
+    # 6개 조건에 가중치를 부여하여 AND 경직성 해소
+    score_2x = 0
+    if current > _ma_m > _ma_l: score_2x += 2  # 핵심 추세 정렬 (가중치 2)
+    if slope_mid > 0:            score_2x += 1  # MA중기 상승기울기
+    if _rsi > 50:                score_2x += 1  # RSI 중립 이상
+    if trend_strong:             score_2x += 1  # ADX 추세강도 확인
+    if trend_up:                 score_2x += 1  # +DI > -DI (방향 확인)
+    # 최대 점수: 6점
+
+    if current < _ma_l:
+        # 장기 MA 하단 = 무조건 현금 (하락장)
         lev = 0.0
-        signal = "🔴 현금 전환"
+        signal = "🔴 현금 전환 (장기추세 이탈)"
         signal_type = "CASH"
+    elif vol_spike and current < _ma_m:
+        # 변동성 급등 + 중기선 하단 = 현금
+        lev = 0.0
+        signal = "🔴 현금 (변동성 급등)"
+        signal_type = "CASH_VOL"
+    elif score_2x >= 5 and not vol_spike:
+        # 5~6점: 2x 레버리지 (강한 상승추세)
+        lev = 2.0
+        signal = "🟢 2x 레버리지 (강한 상승추세)"
+        signal_type = "LEVERAGE_2X"
+    elif score_2x >= 3 or (current > _ma_l and not vol_spike):
+        # 3~4점 or 장기선 위: 1x 보유
+        lev = 1.0
+        signal = "🔵 1x 원물 보유"
+        signal_type = "HOLD_1X"
     else:
         lev = 1.0
         signal = "⚪ 1x 원물"
         signal_type = "HOLD_1X"
 
-    if vol_spike and current < _ma50:
-        lev = 0.0
-        signal = "🔴 현금 (변동성 급등)"
-        signal_type = "CASH_VOL"
+    # ── 횡보 변동성 보호: 레버리지 ETF 베타슬리피지 방지 ──
+    # 연환산 변동성 25% 초과 + ADX 추세 미확정 → 2x 강제 다운그레이드
+    ann_vol = _v20 * np.sqrt(252) * 100
+    if lev == 2.0 and ann_vol > 25 and not trend_strong:
+        lev = 1.0
+        signal = "🔵 1x 다운그레이드 (횡보 변동성 과다)"
+        signal_type = "HOLD_1X"
 
     return {
         "signal": signal, "signal_type": signal_type,
         "leverage": lev,
         "price": current, "change_pct": (current-prev)/prev*100,
-        "ma50": _ma50, "ma200": _ma200, "ma50_slope": slope50,
-        "rsi": _rsi, "vol_spike": vol_spike,
-        "macd_hist": round(macd_h, 4), "macd_bullish": macd_bullish,
+        "ma50": _ma_m, "ma200": _ma_l, "ma50_slope": slope_mid,
+        "rsi": _rsi, "adx": round(_adx, 1),
+        "trend_strong": trend_strong, "trend_up": trend_up,
+        "stoch_k": round(_stk, 1),
+        "vol_spike": vol_spike,
+        "ann_vol": round(ann_vol, 1),
         "cross_signal": cross_signal,
-        "strategy_name": "레버리지 스위칭",
-        "strategy_label": f"2x/1x/0x (MA50/200 + MACD)",
+        "confidence": confidence,
+        "score_2x": score_2x,
+        "strategy_name": "레버리지 스위칭 v2",
+        "strategy_label": f"2x/1x/0x · MA{ma_m}/{ma_l} · ADX{_adx:.0f}",
     }
 
 
 # ════════════════════════════════════════════════════════════════
 # 전략 3: 이중필터 모멘텀 (NIKKEI/항셍용)
 # ════════════════════════════════════════════════════════════════
-def analyze_dual_filter(df, params):
+def analyze_dual_filter(df, params, profile=None):
+    """이중필터 모멘텀: 단·중·장기 3개 모멘텀 + ADX 추세강도 + Stochastic 극단.
+    국가별 모멘텀 윈도우 차등 적용 (중국=10/30/90, 미국=21/63/210)."""
+    p = profile or COUNTRY_PROFILES["JP"]
+    w_short, w_mid, w_long = p["momentum_windows"]
+    rsi_lo, rsi_hi = p["rsi_band"]
+    rsi_x_lo, rsi_x_hi = p["rsi_extreme"]
+    adx_min = p["trend_strength_min"]
+
     close = df['Close']
     current = float(close.iloc[-1])
     prev = float(close.iloc[-2]) if len(close) > 1 else current
-    rsi_val = float(calc_rsi(close).iloc[-1])
-    _, _, macd_h = calc_macd(close)
 
-    mom_3m  = (current / float(close.iloc[-63])  - 1) * 100 if len(close) >= 63  else 0
-    mom_10m = (current / float(close.iloc[-210]) - 1) * 100 if len(close) >= 210 else 0
+    n = len(close)
+    mom_s = (current / float(close.iloc[-w_short]) - 1) * 100 if n >= w_short else 0
+    mom_m = (current / float(close.iloc[-w_mid])   - 1) * 100 if n >= w_mid   else 0
+    mom_l = (current / float(close.iloc[-w_long])  - 1) * 100 if n >= w_long  else 0
 
-    both_neg = mom_3m < 0 and mom_10m < 0
-    any_pos  = mom_3m > 0 or mom_10m > 0
-    # RSI 극단값: 과매수(>80)이면 수익실현 주의, 과매도(<20)이면 반등 주의
-    rsi_overbought  = rsi_val > 80
-    rsi_oversold    = rsi_val < 20
+    rsi_val = float(calc_rsi(close).iloc[-1]) if not pd.isna(calc_rsi(close).iloc[-1]) else 50
+    adx, plus_di, minus_di = calc_adx(df, period=14)
+    _adx = float(adx.iloc[-1]) if not pd.isna(adx.iloc[-1]) else 15
+    _pdi = float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0
+    _mdi = float(minus_di.iloc[-1]) if not pd.isna(minus_di.iloc[-1]) else 0
+    stoch_k, stoch_d = calc_stochastic(df, k_period=14, d_period=3)
+    _stk = float(stoch_k.iloc[-1]) if not pd.isna(stoch_k.iloc[-1]) else 50
 
-    if both_neg:
-        signal = "🔴 현금 (3m & 10m 모두 음)"
+    pos_count = sum(1 for m in (mom_s, mom_m, mom_l) if m > 0)
+    neg_count = 3 - pos_count
+    trend_strong = _adx >= adx_min
+    trend_up = _pdi > _mdi
+
+    # 극단 RSI = 평균회귀 신호 (중국형 시장에서 유용)
+    rsi_extreme_low  = rsi_val <= rsi_x_lo
+    rsi_extreme_high = rsi_val >= rsi_x_hi
+
+    if pos_count == 3 and trend_strong and trend_up:
+        signal = "🟢 강력 매수 (3모멘텀+추세확정)"
+        signal_type = "STRONG_BUY"
+        action = "강력 매수"
+        confidence = 85
+    elif pos_count == 3 and (trend_strong or trend_up):
+        # 3모멘텀 but ADX or 방향 하나만 확정 → 일반 매수
+        signal = "🟢 매수 (3모멘텀·추세 부분확정)"
+        signal_type = "BUY"
+        action = "매수"
+        confidence = 72
+    elif pos_count == 2 and trend_strong and trend_up:
+        # 2모멘텀 + 추세 확정 → 투자 유지
+        signal = "🟢 투자 유지 (2모멘텀+추세확정)"
+        signal_type = "INVESTED"
+        action = "투자 유지"
+        confidence = 65
+    elif pos_count == 2:
+        # 2모멘텀 but 추세 미확정 → 소극적 관망
+        signal = "⚪ 관망 (2모멘텀·추세 미확정)"
+        signal_type = "NEUTRAL"
+        action = "관망"
+        confidence = 48
+    elif rsi_extreme_low and pos_count == 0:
+        signal = "🟡 반등 대기 (과매도 극단)"
+        signal_type = "CAUTION"
+        action = "분할 매수 검토"
+        confidence = 55
+    elif neg_count == 3 and trend_strong and not trend_up:
+        # 전구간 음모멘텀 + 하락추세 확인 → 강한 현금
+        signal = "🔴 현금 (전 구간 음모멘텀+하락추세)"
         signal_type = "CASH"
         action = "현금 전환"
-    elif any_pos and rsi_overbought:
-        signal = "🟡 주의 (RSI 과매수 — 수익실현 고려)"
-        signal_type = "CAUTION"
-        action = "비중 축소 검토"
-    elif any_pos and macd_h > 0:
-        signal = "🟢 투자 유지 (MACD 확인)"
-        signal_type = "INVESTED"
-        action = "투자 유지"
-    elif any_pos:
-        signal = "🔵 투자 유지 (모멘텀 양호)"
-        signal_type = "INVESTED"
-        action = "투자 유지"
-    elif rsi_oversold:
-        signal = "🟡 주의 (RSI 과매도 — 반등 가능)"
-        signal_type = "CAUTION"
-        action = "관망 (반등 확인 후 진입)"
+        confidence = 80
+    elif neg_count == 3:
+        signal = "🔴 현금 (전 구간 음모멘텀)"
+        signal_type = "CASH"
+        action = "현금 전환"
+        confidence = 70
+    elif rsi_extreme_high and trend_strong and not trend_up:
+        signal = "🔴 매도 (과열+하락추세)"
+        signal_type = "SELL"
+        action = "분할 매도"
+        confidence = 70
     else:
         signal = "⚪ 관망"
         signal_type = "NEUTRAL"
         action = "관망"
+        confidence = 40
 
     return {
         "signal": signal, "signal_type": signal_type,
         "price": current, "change_pct": (current-prev)/prev*100,
-        "mom_3m": round(mom_3m, 2), "mom_10m": round(mom_10m, 2),
-        "rsi": rsi_val,
-        "macd_hist": round(macd_h, 4),
+        "mom_short": round(mom_s, 2), "mom_mid": round(mom_m, 2), "mom_long": round(mom_l, 2),
+        "mom_3m": round(mom_m, 2), "mom_10m": round(mom_l, 2),  # 호환성
+        "mom_windows": [w_short, w_mid, w_long],
+        "rsi": rsi_val, "adx": round(_adx, 1),
+        "trend_strong": trend_strong, "trend_up": trend_up,
+        "stoch_k": round(_stk, 1),
         "action": action,
-        "strategy_name": "이중필터 모멘텀",
-        "strategy_label": f"3m({mom_3m:+.1f}%) + 10m({mom_10m:+.1f}%)",
+        "confidence": confidence,
+        "strategy_name": "이중필터 모멘텀 v2",
+        "strategy_label": f"{w_short}/{w_mid}/{w_long}일 · ADX{_adx:.0f}",
     }
 
 
 # ════════════════════════════════════════════════════════════════
 # 전략 4: 위기방어형 (DAX + BTC 현물용)
 # ════════════════════════════════════════════════════════════════
-def analyze_risk_defense(df, params):
+def analyze_risk_defense(df, params, profile=None):
+    """위기방어형: 8개 위험요인 가중치 점수화. 국가별 변동성·하락 임계값 차등.
+    추가 지표: ADX(추세 약화), MFI(자금이탈), Bollinger %B."""
+    p = profile or COUNTRY_PROFILES["US"]
+    ma_s, ma_m, ma_l = p["ma_periods"]
+    vol_mult = p["vol_regime_mult"]
+    drop_threshold = p["vol_drop_threshold"]
+
     close = df['Close']
-    ma50 = close.rolling(50).mean()
-    ma200 = close.rolling(200).mean()
+    ma_mid  = close.rolling(ma_m).mean()
+    ma_long = close.rolling(ma_l).mean()
     rsi = calc_rsi(close)
+    adx, plus_di, minus_di = calc_adx(df, period=14)
     ann_factor = np.sqrt(365) if params.get('is_crypto') else np.sqrt(252)
     vol20 = close.pct_change().rolling(20).std() * ann_factor * 100
     vol60 = close.pct_change().rolling(60).std() * ann_factor * 100
-    macd_l, macd_s, macd_h = calc_macd(close)
 
     i = len(df) - 1
     current = float(close.iloc[-1])
     prev = float(close.iloc[-2]) if len(close) > 1 else current
-    _ma50 = float(ma50.iloc[-1]) if not pd.isna(ma50.iloc[-1]) else current
-    _ma200 = float(ma200.iloc[-1]) if not pd.isna(ma200.iloc[-1]) else current
-    _rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50
-    _v20 = float(vol20.iloc[-1]) if not pd.isna(vol20.iloc[-1]) else 20
-    _v60 = float(vol60.iloc[-1]) if not pd.isna(vol60.iloc[-1]) else 20
+    _ma_m = float(ma_mid.iloc[-1])  if not pd.isna(ma_mid.iloc[-1])  else current
+    _ma_l = float(ma_long.iloc[-1]) if not pd.isna(ma_long.iloc[-1]) else current
+    _rsi  = float(rsi.iloc[-1])     if not pd.isna(rsi.iloc[-1])     else 50
+    _adx  = float(adx.iloc[-1])     if not pd.isna(adx.iloc[-1])     else 15
+    _pdi  = float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0
+    _mdi  = float(minus_di.iloc[-1])if not pd.isna(minus_di.iloc[-1])else 0
+    _v20  = float(vol20.iloc[-1])   if not pd.isna(vol20.iloc[-1])   else 20
+    _v60  = float(vol60.iloc[-1])   if not pd.isna(vol60.iloc[-1])   else 20
     r20 = (current / float(close.iloc[i-20]) - 1) * 100 if i >= 20 else 0
 
-    # 거래량 추세 (가격 하락 + 거래량 증가 = 매도 압력 확인)
-    vol_series = df['Volume']
-    avg_vol_20 = float(vol_series.rolling(20).mean().iloc[-1])
-    avg_vol_60 = float(vol_series.rolling(60).mean().iloc[-1])
-    vol_expanding = avg_vol_20 > avg_vol_60 * 1.1
+    # MFI 자금흐름
+    try:
+        mfi = calc_mfi(df, period=14)
+        _mfi = float(mfi.iloc[-1]) if not pd.isna(mfi.iloc[-1]) else 50
+    except Exception:
+        _mfi = 50
 
-    drop_threshold = -10 if params.get('is_crypto') else -5
+    # Bollinger %B
+    try:
+        _, _, _, bb_pct_b, _ = calc_bollinger(close)
+    except Exception:
+        bb_pct_b = 0.5
 
     risk_score = 0
     risk_details = []
-    if current < _ma200:          risk_score += 30; risk_details.append("MA200↓")
-    if current < _ma50:           risk_score += 15; risk_details.append("MA50↓")
-    if _ma50 < _ma200:            risk_score += 15; risk_details.append("데드크로스")
-    if _rsi < 40:                 risk_score += 10; risk_details.append(f"RSI{_rsi:.0f}")
-    if r20 < drop_threshold:      risk_score += 15; risk_details.append(f"20일{r20:.1f}%")
-    if _v20 > _v60 * 1.5:         risk_score += 15; risk_details.append("변동성↑")
-    # MACD 음전환 추가
-    if macd_h < 0 and macd_l < 0: risk_score += 10; risk_details.append("MACD↓")
-    # 하락 중 거래량 증가 = 추가 매도 압력
-    if r20 < 0 and vol_expanding:  risk_score += 5;  risk_details.append("거래량↑하락")
+    if current < _ma_l:           risk_score += 25; risk_details.append("MA장기↓")
+    if current < _ma_m:           risk_score += 12; risk_details.append("MA중기↓")
+    if _ma_m < _ma_l:             risk_score += 12; risk_details.append("데드크로스")
+    if _rsi < 40:                 risk_score += 8;  risk_details.append(f"RSI{_rsi:.0f}")
+    if r20 < drop_threshold:      risk_score += 12; risk_details.append(f"20일{r20:.1f}%")
+    if _v20 > _v60 * vol_mult:    risk_score += 12; risk_details.append("변동성↑")
+    if _adx > 25 and _mdi > _pdi: risk_score += 10; risk_details.append("하락추세강함")
+    if _mfi < 30:                 risk_score += 5;  risk_details.append(f"MFI{_mfi:.0f}(자금이탈)")
+    if bb_pct_b < 0.1:            risk_score += 4;  risk_details.append("BB하단이탈")
+
+    risk_score = min(100, risk_score)
 
     if risk_score >= 70:
         signal = f"🔴 현금 전환 (위험 {risk_score}점)"
@@ -815,21 +1881,27 @@ def analyze_risk_defense(df, params):
     elif risk_score >= 50:
         signal = f"🟡 주의 (위험 {risk_score}점)"
         signal_type = "CAUTION"
-    elif risk_score >= 35:
-        signal = f"⚪ 관망 (위험 {risk_score}점)"
-        signal_type = "NEUTRAL"
-    else:
+    elif risk_score <= 25:
         signal = f"🟢 투자 유지 (위험 {risk_score}점)"
         signal_type = "INVESTED"
+    else:
+        signal = f"⚪ 관망 (위험 {risk_score}점)"
+        signal_type = "NEUTRAL"
+
+    confidence = 100 - risk_score if signal_type == "INVESTED" else risk_score
 
     return {
         "signal": signal, "signal_type": signal_type,
         "risk_score": risk_score, "risk_details": risk_details,
         "price": current, "change_pct": (current-prev)/prev*100,
-        "rsi": _rsi,
-        "macd_hist": round(macd_h, 4),
-        "strategy_name": "위기방어형",
-        "strategy_label": f"위험스코어 {risk_score}/100",
+        "rsi": _rsi, "adx": round(_adx, 1),
+        "mfi": round(_mfi, 1),
+        "ma50": _ma_m, "ma200": _ma_l,
+        "vol20": round(_v20, 1), "vol60": round(_v60, 1),
+        "r20": round(r20, 2),
+        "confidence": confidence,
+        "strategy_name": "위기방어형 v2",
+        "strategy_label": f"위험 {risk_score}/100 · MA{ma_m}/{ma_l}",
     }
 
 
@@ -839,17 +1911,24 @@ def analyze_risk_defense(df, params):
 def analyze_market(ticker, market_info, df):
     strategy = market_info["strategy"]
     params = market_info["params"]
+    country_code, profile = get_country_profile(ticker)
 
     if strategy == "minervini":
         result = analyze_minervini(df, params)
     elif strategy == "leverage":
-        result = analyze_leverage(df, params)
+        result = analyze_leverage(df, params, profile=profile)
     elif strategy == "dual_filter":
-        result = analyze_dual_filter(df, params)
+        result = analyze_dual_filter(df, params, profile=profile)
     elif strategy == "risk_defense":
-        result = analyze_risk_defense(df, params)
+        result = analyze_risk_defense(df, params, profile=profile)
     else:
         return None
+
+    # 추가 보조 지표 (모든 전략 공통)
+    try:
+        obv_slope = calc_obv_slope(df, period=20)
+    except Exception:
+        obv_slope = 0
 
     # 공통 필드 추가
     close = df['Close']
@@ -859,12 +1938,251 @@ def analyze_market(ticker, market_info, df):
         "symbol": market_info["symbol"],
         "flag": market_info["flag"],
         "strategy": strategy,
+        "country_code": country_code,
+        "country_name": profile["name"],
+        "country_tendency": profile["tendency"],
+        "obv_slope": round(obv_slope, 2),
         "high_1y": float(df['High'].max()),
         "low_1y": float(df['Low'].min()),
         "from_high_pct": round((result['price'] - float(df['High'].max())) / float(df['High'].max()) * 100, 1),
         "price_history": _build_price_history(df, n=20),
+        "etf": MARKET_ETF.get(ticker, {}),
     })
     return result
+
+
+# ════════════════════════════════════════════════════════════════
+# 백테스트 엔진
+# ════════════════════════════════════════════════════════════════
+
+def _bt_positions_leverage(df, params, profile):
+    """레버리지 전략 - 포지션 배열 생성 (0/1/2)"""
+    ma_s, ma_m, ma_l = profile["ma_periods"]
+    vol_mult = profile["vol_regime_mult"]
+    adx_min = profile["trend_strength_min"]
+
+    close = df['Close']
+    n = len(close)
+    ma_mid  = close.rolling(ma_m).mean()
+    ma_long = close.rolling(ma_l).mean()
+    rsi_s   = calc_rsi(close)
+    adx_s, pdi_s, mdi_s = calc_adx(df, period=14)
+    v20_s = close.pct_change().rolling(20).std()
+    v60_s = close.pct_change().rolling(60).std()
+    slope_s = (ma_mid - ma_mid.shift(5)) / ma_mid.shift(5).replace(0, np.nan) * 100
+
+    positions = np.zeros(n)
+    start = max(ma_l + 10, 60)
+    for i in range(start, n):
+        c   = float(close.iloc[i])
+        mm  = float(ma_mid.iloc[i])  if not pd.isna(ma_mid.iloc[i])  else c
+        ml  = float(ma_long.iloc[i]) if not pd.isna(ma_long.iloc[i]) else c
+        rsi = float(rsi_s.iloc[i])   if not pd.isna(rsi_s.iloc[i])   else 50
+        adx = float(adx_s.iloc[i])   if not pd.isna(adx_s.iloc[i])   else 15
+        pdi = float(pdi_s.iloc[i])   if not pd.isna(pdi_s.iloc[i])   else 0
+        mdi = float(mdi_s.iloc[i])   if not pd.isna(mdi_s.iloc[i])   else 0
+        v20 = float(v20_s.iloc[i])   if not pd.isna(v20_s.iloc[i])   else 0.01
+        v60 = float(v60_s.iloc[i])   if not pd.isna(v60_s.iloc[i])   else 0.01
+        sl  = float(slope_s.iloc[i]) if not pd.isna(slope_s.iloc[i]) else 0
+
+        vs = v20 > v60 * vol_mult if v60 > 0 else False
+        ts = adx >= adx_min
+        tu = pdi > mdi
+
+        if c < ml or (vs and c < mm):
+            positions[i] = 0.0
+            continue
+
+        score = 0
+        if c > mm > ml: score += 2
+        if sl > 0: score += 1
+        if rsi > 50: score += 1
+        if ts: score += 1
+        if tu: score += 1
+
+        if score >= 5 and not vs:
+            pos = 2.0
+            ann_vol = v20 * np.sqrt(252) * 100
+            if ann_vol > 25 and not ts:
+                pos = 1.0
+        else:
+            pos = 1.0
+        positions[i] = pos
+    return positions
+
+
+def _bt_positions_dual(df, params, profile):
+    """이중필터 전략 - 포지션 배열 생성 (0/0.5/1)"""
+    w_short, w_mid, w_long = profile["momentum_windows"]
+    adx_min = profile["trend_strength_min"]
+
+    close = df['Close']
+    n = len(close)
+    adx_s, pdi_s, mdi_s = calc_adx(df, period=14)
+
+    positions = np.zeros(n)
+    start = max(w_long + 5, 30)
+    for i in range(start, n):
+        c = float(close.iloc[i])
+        mom_s = (c / float(close.iloc[i - w_short]) - 1) if i >= w_short else 0
+        mom_m = (c / float(close.iloc[i - w_mid])   - 1) if i >= w_mid   else 0
+        mom_l = (c / float(close.iloc[i - w_long])  - 1) if i >= w_long  else 0
+        adx = float(adx_s.iloc[i]) if not pd.isna(adx_s.iloc[i]) else 15
+        pdi = float(pdi_s.iloc[i]) if not pd.isna(pdi_s.iloc[i]) else 0
+        mdi = float(mdi_s.iloc[i]) if not pd.isna(mdi_s.iloc[i]) else 0
+        pos_count = sum(1 for m in (mom_s, mom_m, mom_l) if m > 0)
+        ts = adx >= adx_min
+        tu = pdi > mdi
+        if pos_count == 3 or (pos_count >= 2 and ts and tu):
+            positions[i] = 1.0
+        elif pos_count == 2:
+            positions[i] = 0.5
+    return positions
+
+
+def _bt_positions_minervini(df, params):
+    """미너비니 전략 - 포지션 배열 생성 (0/1)"""
+    close = df['Close']
+    n = len(close)
+    ma_f  = close.rolling(params['ma_fast']).mean()
+    ma_s  = close.rolling(params['ma_slow']).mean()
+    rsi_s = calc_rsi(close)
+    slope_s = (ma_s - ma_s.shift(5)) / ma_s.shift(5).replace(0, np.nan) * 100
+
+    positions = np.zeros(n)
+    start = max(params['ma_slow'] + 10, 30)
+    for i in range(start, n):
+        c   = float(close.iloc[i])
+        mf  = float(ma_f.iloc[i])  if not pd.isna(ma_f.iloc[i])  else c
+        ms  = float(ma_s.iloc[i])  if not pd.isna(ma_s.iloc[i])  else c
+        rsi = float(rsi_s.iloc[i]) if not pd.isna(rsi_s.iloc[i]) else 50
+        sl  = float(slope_s.iloc[i]) if not pd.isna(slope_s.iloc[i]) else 0
+        if c > mf > ms and sl > 0 and rsi >= params['entry_rsi']:
+            positions[i] = 1.0
+    return positions
+
+
+def _bt_positions_risk(df, params, profile):
+    """위기방어형 전략 - 포지션 배열 생성 (0/1)"""
+    ma_s, ma_m, ma_l = profile["ma_periods"]
+    vol_mult = profile["vol_regime_mult"]
+    drop_threshold = profile["vol_drop_threshold"]
+
+    close = df['Close']
+    n = len(close)
+    ma_mid  = close.rolling(ma_m).mean()
+    ma_long = close.rolling(ma_l).mean()
+    rsi_s   = calc_rsi(close)
+    adx_s, pdi_s, mdi_s = calc_adx(df, period=14)
+    v20_s = close.pct_change().rolling(20).std() * np.sqrt(252) * 100
+    v60_s = close.pct_change().rolling(60).std() * np.sqrt(252) * 100
+
+    positions = np.zeros(n)
+    start = max(ma_l + 10, 60)
+    for i in range(start, n):
+        c   = float(close.iloc[i])
+        mm  = float(ma_mid.iloc[i])  if not pd.isna(ma_mid.iloc[i])  else c
+        ml  = float(ma_long.iloc[i]) if not pd.isna(ma_long.iloc[i]) else c
+        rsi = float(rsi_s.iloc[i])   if not pd.isna(rsi_s.iloc[i])   else 50
+        adx = float(adx_s.iloc[i])   if not pd.isna(adx_s.iloc[i])   else 15
+        pdi = float(pdi_s.iloc[i])   if not pd.isna(pdi_s.iloc[i])   else 0
+        mdi = float(mdi_s.iloc[i])   if not pd.isna(mdi_s.iloc[i])   else 0
+        v20 = float(v20_s.iloc[i])   if not pd.isna(v20_s.iloc[i])   else 20
+        v60 = float(v60_s.iloc[i])   if not pd.isna(v60_s.iloc[i])   else 20
+        r20 = (c / float(close.iloc[i - 20]) - 1) * 100 if i >= 20 else 0
+
+        risk = 0
+        if c < ml: risk += 25
+        if c < mm: risk += 12
+        if mm < ml: risk += 12
+        if rsi < 40: risk += 8
+        if r20 < drop_threshold: risk += 12
+        if v20 > v60 * vol_mult: risk += 12
+        if adx > 25 and mdi > pdi: risk += 10
+        positions[i] = 0.0 if min(100, risk) >= 50 else 1.0
+    return positions
+
+
+def backtest_strategy(ticker, market_info, period="10y"):
+    """10년 백테스트: CAGR, MDD, Sharpe, Buy&Hold 비교.
+    레버리지 비용(2x=연0.5%, ETF보수=연0.1%) 반영."""
+    import datetime as _dt
+
+    df = load_data(ticker, period=period)
+    if df is None or len(df) < 250:
+        return None
+
+    strategy = market_info["strategy"]
+    params   = market_info["params"]
+    _, profile = get_country_profile(ticker)
+
+    close_arr = df['Close'].values.astype(float)
+    n = len(close_arr)
+
+    try:
+        if strategy == "leverage":
+            pos_arr = _bt_positions_leverage(df, params, profile)
+        elif strategy == "dual_filter":
+            pos_arr = _bt_positions_dual(df, params, profile)
+        elif strategy == "minervini":
+            pos_arr = _bt_positions_minervini(df, params)
+        elif strategy == "risk_defense":
+            pos_arr = _bt_positions_risk(df, params, profile)
+        else:
+            pos_arr = np.ones(n)
+    except Exception as e:
+        print(f"  ⚠️ backtest {ticker}: {e}")
+        return None
+
+    daily_ret = np.zeros(n)
+    daily_ret[1:] = np.diff(close_arr) / close_arr[:-1]
+
+    equity = 100.0; bnh = 100.0
+    peak_eq = 100.0; peak_bh = 100.0
+    mdd = 0.0; mdd_bh = 0.0
+    eq_curve = [100.0]
+    ret_list = []
+
+    for i in range(1, n):
+        r   = float(daily_ret[i])
+        pos = float(pos_arr[i - 1])
+        cost = (pos * 0.005 + (0.001 if pos > 0 else 0)) / 252
+        pr = r * pos - cost
+        equity *= (1 + pr); bnh *= (1 + r)
+        peak_eq = max(peak_eq, equity); peak_bh = max(peak_bh, bnh)
+        mdd    = max(mdd,    (peak_eq - equity) / peak_eq)
+        mdd_bh = max(mdd_bh, (peak_bh - bnh)   / peak_bh)
+        eq_curve.append(equity); ret_list.append(pr)
+
+    years    = n / 252
+    cagr     = float((equity / 100) ** (1 / years) - 1) if years > 0 else 0
+    cagr_bh  = float((bnh   / 100) ** (1 / years) - 1) if years > 0 else 0
+    arr = np.array(ret_list)
+    sharpe = float(arr.mean() / arr.std() * np.sqrt(252)) if len(arr) > 1 and arr.std() > 0 else 0
+
+    # 최근 5개년 연도별 수익률
+    yearly = {}
+    try:
+        today_yr = _dt.date.today().year
+        for yr_back in range(1, min(6, int(years) + 1)):
+            end_i   = max(0, len(eq_curve) - (yr_back - 1) * 252 - 1)
+            start_i = max(0, end_i - 252)
+            if start_i < end_i and eq_curve[start_i] > 0:
+                yr_ret = (eq_curve[end_i] / eq_curve[start_i] - 1) * 100
+                yearly[str(today_yr - yr_back)] = round(yr_ret, 1)
+    except Exception:
+        pass
+
+    return {
+        "cagr":         round(cagr    * 100, 1),
+        "mdd":          round(mdd     * 100, 1),
+        "sharpe":       round(sharpe,  2),
+        "years":        round(years,   1),
+        "final_equity": round(equity,  1),
+        "cagr_bh":      round(cagr_bh * 100, 1),
+        "mdd_bh":       round(mdd_bh  * 100, 1),
+        "yearly":       yearly,
+    }
 
 
 # ════════════════════════════════════════════════════════════════
@@ -919,12 +2237,11 @@ def build_message(r):
         elif lev == 0:
             if '^KS' in r['ticker']: etf_guide = "현금 or KODEX 인버스 (114800)"
             elif '^KQ' in r['ticker']: etf_guide = "현금 or KODEX 코스닥150 인버스 (251340)"
-        macd_status = "✅ MACD 확인" if r.get('macd_bullish') else "⏳ MACD 미확인"
         detail = (
             f"  ⚡ 레버리지: `{lev}x` {'🟢강세' if lev==2 else ('🔵보통' if lev==1 else '🔴현금')}\n"
             f"  📊 MA50 `{r.get('ma50',0):,.0f}` | MA200 `{r.get('ma200',0):,.0f}`\n"
-            f"  📈 MA50기울기(10일) `{r.get('ma50_slope',0):+.2f}%` | RSI `{r['rsi']:.0f}`\n"
-            f"  {macd_status} | {'⚠️ 변동성 급등!' if r.get('vol_spike') else '변동성 정상'}\n"
+            f"  📈 MA50기울기 `{r.get('ma50_slope',0):+.2f}%` | RSI `{r['rsi']:.0f}`\n"
+            f"  {'⚠️ 변동성 급등!' if r.get('vol_spike') else ''}\n"
             f"{f'  💼 추천ETF: `{etf_guide}`' if etf_guide else ''}\n"
         )
     elif r['strategy'] == 'dual_filter':
@@ -1000,26 +2317,95 @@ def _slope(series, n=5):
     v_prev = float(s.iloc[-(n + 1)])
     return (v_now - v_prev) / v_prev * 100 if v_prev != 0 else 0.0
 
-def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio):
-    """7개 조건 기반 복합 신호 (5단계: STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL)
-
-    기존 버그 수정: 점수 2-3이 모두 SELL로 분류되고 NEUTRAL 리턴 불가했던 문제 해결.
-    조건 완화: RSI 범위 확대(40-75), BB %B 임계값 하향(0.45), 거래량 임계값 하향(1.1)
+def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
+                       divergence=None, candle_pattern=None, ma50_slope=0,
+                       rs_score=50, momentum_composite=50, vcp_detected=False,
+                       regime_adj=0, liquidity_adj=0, fundamental_adj=0):
+    """가중치 기반 신호 생성 (0~100점, 기본점수 25)
+    - MA200/MA50 추세: 30점 (장기 가장 중요)
+    - 모멘텀 (RSI/MACD): 25점 (MACD 최대 ±8점)
+    - 단기 추세 (MA20·기울기): 15점
+    - 변동성/거래량 (BB/Vol): 10점
+    - 다이버전스·캔들 보정: ±10점
+    - 상대강도(RS): ±5점 (선행)
+    - 모멘텀 복합 스코어: ±3점 (선행, 이중카운팅 축소)
+    - VCP 패턴: +5점 (선행)
+    - 시장 환경(벤치마크 추세): ±10점
+    - 유동성(거래대금): ±5점
+    - 펀더멘털(PER/ROE/EPS): ±8점
+    신호 기준: STRONG_BUY≥80, BUY≥63, SELL≤40, STRONG_SELL≤20
     """
-    score = 0
-    if price > ma20:                  score += 1
-    if price > ma50:                  score += 1
-    if ma200 and price > ma200:       score += 1
-    if 40 < rsi < 75:                 score += 1  # 원래 50-70 → 40-75 (과매도/과매수 제외)
-    if macd_hist > 0:                 score += 1
-    if bb_pct_b > 0.45:               score += 1  # 원래 0.5 → 0.45 (BB 중간선 근처 포함)
-    if vol_ratio > 1.1:               score += 1  # 원래 1.2 → 1.1 (10% 이상 거래량 증가)
-    # 5단계 분류 (원래 NEUTRAL 도달 불가 버그 수정)
-    if score >= 6: return "STRONG_BUY",  "🟢 강력 매수"
-    if score >= 5: return "BUY",         "🟢 매수"
-    if score >= 3: return "NEUTRAL",     "⚪ 중립"
-    if score >= 2: return "SELL",        "🔴 매도"
-    return "STRONG_SELL", "🔴 강력 매도"
+    score = 25  # 낮은 기본점수 — 조건 충족 시만 상승
+
+    # 장기 추세 (30점)
+    if ma200 and price > ma200: score += 15
+    elif ma200:                  score -= 15
+    if price > ma50:             score += 10
+    else:                        score -= 10
+    if ma50_slope > 0.5:         score += 5
+    elif ma50_slope < -0.5:      score -= 5
+
+    # 모멘텀 (25점)
+    if   50 < rsi < 70:          score += 10
+    elif rsi >= 80:              score -= 12  # 극단 과매수
+    elif rsi >= 70:              score -= 8   # 과매수 경계
+    elif rsi <= 20:              score += 7   # 극단 과매도 반등
+    elif rsi <= 30:              score += 5   # 과매도 반등 가능
+    else:                        score -= 5
+    # MACD 히스토그램: 크기 비례 점수 (최대 ±8점, 이중카운팅 방지)
+    if macd_hist != 0:
+        # 가격 대비 히스토그램 비율로 정규화 (0.5% 기준 ±6점, 최대 ±8점)
+        _macd_norm = (macd_hist / price) * 100 if price else 0
+        _macd_pts = max(-8, min(8, _macd_norm / 0.5 * 6))
+        score += int(_macd_pts)
+
+    # 단기 추세 (15점)
+    if price > ma20:             score += 8
+    else:                        score -= 8
+
+    # 변동성/거래량 (15점)
+    if 0.3 < bb_pct_b < 0.7:     score += 5   # 중심부 = 안정
+    elif bb_pct_b > 0.9:         score -= 3   # 상단 이탈 = 단기 조정 위험
+    elif bb_pct_b < 0.1:         score += 3   # 하단 = 단기 반등 가능
+    if vol_ratio > 1.5:          score += 5   # 거래량 동반 추세
+    elif vol_ratio < 0.7:        score -= 3   # 거래량 위축 = 모멘텀 약화
+
+    # 다이버전스 보정 (±10점)
+    if divergence == "bullish":  score += 10
+    elif divergence == "bearish": score -= 10
+
+    # 캔들 패턴 보정 (±5점)
+    if candle_pattern in ("강세 장악형", "해머 (저점 반전)"):     score += 5
+    elif candle_pattern in ("약세 장악형", "슈팅스타 (고점 반전)"): score -= 5
+
+    # ── 선행 지표 보정 ──────────────────────────────────────────
+    # 상대강도 (±5점): 시장 대비 초과 강세/약세
+    if   rs_score >= 80: score += 5
+    elif rs_score >= 65: score += 2
+    elif rs_score <= 20: score -= 5
+    elif rs_score <= 35: score -= 2
+
+    # 모멘텀 복합 (±3점, 이중카운팅 축소): RSI/MACD/MA기울기와 정보 중복 → 극단값에서만 보정
+    if   momentum_composite >= 80: score += 3
+    elif momentum_composite <= 20: score -= 3
+
+    # VCP 패턴 (+5점): 변동성 수축 후 돌파 임박
+    if vcp_detected:               score += 5
+
+    # ── 매크로/품질 필터 ────────────────────────────────────────
+    # 시장 환경 (±10점): 벤치마크가 약세장이면 매수 신호 약화
+    score += regime_adj
+    # 유동성 (±5점): 거래대금 부족 종목은 신호 신뢰도 하락
+    score += liquidity_adj
+    # 펀더멘털 (±8점): 저PER·고ROE·EPS성장 보너스, 적자·고PER 패널티
+    score += fundamental_adj
+
+    score = max(0, min(100, score))
+    if score >= 80: return "STRONG_BUY",  "🟢 강력 매수", score
+    if score >= 63: return "BUY",         "🟢 매수",     score
+    if score <= 20: return "STRONG_SELL", "🔴 강력 매도", score
+    if score <= 40: return "SELL",        "🔴 매도",     score
+    return "NEUTRAL", "⚪ 중립", score
 
 def _generate_analysis_text(ticker, price, chg, rsi, macd_hist, bb_pct_b,
                               ma20, ma50, ma200, signal_type, vol_spike, from_high):
@@ -1085,22 +2471,16 @@ def _generate_forecasts(price, signal_type, rsi, ma50_slope, macd_hist, bb_bw, f
                  "text": "장기 추세 판단을 위한 추가 데이터 필요"}
     return [short, mid, long_]
 
-def _assess_risk(price, ma20, ma50, ma200, rsi, bb_pct_b, vol_spike, from_high,
-                  macd_hist=0, stoch_k=50):
-    """위험도 평가: score, level, color, factors (Stochastic RSI + MACD 포함)"""
+def _assess_risk(price, ma20, ma50, ma200, rsi, bb_pct_b, vol_spike, from_high):
+    """위험도 평가: score, level, color, factors"""
     factors, score = [], 0
     if ma200 and price < ma200: score += 25; factors.append("MA200 하회")
     if price < ma50:            score += 15; factors.append("MA50 하회")
-    if rsi > 72:                score += 12; factors.append(f"RSI 과매수({rsi:.0f})")
-    if rsi < 28:                score += 10; factors.append(f"RSI 과매도({rsi:.0f})")
+    if rsi > 75:                score += 15; factors.append(f"RSI 과매수({rsi:.0f})")
+    if rsi < 25:                score += 10; factors.append(f"RSI 과매도({rsi:.0f})")
     if vol_spike:               score += 10; factors.append("거래량 급증")
     if bb_pct_b > 0.9:          score += 10; factors.append("BB 상단 이탈")
     if from_high < -25:         score += 15; factors.append(f"고점대비 {from_high:.0f}%")
-    # Stochastic RSI 극단값
-    if stoch_k > 85:            score += 8;  factors.append(f"StochRSI 과매수({stoch_k:.0f})")
-    if stoch_k < 15:            score += 6;  factors.append(f"StochRSI 과매도({stoch_k:.0f})")
-    # MACD 음전환
-    if macd_hist < 0:           score += 5;  factors.append("MACD 음전환")
     level = "높음" if score >= 50 else "중간" if score >= 25 else "낮음"
     color = "red"   if score >= 50 else "yellow" if score >= 25 else "green"
     return {"score": score, "level": level, "color": color, "factors": factors}
@@ -1110,6 +2490,422 @@ def _build_price_history(df, n=20):
     close = df['Close']
     idxs  = np.linspace(0, len(close) - 1, min(n, len(close)), dtype=int)
     return [{"d": df.index[i].strftime("%m/%d"), "c": round(float(close.iloc[i]), 2)} for i in idxs]
+
+
+# ════════════════════════════════════════════════════════════════
+# 개별 종목 백테스트
+# ════════════════════════════════════════════════════════════════
+def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
+    """개별 종목 백테스트 — 실제 전략 시뮬레이션.
+
+    진입·청산 규칙 (카드에 보여주는 전략과 동일):
+      - BUY/STRONG_BUY 시그널 → 종가 진입, calc_position_targets()로 stop/T2 설정
+      - 당일 저가 ≤ stop  → 손절가에 청산
+      - 당일 고가 ≥ T2   → 목표가에 청산
+      - SELL/STRONG_SELL → 당일 종가 청산
+      - 거래비용: 진입 0.15% + 청산 0.15% (왕복 0.3%)
+    """
+    import datetime as _dt
+
+    df = load_data(ticker, period=period)
+    if df is None or len(df) < 250:
+        return None
+    df = df.dropna(subset=['Close', 'High', 'Low', 'Open', 'Volume'])
+    if len(df) < 250:
+        return None
+
+    close = df['Close']
+    high  = df['High']
+    low   = df['Low']
+    n     = len(close)
+
+    # 지표 사전 계산 (전체 기간 한번에)
+    ma20_s  = close.rolling(20).mean()
+    ma50_s  = close.rolling(50).mean()
+    ma200_s = close.rolling(200).mean()
+    rsi_s   = calc_rsi(close)
+    ema12   = close.ewm(span=12, adjust=False).mean()
+    ema26   = close.ewm(span=26, adjust=False).mean()
+    _macd   = ema12 - ema26
+    mhist_s = _macd - _macd.ewm(span=9, adjust=False).mean()
+    bb_std  = close.rolling(20).std()
+    bb_l    = close.rolling(20).mean() - 2 * bb_std
+    bb_u    = close.rolling(20).mean() + 2 * bb_std
+    bpctb_s = (close - bb_l) / (bb_u - bb_l).replace(0, np.nan)
+    volr_s  = df['Volume'] / df['Volume'].rolling(20).mean().replace(0, np.nan)
+    sl50_s  = (ma50_s - ma50_s.shift(5)) / ma50_s.shift(5).replace(0, np.nan) * 100
+    atr_s   = calc_atr(df)
+    low10_s = low.rolling(10).min()
+    low20_s = low.rolling(20).min()
+    high20_s= high.rolling(20).max()
+
+    def _sig(i):
+        c    = float(close.iloc[i])
+        m20  = float(ma20_s.iloc[i])  if not pd.isna(ma20_s.iloc[i])  else c
+        m50  = float(ma50_s.iloc[i])  if not pd.isna(ma50_s.iloc[i])  else c
+        m200 = float(ma200_s.iloc[i]) if not pd.isna(ma200_s.iloc[i]) else None
+        rsi  = float(rsi_s.iloc[i])   if not pd.isna(rsi_s.iloc[i])   else 50
+        mh   = float(mhist_s.iloc[i]) if not pd.isna(mhist_s.iloc[i]) else 0
+        bpb  = float(bpctb_s.iloc[i]) if not pd.isna(bpctb_s.iloc[i]) else 0.5
+        vr   = float(volr_s.iloc[i])  if not pd.isna(volr_s.iloc[i])  else 1.0
+        s50  = float(sl50_s.iloc[i])  if not pd.isna(sl50_s.iloc[i])  else 0
+        sig, _, _ = _generate_signal(c, m20, m50, m200, rsi, mh, bpb, vr, ma50_slope=s50)
+        return sig, m20, m50
+
+    equity   = 100.0;  bnh      = 100.0
+    peak_eq  = 100.0;  peak_bh  = 100.0
+    mdd      = 0.0;    mdd_bh   = 0.0
+    eq_curve = [100.0]; ret_list = []
+
+    in_pos   = False
+    stop_p   = 0.0
+    target_p = 0.0
+    FEE      = 0.0015   # 편도 수수료·세금
+
+    for i in range(210, n):
+        c      = float(close.iloc[i])
+        c_hi   = float(high.iloc[i])
+        c_lo   = float(low.iloc[i])
+        c_prev = float(close.iloc[i - 1]) if i > 0 else c
+        dr     = (c - c_prev) / c_prev if c_prev > 0 else 0
+
+        # Buy & Hold 추적
+        bnh    *= (1 + dr)
+        peak_bh = max(peak_bh, bnh)
+        mdd_bh  = max(mdd_bh, (peak_bh - bnh) / peak_bh)
+
+        sig, m20, m50 = _sig(i)
+        pr = 0.0  # 당일 포트폴리오 수익률 (현금 = 0)
+
+        if in_pos:
+            if c_lo <= stop_p:
+                # 손절: 당일 저가가 손절가 이하 → 손절가에 청산
+                pr = (stop_p / c_prev - 1) - FEE
+                in_pos = False
+            elif c_hi >= target_p:
+                # 목표 달성: 당일 고가가 T2 이상 → 목표가에 청산
+                pr = (target_p / c_prev - 1) - FEE
+                in_pos = False
+            elif sig in ("SELL", "STRONG_SELL"):
+                # 매도 시그널: 종가 청산
+                pr = dr - FEE
+                in_pos = False
+            else:
+                # 보유 유지: mark-to-market
+                pr = dr
+        else:
+            if sig in ("BUY", "STRONG_BUY"):
+                # 신규 진입: 종가 매수, stop/target 설정
+                atr  = float(atr_s.iloc[i])   if not pd.isna(atr_s.iloc[i])   else c * 0.02
+                l10  = float(low10_s.iloc[i])  if not pd.isna(low10_s.iloc[i])  else c * 0.97
+                l20  = float(low20_s.iloc[i])  if not pd.isna(low20_s.iloc[i])  else c * 0.95
+                h20  = float(high20_s.iloc[i]) if not pd.isna(high20_s.iloc[i]) else c * 1.05
+                tgts = calc_position_targets(c, atr, l20, h20, sig,
+                                              ma20=m20, ma50=m50, low_10d=l10)
+                if tgts and 0 < tgts["stop"] < c < tgts["t2"]:
+                    in_pos   = True
+                    stop_p   = tgts["stop"]
+                    target_p = tgts["t2"]
+                    pr = -FEE   # 진입 수수료만 당일 반영
+
+        equity  *= (1 + pr)
+        peak_eq  = max(peak_eq, equity)
+        mdd      = max(mdd, (peak_eq - equity) / peak_eq)
+        eq_curve.append(equity)
+        ret_list.append(pr)
+
+    years   = n / 252
+    cagr    = float((equity / 100) ** (1 / years) - 1) if years > 0 else 0
+    cagr_bh = float((bnh    / 100) ** (1 / years) - 1) if years > 0 else 0
+    active  = [r for r in ret_list if r != 0.0]
+    arr     = np.array(active)
+    sharpe  = float(arr.mean() / arr.std() * np.sqrt(252)) if len(arr) > 10 and arr.std() > 0 else 0
+
+    yearly = {}
+    try:
+        today_yr = _dt.date.today().year
+        for yr_back in range(1, min(6, int(years) + 1)):
+            end_i   = max(0, len(eq_curve) - (yr_back - 1) * 252 - 1)
+            start_i = max(0, end_i - 252)
+            if start_i < end_i and eq_curve[start_i] > 0:
+                yearly[str(today_yr - yr_back)] = round(
+                    (eq_curve[end_i] / eq_curve[start_i] - 1) * 100, 1)
+    except Exception:
+        pass
+
+    return {
+        "cagr":         round(cagr    * 100, 1),
+        "mdd":          round(mdd     * 100, 1),
+        "sharpe":       round(sharpe,  2),
+        "years":        round(years,   1),
+        "final_equity": round(equity,  1),
+        "cagr_bh":      round(cagr_bh * 100, 1),
+        "mdd_bh":       round(mdd_bh  * 100, 1),
+        "yearly":       yearly,
+    }
+
+
+# ════════════════════════════════════════════════════════════════
+# 선행 지표 헬퍼 함수들
+# ════════════════════════════════════════════════════════════════
+import time as _time_mod
+
+_bm_close_cache: dict = {}  # {ticker: (timestamp, Series)}
+
+def _get_benchmark_close(bm_ticker: str, period: str = "1y"):
+    """벤치마크 종가 캐시 (1시간 TTL)"""
+    now = _time_mod.time()
+    if bm_ticker in _bm_close_cache:
+        ts, series = _bm_close_cache[bm_ticker]
+        if now - ts < 3600:
+            return series
+    try:
+        df_bm = load_data(bm_ticker, period=period)
+        if df_bm.empty:
+            return None
+        series = df_bm['Close'].dropna()
+        _bm_close_cache[bm_ticker] = (now, series)
+        return series
+    except Exception:
+        return None
+
+
+def calc_relative_strength(close: pd.Series, bm_ticker: str) -> float:
+    """상대강도 점수 (0~100). 50=시장평균, >50=시장 초과, <50=시장 미달"""
+    bm_close = _get_benchmark_close(bm_ticker)
+    if bm_close is None or len(close) < 63:
+        return 50.0
+
+    n6 = min(126, len(close), len(bm_close))
+    n3 = min(63, n6)
+
+    stk = close.values.astype(float)
+    bm  = bm_close.values.astype(float)
+
+    # 인덱스 불일치 방지: 각각 뒤에서 n개 슬라이싱
+    stk_now = stk[-1];  stk_3 = stk[-n3];  stk_6 = stk[-n6]
+    bm_now  = bm[-1];   bm_3  = bm[-n3];   bm_6  = bm[-n6]
+
+    stk_ret3 = (stk_now / stk_3 - 1) if stk_3 != 0 else 0
+    bm_ret3  = (bm_now  / bm_3  - 1) if bm_3  != 0 else 0
+    stk_ret6 = (stk_now / stk_6 - 1) if stk_6 != 0 else 0
+    bm_ret6  = (bm_now  / bm_6  - 1) if bm_6  != 0 else 0
+
+    # 초과 수익률 (3개월 60%, 6개월 40% 가중)
+    raw_rs = (stk_ret3 - bm_ret3) * 0.6 + (stk_ret6 - bm_ret6) * 0.4
+
+    # ±30% 초과를 0~100으로 변환
+    rs_score = 50.0 + raw_rs / 0.30 * 50.0
+    return round(max(0.0, min(100.0, rs_score)), 1)
+
+
+def calc_momentum_scores(close: pd.Series) -> dict:
+    """1M/3M/6M 모멘텀 및 복합 점수"""
+    c = close.dropna()
+    n = len(c)
+    curr = float(c.iloc[-1])
+
+    def _ret(periods):
+        if n < periods: return None
+        base = float(c.iloc[-periods])
+        return round((curr / base - 1) * 100, 1) if base != 0 else None
+
+    mom_1m = _ret(21)
+    mom_3m = _ret(63)
+    mom_6m = _ret(126)
+
+    parts, weights = [], []
+    if mom_1m is not None: parts.append(mom_1m * 0.3); weights.append(0.3)
+    if mom_3m is not None: parts.append(mom_3m * 0.4); weights.append(0.4)
+    if mom_6m is not None: parts.append(mom_6m * 0.3); weights.append(0.3)
+
+    if parts:
+        raw = sum(parts) / sum(weights)
+        composite = round(max(0.0, min(100.0, 50.0 + raw / 30.0 * 50.0)), 1)
+    else:
+        composite = 50.0
+
+    return {"mom_1m": mom_1m, "mom_3m": mom_3m, "mom_6m": mom_6m, "composite": composite}
+
+
+def detect_vcp(df: pd.DataFrame, high_52w: float) -> dict:
+    """VCP (변동성 수축 패턴) 감지 — 미너비니 기준
+    조건: ① 변동폭 수축 ② 거래량 수축 ③ 52주 고점 25% 이내
+    """
+    close = df['Close'].dropna()
+    high  = df['High'].dropna()
+    low   = df['Low'].dropna()
+    vol   = df['Volume'].dropna()
+
+    n = len(close)
+    if n < 60:
+        return {"detected": False, "stage": 0, "tightness": None, "dist_from_high_pct": None}
+
+    current = float(close.iloc[-1])
+    dist_from_high = (high_52w - current) / high_52w if high_52w > 0 else 1.0
+
+    # 52주 고점에서 25% 이상 하락 시 VCP 미해당
+    if dist_from_high > 0.25:
+        return {"detected": False, "stage": 0, "tightness": None,
+                "dist_from_high_pct": round(dist_from_high * 100, 1)}
+
+    # 최근 60일을 3개 20일 구간으로 분할하여 range와 volume 측정
+    segs = []
+    for i in range(3):
+        s = -(60 - i * 20)
+        e = -(40 - i * 20) if i < 2 else None
+        seg_h = float(high.iloc[s:e].max())
+        seg_l = float(low.iloc[s:e].min())
+        seg_v = float(vol.iloc[s:e].mean())
+        rang  = (seg_h - seg_l) / seg_l * 100 if seg_l > 0 else 0
+        segs.append({"range": rang, "vol": seg_v})
+    # segs[0]=가장 오래된 구간 → segs[2]=최근 구간
+
+    range_contracting = segs[0]["range"] > segs[1]["range"] > segs[2]["range"]
+    vol_contracting   = segs[0]["vol"]   > segs[1]["vol"]   > segs[2]["vol"]
+
+    # 최근 5일 tight 구간 (변동폭 5% 미만)
+    last5_h = float(high.iloc[-5:].max())
+    last5_l = float(low.iloc[-5:].min())
+    last5_c = float(close.iloc[-5]) if n >= 5 else current
+    recent_range_pct = (last5_h - last5_l) / last5_c * 100 if last5_c > 0 else 99
+    very_tight = recent_range_pct < 5.0
+
+    stage = sum([range_contracting, vol_contracting, very_tight])
+    detected = stage >= 2
+
+    return {
+        "detected": detected,
+        "stage": stage,
+        "tightness": round(recent_range_pct, 1),
+        "dist_from_high_pct": round(dist_from_high * 100, 1),
+    }
+
+
+def calc_market_regime(bm_ticker: str) -> dict:
+    """벤치마크 추세로 시장 환경 평가
+    - bull (강세장): 벤치마크가 MA200·MA50 모두 위 → +5점 (매수 신호 신뢰도 강화)
+    - bear (약세장): 벤치마크가 MA200·MA50 모두 아래 → -10점 (역추세 매매 위험)
+    - correction (상승장 조정): MA200 위 · MA50 아래 → 0점
+    - rebound (약세장 반등): MA200 아래 · MA50 위 → -3점 (속임수 가능)
+    """
+    bm_close = _get_benchmark_close(bm_ticker, period="2y")
+    if bm_close is None or len(bm_close) < 200:
+        return {"regime": "unknown", "score_adj": 0,
+                "bm_above_ma200": None, "bm_above_ma50": None,
+                "bm_ticker": bm_ticker, "label": "데이터 부족"}
+
+    bm_ma200 = float(bm_close.rolling(200).mean().iloc[-1])
+    bm_ma50  = float(bm_close.rolling(50).mean().iloc[-1])
+    bm_curr  = float(bm_close.iloc[-1])
+
+    above_200 = bm_curr > bm_ma200
+    above_50  = bm_curr > bm_ma50
+
+    if above_200 and above_50:
+        regime, adj, label = "bull",       +5,  "🟢 강세장"
+    elif (not above_200) and (not above_50):
+        regime, adj, label = "bear",       -10, "🔴 약세장"
+    elif above_200 and (not above_50):
+        regime, adj, label = "correction",  0,  "🟡 상승장 조정"
+    else:
+        regime, adj, label = "rebound",    -3,  "🟠 약세장 반등"
+
+    return {
+        "regime": regime, "score_adj": adj, "label": label,
+        "bm_above_ma200": above_200, "bm_above_ma50": above_50,
+        "bm_ticker": bm_ticker,
+    }
+
+
+def calc_liquidity_score(current_vol: int, price: float, is_korean: bool) -> dict:
+    """거래대금(원화/달러) 기준 유동성 평가
+    - 한국: 5억 미만 -5점 / 5억~20억 0점 / 20억 이상 +2점
+    - 미국: $5M 미만 -5점 / $5M~$50M 0점 / $50M 이상 +2점
+    """
+    if current_vol is None or price is None or current_vol <= 0 or price <= 0:
+        return {"score_adj": 0, "trading_value": 0, "label": "데이터 부족"}
+
+    trading_value = current_vol * price  # 원화 또는 달러 단위
+
+    if is_korean:
+        low_th  = 500_000_000        # 5억 원
+        high_th = 2_000_000_000      # 20억 원
+        unit    = "억원"
+        divisor = 1e8
+    else:
+        low_th  = 5_000_000          # $5M
+        high_th = 50_000_000         # $50M
+        unit    = "M$"
+        divisor = 1e6
+
+    if trading_value < low_th:
+        adj, label = -5, f"⚠️ 저유동성"
+    elif trading_value < high_th:
+        adj, label = 0,  "보통"
+    else:
+        adj, label = 2,  "충분"
+
+    return {
+        "score_adj": adj,
+        "trading_value": float(trading_value),
+        "trading_value_display": f"{trading_value/divisor:.1f}{unit}",
+        "label": label,
+    }
+
+
+def calc_fundamental_score(pe_ratio, roe, eps_growth) -> dict:
+    """펀더멘털 점수 (±8점 캡)
+    PER:      <10 +3, 10~25 +1, 25~50 0, ≥50 -2, None/음수 0
+    ROE:      >20% +3, 15~20% +2, 10~15% +1, 0~10% 0, <0% -3
+    EPS성장:  >30% +3, 15~30% +2, 0~15% +1, <0% -3
+    """
+    parts = []
+    details = {}
+
+    # PER
+    if pe_ratio is not None:
+        if   pe_ratio <= 0:   pe_pts = 0     # 적자기업 (PER 의미 없음)
+        elif pe_ratio < 10:   pe_pts = 3
+        elif pe_ratio < 25:   pe_pts = 1
+        elif pe_ratio < 50:   pe_pts = 0
+        else:                 pe_pts = -2
+        parts.append(pe_pts); details["per"] = pe_pts
+    else:
+        details["per"] = None
+
+    # ROE
+    if roe is not None:
+        if   roe >= 20:  roe_pts = 3
+        elif roe >= 15:  roe_pts = 2
+        elif roe >= 10:  roe_pts = 1
+        elif roe >= 0:   roe_pts = 0
+        else:            roe_pts = -3
+        parts.append(roe_pts); details["roe"] = roe_pts
+    else:
+        details["roe"] = None
+
+    # EPS 성장
+    if eps_growth is not None:
+        if   eps_growth >= 30: eps_pts = 3
+        elif eps_growth >= 15: eps_pts = 2
+        elif eps_growth >= 0:  eps_pts = 1
+        else:                  eps_pts = -3
+        parts.append(eps_pts); details["eps_growth"] = eps_pts
+    else:
+        details["eps_growth"] = None
+
+    total = sum(parts) if parts else 0
+    total = max(-8, min(8, total))   # 캡 ±8
+
+    if   total >= 5:  label = "🟢 우량"
+    elif total >= 2:  label = "🟢 양호"
+    elif total >= -1: label = "🟡 보통"
+    elif total >= -4: label = "🟠 부진"
+    else:             label = "🔴 위험"
+
+    return {"score_adj": total, "details": details, "label": label,
+            "available": len(parts) > 0}
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1124,6 +2920,28 @@ def analyze_stock(ticker: str) -> dict:
     df = df.dropna(subset=['Close', 'High', 'Low', 'Open', 'Volume'])
     if df.empty or len(df) < 30:
         raise ValueError(f"데이터를 불러올 수 없습니다: {ticker}")
+
+    # 펀더멘털 (PER, 시총, 배당, 베타, ROE, EPS성장)
+    pe_ratio = None;  market_cap = None;  dividend_yield = None
+    beta = None;      roe = None;         eps_growth = None
+    try:
+        t_obj = yf.Ticker(ticker)
+        fi = t_obj.fast_info
+        market_cap = getattr(fi, 'market_cap', None)
+        full_info  = t_obj.info or {}
+        pe_ratio   = full_info.get('trailingPE') or full_info.get('forwardPE')
+        if pe_ratio and (pe_ratio < 0 or pe_ratio > 1000): pe_ratio = None
+        dy = full_info.get('dividendYield')
+        if dy and 0 < dy < 1:  dividend_yield = round(dy * 100, 2)  # 비율 → %
+        elif dy and dy >= 1:   dividend_yield = round(dy, 2)        # 이미 % 형식
+        beta = full_info.get('beta')
+        if beta is not None: beta = round(float(beta), 2)
+        roe_raw = full_info.get('returnOnEquity')
+        if roe_raw: roe = round(float(roe_raw) * 100, 2)
+        eg = full_info.get('earningsGrowth')
+        if eg is not None: eps_growth = round(float(eg) * 100, 1)
+    except Exception:
+        pass
 
     close = df['Close']
     high  = df['High']
@@ -1158,44 +2976,105 @@ def analyze_stock(ticker: str) -> dict:
     current_vol = int(df['Volume'].iloc[-1])
     avg_vol     = int(df['Volume'].rolling(20).mean().iloc[-1]) if not pd.isna(df['Volume'].rolling(20).mean().iloc[-1]) else 0
 
-    # 지지/저항 — 60일 롤링 (원래 20일 → 더 의미있는 중기 레벨)
-    support    = float(low.rolling(60).min().iloc[-1])
-    resistance = float(high.rolling(60).max().iloc[-1])
+    # 지지/저항
+    low_10d    = float(low.rolling(10).min().iloc[-1])   # 스윙로우 (롱 손절 기준)
+    high_10d   = float(high.rolling(10).max().iloc[-1])  # 스윙하이 (숏 손절 기준)
+    support    = float(low.rolling(20).min().iloc[-1])
+    resistance = float(high.rolling(20).max().iloc[-1])
 
     # 52주 범위
     high_52w  = float(high.max())
     low_52w   = float(low.min())
     from_high = (current - high_52w) / high_52w * 100
 
-    # Stochastic RSI
-    stoch_k, stoch_d = calc_stoch_rsi(close)
+    # ATR (변동성, 손절가 산정)
+    atr_series = calc_atr(df, p=14)
+    atr_val    = float(atr_series.iloc[-1]) if not pd.isna(atr_series.iloc[-1]) else None
 
-    # 신호 생성
-    signal_type, signal_text = _generate_signal(
-        current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio
+    # RSI 다이버전스
+    rsi_series = calc_rsi(close)
+    divergence = detect_rsi_divergence(close, rsi_series, lookback=20)
+
+    # 캔들 패턴
+    candle_pattern = detect_candle_pattern(df)
+
+    # ── 선행 지표 ────────────────────────────────────────────────
+    is_korean = ticker.endswith(".KS") or ticker.endswith(".KQ")
+    bm_ticker = "^KS11" if is_korean else "^GSPC"
+
+    rs_score = calc_relative_strength(close, bm_ticker)
+    momentum = calc_momentum_scores(close)
+    vcp      = detect_vcp(df, high_52w)
+
+    # ── 매크로/품질 필터 ─────────────────────────────────────────
+    regime      = calc_market_regime(bm_ticker)
+    liquidity   = calc_liquidity_score(current_vol, current, is_korean)
+    fundamental = calc_fundamental_score(pe_ratio, roe, eps_growth)
+
+    # 신호 생성 (가중치 + 다이버전스 + 캔들 + 선행지표 + 매크로 + 품질)
+    signal_type, signal_text, confidence = _generate_signal(
+        current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
+        divergence=divergence, candle_pattern=candle_pattern, ma50_slope=ma50_slope,
+        rs_score=rs_score, momentum_composite=momentum["composite"],
+        vcp_detected=vcp["detected"],
+        regime_adj=regime["score_adj"],
+        liquidity_adj=liquidity["score_adj"],
+        fundamental_adj=fundamental["score_adj"],
     )
+
+    # 손절/목표/R:R (기술적 지지선 + MA + 스윙로우/하이 전달)
+    targets = calc_position_targets(
+        current, atr_val, support, resistance, signal_type,
+        ma20=ma20, ma50=ma50, low_10d=low_10d, high_10d=high_10d
+    )
+    # 포지션 사이즈 (계좌 1천만원, 1% 리스크 가정 기본값)
+    position = calc_position_size(current, targets["stop"], 10_000_000, 1.0) if targets else None
 
     # 분석 텍스트
     analysis_text = _generate_analysis_text(
         ticker, current, change_pct, rsi, macd_hist, bb_pct_b,
         ma20, ma50, ma200, signal_type, vol_spike, from_high
     )
+    # 보조 텍스트 추가 (다이버전스·캔들·선행지표·매크로)
+    extras = []
+    if divergence == "bullish":
+        extras.append("⚡ RSI 상승 다이버전스 — 단기 반등 가능성")
+    elif divergence == "bearish":
+        extras.append("⚠️ RSI 하락 다이버전스 — 단기 조정 가능성")
+    if candle_pattern:
+        extras.append(f"🕯️ 직전봉: {candle_pattern}")
+    if vcp["detected"]:
+        extras.append(f"📐 VCP 패턴 감지 — 변동성 수축 {vcp['stage']}단계, 돌파 임박 가능성")
+    if rs_score >= 70:
+        extras.append(f"💪 RS {rs_score:.0f} — 시장 대비 강세 (상위 {100-int(rs_score)}%)")
+    elif rs_score <= 30:
+        extras.append(f"📉 RS {rs_score:.0f} — 시장 대비 약세")
+    if regime["regime"] == "bear":
+        extras.append(f"🌧️ 시장 환경 약세장 — 매수 신호 신뢰도 하향 조정")
+    elif regime["regime"] == "bull":
+        extras.append(f"☀️ 시장 환경 강세장 — 매수 신호 신뢰도 가중")
+    if liquidity["score_adj"] < 0:
+        extras.append(f"💧 거래대금 {liquidity.get('trading_value_display','')} — 저유동성 주의")
+    if fundamental["available"] and fundamental["score_adj"] <= -4:
+        extras.append(f"⚠️ 펀더멘털 부진 — 적자 또는 고평가 우려")
+    elif fundamental["available"] and fundamental["score_adj"] >= 5:
+        extras.append(f"🏅 펀더멘털 우량 — 저PER·고ROE·EPS성장 동반")
+    if extras:
+        analysis_text = analysis_text + " " + " ".join(extras)
 
     # 전망
     forecasts = _generate_forecasts(
         current, signal_type, rsi, ma50_slope, macd_hist, bb_bw, from_high
     )
 
-    # 위험도 (Stochastic RSI + MACD 포함)
-    risk = _assess_risk(current, ma20, ma50, ma200, rsi, bb_pct_b, vol_spike, from_high,
-                        macd_hist=macd_hist, stoch_k=stoch_k)
+    # 위험도
+    risk = _assess_risk(current, ma20, ma50, ma200, rsi, bb_pct_b, vol_spike, from_high)
 
     # 스파크라인
     price_history = _build_price_history(df, n=20)
 
     # 메타 정보
-    info       = POPULAR_STOCKS.get(ticker, {})
-    is_korean  = ticker.endswith(".KS") or ticker.endswith(".KQ")
+    info = POPULAR_STOCKS.get(ticker, {})
 
     return {
         "ticker": ticker,
@@ -1218,8 +3097,6 @@ def analyze_stock(ticker: str) -> dict:
         "ma20_slope": round(ma20_slope, 2),
         "ma50_slope": round(ma50_slope, 2),
         "rsi": round(rsi, 1),
-        "stoch_rsi_k": stoch_k,
-        "stoch_rsi_d": stoch_d,
         "macd_line": round(macd_line, 4),
         "macd_signal": round(macd_sig, 4),
         "macd_hist": round(macd_hist, 4),
@@ -1235,10 +3112,34 @@ def analyze_stock(ticker: str) -> dict:
         "resistance": round(resistance, 2),
         "signal_type": signal_type,
         "signal_text": signal_text,
+        "confidence": confidence,
         "analysis_text": analysis_text,
         "forecasts": forecasts,
         "risk": risk,
         "price_history": price_history,
+        # ── 펀더멘털 ──
+        "pe_ratio": round(pe_ratio, 1) if pe_ratio else None,
+        "market_cap": int(market_cap) if market_cap else None,
+        "dividend_yield": dividend_yield,
+        "beta": beta,
+        "roe": roe,
+        "eps_growth": eps_growth,
+        # ── 진입/출구 전략 ──
+        "atr": round(atr_val, 2) if atr_val else None,
+        "targets": targets,
+        "position": position,
+        # ── 신호 보조 ──
+        "divergence": divergence,
+        "candle_pattern": candle_pattern,
+        # ── 선행 지표 ──
+        "rs_score": rs_score,
+        "rs_label": "강세" if rs_score >= 70 else "약세" if rs_score <= 30 else "보통",
+        "momentum": momentum,
+        "vcp": vcp,
+        # ── 매크로/품질 필터 ──
+        "market_regime": regime,
+        "liquidity": liquidity,
+        "fundamental_score": fundamental,
         "generated_at": datetime.datetime.now().isoformat(),
     }
 

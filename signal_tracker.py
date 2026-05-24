@@ -164,6 +164,17 @@ def get_accuracy_stats() -> dict:
         data = _load()
 
     sigs = data.get("signals", [])
+
+    # 이름 없는 신호에 POPULAR_STOCKS에서 이름 보충
+    try:
+        from multi_market_bot_v4 import POPULAR_STOCKS as _ps
+        for s in sigs:
+            if not s.get("name") or s["name"] == s.get("ticker", ""):
+                info = _ps.get(s.get("ticker", ""), {})
+                if info.get("name"):
+                    s["name"] = info["name"]
+    except Exception:
+        pass
     evaluated = [s for s in sigs if s.get("outcome") is not None]
 
     # ── 신호 유형별 ─────────────────────────────────────────────

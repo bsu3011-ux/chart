@@ -1972,7 +1972,7 @@ function RankingPage(){
 
   const fetchRanking=(refresh=false)=>{
     setLoading(true);
-    fetch(`/api/top_stocks?n=100${refresh?"&refresh=1":""}`)
+    fetch(`/api/top_stocks?n=50${refresh?"&refresh=1":""}`)
       .then(r=>r.json())
       .then(d=>{
         setData(d);

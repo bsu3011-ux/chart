@@ -60,8 +60,38 @@ def _load_krx_cache():
             pass
     return False
 
+def _fetch_krx_via_http() -> dict:
+    """KRX 정보데이터시스템 API로 코스피·코스닥 전종목 조회 (외부 라이브러리 불필요)"""
+    import urllib.request, urllib.parse
+    stocks: dict = {}
+    for mkt_id, market, suffix in (("STK", "KOSPI", ".KS"), ("KSQ", "KOSDAQ", ".KQ")):
+        try:
+            params = urllib.parse.urlencode({
+                "bld":          "dbms/MDC/STAT/standard/MDCSTAT01901",
+                "mktId":        mkt_id,
+                "share":        "1",
+                "csvxls_isNo":  "false",
+            })
+            url = f"http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd?{params}"
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer":    "http://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd",
+            })
+            with urllib.request.urlopen(req, timeout=20) as r:
+                data = json.loads(r.read())
+            for item in data.get("OutBlock_1", []):
+                code = item.get("ISU_SRT_CD", "").strip()
+                name = item.get("ISU_ABBRV", "").strip()
+                if code and name and len(code) == 6:
+                    stocks[code + suffix] = {"name": name, "market": market, "krx_code": code}
+            print(f"[KRX HTTP] {market}: {len([k for k in stocks if k.endswith(suffix)])}개")
+        except Exception as e:
+            print(f"[KRX HTTP] {market} 조회 실패: {e}")
+    return stocks
+
+
 def _build_krx_cache():
-    """KRX 전종목 목록 수집 (FinanceDataReader → pykrx 순으로 시도)"""
+    """KRX 전종목 목록 수집 (FDR → pykrx → KRX HTTP API 순으로 시도)"""
     global _krx_cache
     stocks: dict = {}
     try:
@@ -92,10 +122,11 @@ def _build_krx_cache():
                     name = krx_stock.get_market_ticker_name(t)
                     stocks[t + suffix] = {"name": name, "market": market, "krx_code": t}
         except Exception as e2:
-            print(f"[KRX] pykrx도 실패: {e2}")
+            print(f"[KRX] pykrx도 실패: {e2} — KRX HTTP API 시도")
+            stocks = _fetch_krx_via_http()
 
     if not stocks:
-        print("[KRX] 전종목 캐시 빌드 불가 (네트워크 제한). 6자리 코드 직접 검색은 여전히 작동합니다.")
+        print("[KRX] 전종목 캐시 빌드 불가.")
         return
 
     _krx_cache = stocks

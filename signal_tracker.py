@@ -3,7 +3,7 @@
 신호 정확도 트래커
 - BUY/SELL 신호를 기록하고 5 거래일(≥7일) 후 실제 결과를 자동 평가
 - 신호 유형별·신뢰도 구간별 적중률 계산
-- output/signal_history.json 에 저장
+- output/signal_accuracy.json 에 저장
 """
 import os, json, datetime, threading
 
@@ -16,7 +16,7 @@ def _init_path():
     if not _DATA_FILE:
         base = os.path.dirname(os.path.abspath(__file__))
         os.makedirs(os.path.join(base, "output"), exist_ok=True)
-        _DATA_FILE = os.path.join(base, "output", "signal_history.json")
+        _DATA_FILE = os.path.join(base, "output", "signal_accuracy.json")
 
 
 def _load() -> dict:

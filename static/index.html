@@ -1663,6 +1663,80 @@ function StockResultCard({data:d,onChart,onClose}){
             </div>
           </div>
         )}
+        {/* ── 글로벌 매크로 오버레이 ── */}
+        {d.macro_overlay&&Object.keys(d.macro_overlay.details||{}).length>0&&(()=>{
+          const mo=d.macro_overlay; const det=mo.details||{};
+          const adj=mo.score_adj||0;
+          const col=adj>=2?C.green:adj<=-6?C.red:adj<=-3?C.yellow:C.muted;
+          const badges=[
+            det.vkospi!=null&&{label:`VKOSPI ${det.vkospi}`,sub:det.vkospi_label,
+              col:det.vkospi<15?C.green:det.vkospi<25?C.muted:det.vkospi<35?C.yellow:C.red},
+            det.tnx!=null&&{label:`금리 ${det.tnx}%`,sub:det.tnx_chg!=null?`10일 ${det.tnx_chg>0?"+":""}${det.tnx_chg}%p`:"",
+              col:det.tnx_chg>0.1?C.red:det.tnx_chg<-0.1?C.green:C.muted},
+            det.dxy!=null&&{label:`DXY ${det.dxy}`,sub:det.dxy_label,
+              col:det.dxy_pct>0.4?C.red:det.dxy_pct<-0.4?C.green:C.muted},
+            det.copper!=null&&{label:`구리 $${det.copper}`,sub:det.copper_label,
+              col:det.copper_pct>0.8?C.green:det.copper_pct<-0.8?C.red:C.muted},
+          ].filter(Boolean);
+          return(
+            <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
+              background:`${C.surface}`,border:`1px solid ${C.border}55`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <span style={{color:C.muted,fontSize:9,fontWeight:700,letterSpacing:"0.06em"}}>🌐 글로벌 매크로</span>
+                <span style={{fontSize:9,fontWeight:700,color:col}}>{adj>=0?"+":""}{adj}점</span>
+              </div>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                {badges.map((b,i)=>(
+                  <span key={i} style={{padding:"3px 7px",borderRadius:5,fontSize:9,fontWeight:600,
+                    background:`${b.col}15`,color:b.col,border:`1px solid ${b.col}33`}}>
+                    {b.label}{b.sub?<span style={{color:C.dim,fontWeight:400}}> {b.sub}</span>:null}
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+        {/* ── DART 임원 매매 (한국 종목만) ── */}
+        {d.is_korean&&d.dart_insider&&(d.dart_insider.buy_count>0||d.dart_insider.sell_count>0)&&(()=>{
+          const ins=d.dart_insider;
+          const sig=ins.net_signal;
+          const col=sig==="insider_buy"?C.green:sig==="insider_sell"?C.red:C.muted;
+          const sigLabel=sig==="insider_buy"?"임원 순매수":sig==="insider_sell"?"임원 순매도":"중립";
+          return(
+            <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
+              background:`${col}08`,border:`1px solid ${col}33`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                <span style={{color:C.muted,fontSize:9,fontWeight:700,letterSpacing:"0.06em"}}>👥 DART 임원 매매 (60일)</span>
+                <span style={{fontSize:10,fontWeight:700,color:col}}>{sigLabel}
+                  {ins.score_adj!==0&&<span style={{fontSize:9,marginLeft:4}}>{ins.score_adj>0?"+":""}{ins.score_adj}점</span>}
+                </span>
+              </div>
+              <div style={{display:"flex",gap:10}}>
+                <span style={{color:C.green,fontSize:11,fontWeight:700}}>매수 {ins.buy_count}건</span>
+                <span style={{color:C.red,fontSize:11,fontWeight:700}}>매도 {ins.sell_count}건</span>
+              </div>
+              {ins.details&&ins.details.length>0&&(
+                <div style={{marginTop:5,display:"flex",flexDirection:"column",gap:2}}>
+                  {ins.details.slice(0,3).map((d2,i)=>(
+                    <div key={i} style={{fontSize:9,color:C.dim}}>
+                      <span style={{color:d2.trade_type==="매수"?C.green:C.red,marginRight:4}}>{d2.trade_type}</span>
+                      {d2.name} ({d2.role}) {d2.change>0?`${d2.change.toLocaleString()}주`:""} {d2.date}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {d.dart_disclosures&&d.dart_disclosures.length>0&&(
+                <div style={{marginTop:5,borderTop:`1px solid ${C.border}44`,paddingTop:4}}>
+                  {d.dart_disclosures.map((dc,i)=>(
+                    <div key={i} style={{fontSize:9,color:C.muted,marginTop:2}}>
+                      📋 {dc.title} <span style={{color:C.dim}}>{dc.date}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {/* ── KIS 외국인·기관·체결강도 (한국 종목만) ── */}
         {d.is_korean&&(()=>{
           const inv=d.kis_investor||{};

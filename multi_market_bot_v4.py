@@ -2320,7 +2320,8 @@ def _slope(series, n=5):
 def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
                        divergence=None, candle_pattern=None, ma50_slope=0,
                        rs_score=50, momentum_composite=50, vcp_detected=False,
-                       regime_adj=0, liquidity_adj=0, fundamental_adj=0):
+                       regime_adj=0, liquidity_adj=0, fundamental_adj=0,
+                       macro_adj=0, vol_z_adj=0):
     """가중치 기반 신호 생성 (0~100점, 기본점수 25)
     - MA200/MA50 추세: 30점 (장기 가장 중요)
     - 모멘텀 (RSI/MACD): 25점 (MACD 최대 ±8점)
@@ -2399,6 +2400,10 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
     score += liquidity_adj
     # 펀더멘털 (±8점): 저PER·고ROE·EPS성장 보너스, 적자·고PER 패널티
     score += fundamental_adj
+    # 글로벌 매크로 (±15점): VKOSPI·금리·달러·구리
+    score += macro_adj
+    # 거래량 Z-score (±5점): 이상 거래 감지
+    score += vol_z_adj
 
     score = max(0, min(100, score))
     if score >= 80: return "STRONG_BUY",  "🟢 강력 매수", score
@@ -2908,6 +2913,99 @@ def calc_fundamental_score(pe_ratio, roe, eps_growth) -> dict:
             "available": len(parts) > 0}
 
 
+def calc_macro_overlay(is_korean: bool = True) -> dict:
+    """글로벌 매크로 — VKOSPI, 미국 금리(TNX), 달러(DXY), 구리(HG=F)
+    반환: score_adj (±15 캡), details
+    """
+    import yfinance as yf, pandas as pd
+    score = 0
+    details: dict = {}
+    try:
+        raw = yf.download(["^VKOSPI","^TNX","DX-Y.NYB","HG=F"],
+                          period="1mo", interval="1d",
+                          auto_adjust=True, progress=False, threads=True)
+        if raw.empty:
+            return {"score_adj": 0, "details": {}}
+        cl = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+
+        def _s(sym):
+            try:
+                s = cl[sym].dropna()
+                return s if len(s) >= 2 else None
+            except Exception:
+                return None
+
+        # VKOSPI (한국 공포지수)
+        s = _s("^VKOSPI")
+        if s is not None:
+            v = float(s.iloc[-1]); details["vkospi"] = round(v,1)
+            if   v < 15: score += 3;  details["vkospi_label"] = "안정"
+            elif v < 25: score += 0;  details["vkospi_label"] = "보통"
+            elif v < 35: score -= 4;  details["vkospi_label"] = "불안"
+            else:        score -= 10; details["vkospi_label"] = "공포"
+
+        # 미국 10년물 금리
+        s = _s("^TNX")
+        if s is not None and len(s) >= 10:
+            now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+            chg = round(now - d10, 2)
+            details["tnx"] = round(now, 2); details["tnx_chg"] = chg
+            if   chg >  0.20: score -= 5; details["tnx_label"] = "급등↑"
+            elif chg >  0.10: score -= 2; details["tnx_label"] = "상승"
+            elif chg < -0.20: score += 3; details["tnx_label"] = "급락↓"
+            elif chg < -0.10: score += 1; details["tnx_label"] = "하락"
+            else:                          details["tnx_label"] = "보합"
+
+        # 달러 인덱스 — 한국 종목 외국인 영향
+        if is_korean:
+            s = _s("DX-Y.NYB")
+            if s is not None and len(s) >= 10:
+                now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+                pct = round((now-d10)/d10*100, 1)
+                details["dxy"] = round(now, 1); details["dxy_pct"] = pct
+                if   pct >  1.0: score -= 4; details["dxy_label"] = "강세(외인매도↑)"
+                elif pct >  0.4: score -= 2; details["dxy_label"] = "소폭강세"
+                elif pct < -1.0: score += 3; details["dxy_label"] = "약세(외인유입↑)"
+                elif pct < -0.4: score += 1; details["dxy_label"] = "소폭약세"
+                else:                         details["dxy_label"] = "보합"
+
+        # 구리 선물 (경기선행)
+        s = _s("HG=F")
+        if s is not None and len(s) >= 10:
+            now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+            pct = round((now-d10)/d10*100, 1)
+            details["copper"] = round(now, 2); details["copper_pct"] = pct
+            if   pct >  2.5: score += 2; details["copper_label"] = "급등(경기확장)"
+            elif pct >  0.8: score += 1; details["copper_label"] = "상승"
+            elif pct < -2.5: score -= 3; details["copper_label"] = "급락(경기우려)"
+            elif pct < -0.8: score -= 1; details["copper_label"] = "하락"
+            else:                         details["copper_label"] = "보합"
+    except Exception:
+        pass
+    return {"score_adj": max(-15, min(8, score)), "details": details}
+
+
+def calc_volume_zscore(volume_series) -> dict:
+    """20일 거래량 Z-score — 이상 거래 감지 (score_adj: +5 ~ -2)"""
+    try:
+        import pandas as pd
+        vs = pd.Series(volume_series).dropna()
+        if len(vs) < 22:
+            return {"z": 0.0, "label": "데이터부족", "score_adj": 0}
+        window = vs.iloc[-21:-1]
+        mean_v, std_v = float(window.mean()), float(window.std())
+        today_v = float(vs.iloc[-1])
+        z = round((today_v - mean_v) / std_v, 2) if std_v > 0 else 0.0
+        if   z >  3.0: adj, label = +5, f"폭증 +{z}σ"
+        elif z >  2.0: adj, label = +3, f"급증 +{z}σ"
+        elif z >  1.5: adj, label = +1, f"증가 +{z}σ"
+        elif z < -1.5: adj, label = -2, f"감소 {z}σ"
+        else:          adj, label =  0, f"보통 {z:.1f}σ"
+        return {"z": z, "label": label, "score_adj": adj}
+    except Exception:
+        return {"z": 0.0, "label": "계산오류", "score_adj": 0}
+
+
 # ════════════════════════════════════════════════════════════════
 # 주식 검색 분석 — 메인 함수
 # ════════════════════════════════════════════════════════════════
@@ -3010,6 +3108,8 @@ def analyze_stock(ticker: str) -> dict:
     regime      = calc_market_regime(bm_ticker)
     liquidity   = calc_liquidity_score(current_vol, current, is_korean)
     fundamental = calc_fundamental_score(pe_ratio, roe, eps_growth)
+    macro       = calc_macro_overlay(is_korean)
+    vol_z       = calc_volume_zscore(df["Volume"].values)
 
     # 신호 생성 (가중치 + 다이버전스 + 캔들 + 선행지표 + 매크로 + 품질)
     signal_type, signal_text, confidence = _generate_signal(
@@ -3020,6 +3120,8 @@ def analyze_stock(ticker: str) -> dict:
         regime_adj=regime["score_adj"],
         liquidity_adj=liquidity["score_adj"],
         fundamental_adj=fundamental["score_adj"],
+        macro_adj=macro["score_adj"],
+        vol_z_adj=vol_z["score_adj"],
     )
 
     # ── KIS Open API: 외국인·기관 순매수 + 체결강도 (한국 종목만) ──
@@ -3098,6 +3200,49 @@ def analyze_stock(ticker: str) -> dict:
         extras.append(f"⚠️ 펀더멘털 부진 — 적자 또는 고평가 우려")
     elif fundamental["available"] and fundamental["score_adj"] >= 5:
         extras.append(f"🏅 펀더멘털 우량 — 저PER·고ROE·EPS성장 동반")
+    # ── DART 임원 매매 (한국 종목만) ──────────────────────────
+    dart_insider: dict = {}
+    dart_disclosures: list = []
+    if is_korean:
+        try:
+            from dart_api import get_insider_trades, get_recent_disclosures, is_available as _dart_ok
+            if _dart_ok():
+                krx_code = ticker.split(".")[0]
+                dart_insider     = get_insider_trades(krx_code)
+                dart_disclosures = get_recent_disclosures(krx_code)
+                # 임원 매매 신뢰도 보정 (비대칭: 양 +6 캡, 음 -6 풀)
+                insider_adj = dart_insider.get("score_adj", 0)
+                if insider_adj > 0 and confidence >= 80:
+                    insider_adj = 0   # 이미 높은 종목 과대평가 방지
+                confidence = max(0, min(100, confidence + insider_adj))
+        except Exception:
+            pass
+
+    # 거래량 Z-score extras
+    if vol_z["score_adj"] >= 3:
+        extras.append(f"📊 거래량 {vol_z['label']} — 이상 거래 감지")
+    elif vol_z["score_adj"] <= -2:
+        extras.append(f"📉 거래량 {vol_z['label']} — 관심 감소")
+
+    # 글로벌 매크로 extras
+    if macro["score_adj"] <= -8:
+        mdet = macro["details"]
+        parts = []
+        if mdet.get("vkospi_label") == "공포":
+            parts.append(f"VKOSPI {mdet.get('vkospi','?')}")
+        if mdet.get("tnx_label","").startswith("급등"):
+            parts.append(f"금리급등 +{mdet.get('tnx_chg','?')}%p")
+        if mdet.get("dxy_label","").startswith("강세"):
+            parts.append(f"달러강세 {mdet.get('dxy_pct','?')}%")
+        if parts:
+            extras.append(f"🌐 매크로 위험 — {' · '.join(parts)}")
+
+    # DART 임원 매매 extras
+    if dart_insider.get("net_signal") == "insider_buy":
+        extras.append(f"👥 임원 매수 {dart_insider['buy_count']}건 (60일) — 강한 확신 신호")
+    elif dart_insider.get("net_signal") == "insider_sell":
+        extras.append(f"👥 임원 매도 {dart_insider['sell_count']}건 (60일) — 주의")
+
     # KIS 외국인·기관 순매수 코멘트 (한국 종목)
     if kis_investor:
         sig     = kis_investor.get("signal", "neutral")
@@ -3187,9 +3332,14 @@ def analyze_stock(ticker: str) -> dict:
         "momentum": momentum,
         "vcp": vcp,
         # ── 매크로/품질 필터 ──
-        "market_regime": regime,
-        "liquidity": liquidity,
+        "market_regime":    regime,
+        "liquidity":        liquidity,
         "fundamental_score": fundamental,
+        "macro_overlay":    macro,
+        "vol_zscore":       vol_z,
+        # ── DART 임원 매매 ──
+        "dart_insider":     dart_insider,
+        "dart_disclosures": dart_disclosures,
         # ── KIS 외국인·기관·체결강도 ──
         "kis_investor": kis_investor,
         "kis_trade":    kis_trade,

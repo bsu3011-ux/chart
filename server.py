@@ -1129,6 +1129,10 @@ def get_signal_accuracy():
 def guide():
     return send_from_directory(STATIC_DIR, 'guide.html')
 
+@app.route('/favicon.svg')
+def favicon():
+    return send_from_directory(STATIC_DIR, 'favicon.svg', mimetype='image/svg+xml')
+
 @app.route('/countries-110m.json')
 def world_map():
     """세계지도 TopoJSON 데이터"""

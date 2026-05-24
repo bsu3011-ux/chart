@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 배경 (앱 다크 테마) -->
+  <rect width="512" height="512" rx="96" fill="#06080f"/>
+  <rect width="512" height="512" rx="96" fill="none" stroke="#22d3ee" stroke-width="10" opacity="0.25"/>
+
+  <!-- 캔들스틱 3개 -->
+  <!-- 왼쪽: 중간 크기 불 캔들 -->
+  <line x1="116" y1="130" x2="116" y2="185" stroke="#22d3ee" stroke-width="14" stroke-linecap="round"/>
+  <rect x="82" y="185" width="68" height="140" rx="10" fill="#22d3ee"/>
+  <line x1="116" y1="325" x2="116" y2="375" stroke="#22d3ee" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- 가운데: 가장 큰 불 캔들 -->
+  <line x1="256" y1="70" x2="256" y2="135" stroke="#22d3ee" stroke-width="14" stroke-linecap="round"/>
+  <rect x="222" y="135" width="68" height="200" rx="10" fill="#22d3ee"/>
+  <line x1="256" y1="335" x2="256" y2="400" stroke="#22d3ee" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- 오른쪽: 작은 베어 캔들 (조정) -->
+  <line x1="396" y1="170" x2="396" y2="225" stroke="#f87171" stroke-width="14" stroke-linecap="round"/>
+  <rect x="362" y="225" width="68" height="90" rx="10" fill="#f87171" opacity="0.8"/>
+  <line x1="396" y1="315" x2="396" y2="360" stroke="#f87171" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- 하단 MT 텍스트 -->
+  <text x="256" y="480" text-anchor="middle"
+    font-family="'Arial Black',Arial,sans-serif"
+    font-weight="900" font-size="80" fill="#22d3ee" opacity="0.55"
+    letter-spacing="-2">MT</text>
+</svg>

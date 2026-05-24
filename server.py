@@ -237,21 +237,33 @@ def _run_bot_background():
 
 
 def _daily_scheduler():
-    """매일 오전 8시·오후 4시 (KST = UTC+9) 자동 분석"""
+    """매일 오전 8시·오후 4시 (KST = UTC+9) 자동 분석 + 매시 신호 평가"""
     import time
     run_hours   = {8, 16}
     _last_fired = set()
+    _last_eval_hour = -1
     while True:
         try:
             kst  = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
             key  = (kst.date(), kst.hour)
             if kst.hour in run_hours and key not in _last_fired:
                 _last_fired.add(key)
-                # 오래된 key 정리
                 today = kst.date()
                 _last_fired = {k for k in _last_fired if k[0] >= today}
                 print(f"[scheduler] KST {kst.hour}시 자동 분석 시작")
                 _run_bot_background()
+            # 매시 정각 신호 정확도 평가
+            if kst.hour != _last_eval_hour:
+                _last_eval_hour = kst.hour
+                def _eval():
+                    try:
+                        from signal_tracker import evaluate_pending
+                        n = evaluate_pending(max_eval=50)
+                        if n > 0:
+                            print(f"[signal_tracker] 신호 평가 완료: {n}건")
+                    except Exception as e:
+                        print(f"[signal_tracker] 평가 오류: {e}")
+                threading.Thread(target=_eval, daemon=True).start()
         except Exception as e:
             print(f"[scheduler] 오류: {e}")
         time.sleep(60)
@@ -348,6 +360,22 @@ def get_stock_analysis():
 
     try:
         result = analyze_stock(ticker)
+
+        # Background: record non-neutral signals for accuracy tracking
+        sig_type = result.get("signal_type", "")
+        if sig_type in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL"):
+            _price  = result.get("price") or 0
+            _conf   = result.get("confidence") or 0
+            _indic  = {"rsi": result.get("rsi"), "macd_hist": result.get("macd_hist"),
+                       "rs_score": result.get("rs_score")}
+            def _bg_record(t=ticker, st=sig_type, c=_conf, p=_price, i=_indic):
+                try:
+                    from signal_tracker import record_signal
+                    record_signal(t, st, c, p, i)
+                except Exception:
+                    pass
+            threading.Thread(target=_bg_record, daemon=True).start()
+
         return jsonify(_clean(result))
     except ValueError:
         # yfinance 실패 → POPULAR_STOCKS 기본 정보 폴백
@@ -1049,6 +1077,20 @@ def get_top_stocks():
         "analyzing":      _ranking_in_progress,
         "ranking":        ranking[:n],
     })
+
+
+@app.route('/api/signal_accuracy')
+def get_signal_accuracy():
+    """신호 적중률 통계
+    GET /api/signal_accuracy
+    """
+    try:
+        from signal_tracker import get_accuracy_stats, evaluate_pending
+        evaluate_pending(max_eval=20)   # 빠른 평가 배치
+        stats = get_accuracy_stats()
+        return jsonify(_clean(stats))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/guide')

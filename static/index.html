@@ -386,6 +386,15 @@ function Card({m,open,onToggle,onChart}){
           <div onClick={e=>e.stopPropagation()} style={{marginTop:10}}>
             <div style={{color:C.muted,fontSize:11,marginBottom:8,lineHeight:1.6}}>{m.signal}</div>
 
+            {/* 🌍 매크로 노트 (VIX 패닉/금리역전 등) */}
+            {m.macro_note&&(
+              <div style={{marginBottom:8,padding:"6px 9px",borderRadius:7,
+                background:C.yellowBg,border:`1px solid ${C.yellow}55`,
+                color:C.yellow,fontSize:10,fontWeight:700,display:"flex",alignItems:"center",gap:4}}>
+                <span>🌍</span><span>{m.macro_note}</span>
+              </div>
+            )}
+
             {/* 국가 투자 성향 */}
             {m.country_tendency&&(
               <div style={{marginBottom:8,padding:"8px 10px",borderRadius:8,
@@ -428,14 +437,30 @@ function Card({m,open,onToggle,onChart}){
               </div>
             )}
             {m.strategy==="dual_filter"&&(
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
-                <Met label={`${m.mom_windows?.[0]||21}일`} value={`${m.mom_short>=0?"+":""}${m.mom_short?.toFixed(1)}%`}
-                  color={m.mom_short>=0?C.green:C.red} small/>
-                <Met label={`${m.mom_windows?.[1]||63}일`} value={`${m.mom_mid>=0?"+":""}${m.mom_mid?.toFixed(1)}%`}
-                  color={m.mom_mid>=0?C.green:C.red} small/>
-                <Met label={`${m.mom_windows?.[2]||210}일`} value={`${m.mom_long>=0?"+":""}${m.mom_long?.toFixed(1)}%`}
-                  color={m.mom_long>=0?C.green:C.red} small/>
-              </div>
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:6}}>
+                  <Met label={`${m.mom_windows?.[0]||21}일`} value={`${m.mom_short>=0?"+":""}${m.mom_short?.toFixed(1)}%`}
+                    color={m.mom_short>=0?C.green:C.red} small/>
+                  <Met label={`${m.mom_windows?.[1]||63}일`} value={`${m.mom_mid>=0?"+":""}${m.mom_mid?.toFixed(1)}%`}
+                    color={m.mom_mid>=0?C.green:C.red} small/>
+                  <Met label={`${m.mom_windows?.[2]||210}일`} value={`${m.mom_long>=0?"+":""}${m.mom_long?.toFixed(1)}%`}
+                    color={m.mom_long>=0?C.green:C.red} small/>
+                </div>
+                {typeof m.mom_accel==="number"&&(
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,
+                      padding:"5px 8px",borderRadius:6,background:C.surface,
+                      border:`1px solid ${m.accelerating?C.green:m.mom_accel<-2?C.red:C.border}44`}}>
+                    <span style={{color:C.muted,fontSize:10}}>가속도</span>
+                    <span style={{color:m.accelerating?C.green:m.mom_accel<-2?C.red:C.dim,
+                        fontSize:11,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>
+                      {m.mom_accel>0?"▲":m.mom_accel<0?"▼":"-"} {Math.abs(m.mom_accel).toFixed(1)}%p
+                    </span>
+                    <span style={{color:C.muted,fontSize:9,marginLeft:"auto"}}>
+                      {m.accelerating?"추세 가속":m.mom_accel<-2?"추세 둔화":"중립"}
+                    </span>
+                  </div>
+                )}
+              </>
             )}
             {m.strategy==="risk_defense"&&(
               <>
@@ -839,6 +864,76 @@ function FearGreedGauge({value,label,title,vix}){
       </svg>
       <div style={{color:col,fontSize:11,fontWeight:700,marginTop:-4}}>{label||label2}</div>
       {vix!=null&&<div style={{color:C.muted,fontSize:9,marginTop:2}}>VIX {vix}</div>}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// 🌍 매크로 환경 패널 (VIX · 금리커브 · DXY)
+// ════════════════════════════════════════════
+function MacroPanel({markets}){
+  // 어떤 시장이든 macro 컨텍스트가 붙어있으면 그걸 사용 (모든 시장이 동일 컨텍스트 공유)
+  const macro=markets?.find(m=>m.macro&&(m.macro.vix||m.macro.us_10y))?.macro;
+  if(!macro) return null;
+
+  const level=macro.risk_level||"normal";
+  const tone=level==="risk_off"?{bg:C.redBg,c:C.red,b:C.red+"55",label:"위험회피"}
+            :level==="caution" ?{bg:C.yellowBg,c:C.yellow,b:C.yellow+"55",label:"경계"}
+                               :{bg:C.greenBg,c:C.green,b:C.green+"55",label:"정상"};
+
+  const vixColor=macro.vix>=25?C.red:macro.vix>=20?C.yellow:C.green;
+  const spreadColor=macro.yield_inverted?C.red:C.dim;
+  const dxyColor=macro.dxy>105&&macro.dxy_trend==="up"?C.yellow:C.dim;
+
+  return(
+    <div style={{padding:"10px 12px",borderRadius:12,background:tone.bg,
+        border:`1px solid ${tone.b}`,marginBottom:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+        <span style={{color:tone.c,fontSize:11,fontWeight:800,letterSpacing:"0.04em"}}>
+          🌍 글로벌 매크로 · {tone.label}
+        </span>
+        <span style={{color:C.muted,fontSize:9,fontWeight:700}}>
+          위험 {macro.risk_score}/100
+        </span>
+      </div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",fontSize:10}}>
+        {macro.vix!=null&&(
+          <div style={{padding:"4px 8px",borderRadius:6,background:C.surface,
+              border:`1px solid ${vixColor}44`}}>
+            <span style={{color:C.muted}}>VIX </span>
+            <strong style={{color:vixColor,fontVariantNumeric:"tabular-nums"}}>{macro.vix}</strong>
+            {macro.vix_change_5d!=null&&(
+              <span style={{color:macro.vix_change_5d>0?C.red:C.green,marginLeft:4,fontSize:9}}>
+                {macro.vix_change_5d>0?"▲":"▼"}{Math.abs(macro.vix_change_5d).toFixed(1)}
+              </span>
+            )}
+          </div>
+        )}
+        {macro.yield_spread!=null&&(
+          <div style={{padding:"4px 8px",borderRadius:6,background:C.surface,
+              border:`1px solid ${spreadColor}44`}}>
+            <span style={{color:C.muted}}>10y-3m </span>
+            <strong style={{color:spreadColor,fontVariantNumeric:"tabular-nums"}}>
+              {macro.yield_spread>0?"+":""}{macro.yield_spread}%p
+            </strong>
+            {macro.yield_inverted&&<span style={{color:C.red,marginLeft:4,fontSize:9}}>⚠역전</span>}
+          </div>
+        )}
+        {macro.dxy!=null&&(
+          <div style={{padding:"4px 8px",borderRadius:6,background:C.surface,
+              border:`1px solid ${dxyColor}44`}}>
+            <span style={{color:C.muted}}>DXY </span>
+            <strong style={{color:dxyColor,fontVariantNumeric:"tabular-nums"}}>{macro.dxy}</strong>
+            {macro.dxy_trend==="up"&&macro.dxy>105&&
+              <span style={{color:C.yellow,marginLeft:4,fontSize:9}}>강달러</span>}
+          </div>
+        )}
+      </div>
+      {macro.warnings?.length>0&&(
+        <div style={{marginTop:6,fontSize:10,color:tone.c,fontWeight:600}}>
+          ⚠️ {macro.warnings.join(" · ")}
+        </div>
+      )}
     </div>
   );
 }
@@ -3018,6 +3113,9 @@ function MarketTab({markets,onChart,data,fetchSignals,runAnalysis,loading,apiCon
           <button onClick={()=>setSearchResult(null)} style={{background:"none",border:"none",color:C.red,cursor:"pointer"}}>✕</button>
         </div>
       )}
+
+      {/* 🌍 매크로 환경 (VIX · 금리커브 · DXY) */}
+      <MacroPanel markets={markets}/>
 
       {/* 공포탐욕 + 환율 (데스크탑: 2컬럼) */}
       <div className="desktop-grid" style={{marginBottom:0}}>

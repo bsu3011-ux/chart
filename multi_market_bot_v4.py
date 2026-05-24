@@ -1572,6 +1572,13 @@ def analyze_minervini(df, params):
         signal = "⚪ 관망"
         signal_type = "NEUTRAL"
 
+    # ── 매크로 가드 (크립토는 VIX와 약한 상관, 패닉장만 경고) ──
+    macro = get_macro_context()
+    _vix = macro.get('vix')
+    macro_note = None
+    if _vix is not None and _vix >= 30 and signal_type == "BUY":
+        macro_note = f"⚠️ VIX {_vix:.1f} 패닉 - 진입 신중"
+
     return {
         "signal": signal, "signal_type": signal_type,
         "is_stage2": is_stage2,
@@ -1581,6 +1588,7 @@ def analyze_minervini(df, params):
         "target": round(target, 2), "target_pct": round((target-current)/current*100, 2),
         "stoploss": round(stoploss, 2), "stop_pct": round((current-stoploss)/current*100, 2),
         "rr_ratio": round(rr, 2),
+        "macro": macro, "macro_note": macro_note,
         "strategy_name": "미너비니 추세추종",
         "strategy_label": f"MA{p['ma_fast']}/{p['ma_slow']} Trail×{p['trailing_atr']}",
     }
@@ -1693,6 +1701,30 @@ def analyze_leverage(df, params, profile=None):
         signal = "🔵 1x 다운그레이드 (횡보 변동성 과다)"
         signal_type = "HOLD_1X"
 
+    # ── 매크로 가드: VIX·금리커브 ──
+    macro = get_macro_context()
+    _vix = macro.get('vix')
+    macro_note = None
+    if _vix is not None and _vix >= 30:
+        # VIX 30+ 패닉: 강제 현금
+        lev = 0.0
+        signal = f"🔴 현금 (VIX {_vix:.1f} 패닉)"
+        signal_type = "CASH"
+        confidence = max(0, confidence - 25)
+        macro_note = f"VIX {_vix:.1f} 패닉장 회피"
+    elif _vix is not None and _vix >= 25:
+        # VIX 25+ 경계: 2x → 1x 강제 다운그레이드
+        if lev == 2.0:
+            lev = 1.0
+            signal = f"🔵 1x 다운그레이드 (VIX {_vix:.1f} 경계)"
+            signal_type = "HOLD_1X"
+        confidence = max(0, confidence - 12)
+        macro_note = f"VIX {_vix:.1f} 경계 - 레버리지 축소"
+    if macro.get('yield_inverted'):
+        confidence = max(0, confidence - 8)
+        if not macro_note:
+            macro_note = f"금리역전 ({macro.get('yield_spread')}%p)"
+
     return {
         "signal": signal, "signal_type": signal_type,
         "leverage": lev,
@@ -1706,6 +1738,7 @@ def analyze_leverage(df, params, profile=None):
         "cross_signal": cross_signal,
         "confidence": confidence,
         "score_2x": score_2x,
+        "macro": macro, "macro_note": macro_note,
         "strategy_name": "레버리지 스위칭 v2",
         "strategy_label": f"2x/1x/0x · MA{ma_m}/{ma_l} · ADX{_adx:.0f}",
     }
@@ -1744,6 +1777,11 @@ def analyze_dual_filter(df, params, profile=None):
     neg_count = 3 - pos_count
     trend_strong = _adx >= adx_min
     trend_up = _pdi > _mdi
+
+    # 모멘텀 가속도 (단기 - 중기): 양수면 추세 가속, 음수면 둔화
+    mom_accel = round(mom_s - mom_m, 2)
+    accelerating = mom_accel > 2.0
+    decelerating = mom_accel < -2.0
 
     # 극단 RSI = 평균회귀 신호 (중국형 시장에서 유용)
     rsi_extreme_low  = rsi_val <= rsi_x_lo
@@ -1799,17 +1837,44 @@ def analyze_dual_filter(df, params, profile=None):
         action = "관망"
         confidence = 40
 
+    # ── 모멘텀 가속도 보정 ──
+    if accelerating and pos_count >= 2:
+        confidence = min(100, confidence + 5)
+    elif decelerating and pos_count >= 2:
+        confidence = max(0, confidence - 5)
+
+    # ── 매크로 가드 ──
+    macro = get_macro_context()
+    _vix = macro.get('vix')
+    macro_note = None
+    if _vix is not None and _vix >= 30:
+        confidence = max(0, confidence - 15)
+        if signal_type in ("STRONG_BUY", "BUY", "INVESTED"):
+            signal_type = "NEUTRAL"
+            signal = f"⚪ 매크로 경고 (VIX {_vix:.1f})"
+            action = "관망"
+        macro_note = f"VIX {_vix:.1f} 패닉"
+    elif _vix is not None and _vix >= 25:
+        confidence = max(0, confidence - 8)
+        macro_note = f"VIX {_vix:.1f} 경계"
+    if macro.get('yield_inverted'):
+        confidence = max(0, confidence - 5)
+        if not macro_note:
+            macro_note = f"금리역전 ({macro.get('yield_spread')}%p)"
+
     return {
         "signal": signal, "signal_type": signal_type,
         "price": current, "change_pct": (current-prev)/prev*100,
         "mom_short": round(mom_s, 2), "mom_mid": round(mom_m, 2), "mom_long": round(mom_l, 2),
         "mom_3m": round(mom_m, 2), "mom_10m": round(mom_l, 2),  # 호환성
         "mom_windows": [w_short, w_mid, w_long],
+        "mom_accel": mom_accel, "accelerating": accelerating,
         "rsi": rsi_val, "adx": round(_adx, 1),
         "trend_strong": trend_strong, "trend_up": trend_up,
         "stoch_k": round(_stk, 1),
         "action": action,
         "confidence": confidence,
+        "macro": macro, "macro_note": macro_note,
         "strategy_name": "이중필터 모멘텀 v2",
         "strategy_label": f"{w_short}/{w_mid}/{w_long}일 · ADX{_adx:.0f}",
     }
@@ -1873,6 +1938,22 @@ def analyze_risk_defense(df, params, profile=None):
     if _mfi < 30:                 risk_score += 5;  risk_details.append(f"MFI{_mfi:.0f}(자금이탈)")
     if bb_pct_b < 0.1:            risk_score += 4;  risk_details.append("BB하단이탈")
 
+    # ── 매크로 위험요인 추가 ──
+    macro = get_macro_context()
+    _vix = macro.get('vix')
+    if _vix is not None and _vix >= 30:
+        risk_score += 12; risk_details.append(f"VIX{_vix:.0f}(패닉)")
+    elif _vix is not None and _vix >= 25:
+        risk_score += 7;  risk_details.append(f"VIX{_vix:.0f}(경계)")
+    elif _vix is not None and _vix >= 20:
+        risk_score += 3;  risk_details.append(f"VIX{_vix:.0f}")
+    if macro.get('yield_inverted'):
+        risk_score += 10; risk_details.append(f"금리역전({macro.get('yield_spread')}%p)")
+    if macro.get('dxy') and macro['dxy'] > 105 and macro.get('dxy_trend') == 'up':
+        # 강달러 → 신흥국·원자재 압력
+        if params.get('is_crypto') or 'EM' in str(params.get('country','')):
+            risk_score += 5; risk_details.append(f"강달러({macro['dxy']:.0f})")
+
     risk_score = min(100, risk_score)
 
     if risk_score >= 70:
@@ -1900,6 +1981,7 @@ def analyze_risk_defense(df, params, profile=None):
         "vol20": round(_v20, 1), "vol60": round(_v60, 1),
         "r20": round(r20, 2),
         "confidence": confidence,
+        "macro": macro,
         "strategy_name": "위기방어형 v2",
         "strategy_label": f"위험 {risk_score}/100 · MA{ma_m}/{ma_l}",
     }
@@ -2673,6 +2755,79 @@ def _get_benchmark_close(bm_ticker: str, period: str = "1y"):
         return series
     except Exception:
         return None
+
+
+_macro_cache: dict = {}
+
+def get_macro_context() -> dict:
+    """매크로 환경 컨텍스트 (1시간 TTL 캐시)
+    - VIX: S&P500 옵션 변동성 (>20 경계, >25 위험, >30 패닉)
+    - 금리커브: 10년-3개월 스프레드 (역전시 6-18개월 후 침체 선행)
+    - DXY: 달러지수 (>105 강달러 → 신흥국·원자재 압력)
+    """
+    now = _time_mod.time()
+    if 'ts' in _macro_cache and now - _macro_cache['ts'] < 3600:
+        return _macro_cache['data']
+
+    ctx = {
+        'vix': None, 'vix_change_5d': None,
+        'us_10y': None, 'us_3m': None,
+        'yield_spread': None, 'yield_inverted': False,
+        'dxy': None, 'dxy_trend': None,
+        'risk_level': 'normal', 'risk_score': 0,
+        'warnings': [],
+    }
+
+    try:
+        vix_close = _get_benchmark_close('^VIX', period='3mo')
+        if vix_close is not None and len(vix_close) >= 5:
+            ctx['vix'] = round(float(vix_close.iloc[-1]), 2)
+            ctx['vix_change_5d'] = round(float(vix_close.iloc[-1] - vix_close.iloc[-5]), 2)
+    except Exception:
+        pass
+
+    try:
+        t10 = _get_benchmark_close('^TNX', period='3mo')
+        t3m = _get_benchmark_close('^IRX', period='3mo')
+        if t10 is not None and t3m is not None and len(t10) > 0 and len(t3m) > 0:
+            ctx['us_10y'] = round(float(t10.iloc[-1]), 2)
+            ctx['us_3m']  = round(float(t3m.iloc[-1]), 2)
+            ctx['yield_spread']  = round(ctx['us_10y'] - ctx['us_3m'], 2)
+            ctx['yield_inverted'] = ctx['yield_spread'] < 0
+    except Exception:
+        pass
+
+    try:
+        dxy = _get_benchmark_close('DX-Y.NYB', period='3mo')
+        if dxy is not None and len(dxy) >= 20:
+            ctx['dxy'] = round(float(dxy.iloc[-1]), 2)
+            ma20 = float(dxy.rolling(20).mean().iloc[-1])
+            ctx['dxy_trend'] = 'up' if ctx['dxy'] > ma20 else 'down'
+    except Exception:
+        pass
+
+    score = 0; warnings_ = []
+    if ctx['vix']:
+        if ctx['vix'] >= 30:
+            score += 35; warnings_.append(f"VIX {ctx['vix']:.1f} 패닉")
+        elif ctx['vix'] >= 25:
+            score += 20; warnings_.append(f"VIX {ctx['vix']:.1f} 경계")
+        elif ctx['vix'] >= 20:
+            score += 10; warnings_.append(f"VIX {ctx['vix']:.1f} 상승")
+    if ctx['yield_inverted']:
+        score += 25; warnings_.append(f"금리역전 {ctx['yield_spread']:+.2f}%p")
+    if ctx['dxy'] and ctx['dxy_trend'] == 'up' and ctx['dxy'] > 105:
+        score += 10; warnings_.append(f"강달러 {ctx['dxy']:.1f}")
+
+    ctx['risk_score'] = min(100, score)
+    if   ctx['risk_score'] >= 50: ctx['risk_level'] = 'risk_off'
+    elif ctx['risk_score'] >= 25: ctx['risk_level'] = 'caution'
+    else:                         ctx['risk_level'] = 'normal'
+    ctx['warnings'] = warnings_
+
+    _macro_cache['ts']   = now
+    _macro_cache['data'] = ctx
+    return ctx
 
 
 def calc_relative_strength(close: pd.Series, bm_ticker: str) -> float:

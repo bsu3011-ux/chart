@@ -3,14 +3,13 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# .env 파일이 있으면 환경변수 로드 (git에 포함 안 됨)
-if [ -f "$SCRIPT_DIR/.env" ]; then
-    set -a
-    source "$SCRIPT_DIR/.env"
-    set +a
-fi
-
 while true; do
+    # .env를 매 재시작마다 새로 로드 (KIS 키 등 환경변수 갱신 즉시 반영)
+    if [ -f "$SCRIPT_DIR/.env" ]; then
+        set -a
+        source "$SCRIPT_DIR/.env"
+        set +a
+    fi
     python3 server.py >> "$SCRIPT_DIR/server.log" 2>&1
     echo "[$(date)] 서버 재시작..." >> "$SCRIPT_DIR/server.log"
     sleep 3

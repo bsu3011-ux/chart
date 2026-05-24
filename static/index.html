@@ -1663,12 +1663,23 @@ function StockResultCard({data:d,onChart,onClose}){
             </div>
           </div>
         )}
-        {/* ── KIS 외국인·기관·체결강도 (한국 종목) ── */}
-        {(d.kis_investor&&Object.keys(d.kis_investor).length>0)&&(()=>{
-          const inv=d.kis_investor;
+        {/* ── KIS 외국인·기관·체결강도 (한국 종목만) ── */}
+        {d.is_korean&&(()=>{
+          const inv=d.kis_investor||{};
           const trd=d.kis_trade||{};
+          const hasData=Object.keys(inv).length>0||Object.keys(trd).length>0;
+          if(!hasData){
+            // 한국 종목인데 KIS 데이터 없음 → 키 미설정/API실패 안내
+            return(
+              <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
+                background:`${C.surface}`,border:`1px solid ${C.border}55`}}>
+                <div style={{color:C.muted,fontSize:10,textAlign:"center",lineHeight:1.5}}>
+                  🏦 KIS 수급 데이터 없음 <span style={{color:C.dim,fontSize:9}}>(키 미설정 또는 장마감 후)</span>
+                </div>
+              </div>
+            );
+          }
           const sig=inv.signal||"neutral";
-          const sigColor=sig==="strong_buy"?C.green:sig==="buy"?C.cyan:sig==="strong_sell"?C.red:sig==="sell"?C.red+"bb":C.yellow;
           const fmtN=n=>{if(!n)return "0";const a=Math.abs(n);const s=n>0?"+":"-";return a>=10000?`${s}${(a/10000).toFixed(1)}만`:s+a.toLocaleString();};
           const cttr=trd.cttr||0;
           const cttrCol=cttr>=70?C.green:cttr>=55?C.cyan:cttr<=30?C.red:C.yellow;

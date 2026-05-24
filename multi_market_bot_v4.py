@@ -3023,9 +3023,11 @@ def analyze_stock(ticker: str) -> dict:
     )
 
     # ── KIS Open API: 외국인·기관 순매수 + 체결강도 (한국 종목만) ──
+    # 점수 가중치는 *비대칭*: 양의 보정은 +4 캡(과도 가산 방지), 음의 페널티는 -12까지
+    # 이미 기술/펀더멘털로 높은 점수를 받은 종목에 KIS가 추가로 큰 가산점 주는 걸 막음
     kis_investor: dict = {}
     kis_trade:    dict = {}
-    kis_conf_adj: int  = 0
+    kis_conf_adj_raw: int = 0   # 원시 보정치 (양·음 모두 포함)
     if is_korean:
         try:
             from kis_api import get_investor_trend, get_trade_strength, is_available as _kis_ok
@@ -3033,21 +3035,31 @@ def analyze_stock(ticker: str) -> dict:
                 krx_code     = ticker.split(".")[0]
                 kis_investor = get_investor_trend(krx_code)
                 kis_trade    = get_trade_strength(krx_code)
-                # 외국인·기관 신호 → 신뢰도 보정 (±8점)
+                # 외국인·기관 신호 보정 (양 +4 / 음 -8)
                 sig = kis_investor.get("signal", "neutral")
-                if   sig == "strong_buy":  kis_conf_adj += 8
-                elif sig == "buy":         kis_conf_adj += 4
-                elif sig == "sell":        kis_conf_adj -= 4
-                elif sig == "strong_sell": kis_conf_adj -= 8
-                # 체결강도 → 신뢰도 보정 (±4점)
+                if   sig == "strong_buy":  kis_conf_adj_raw += 4    # 동반 매수: 확인 정도만 가산
+                elif sig == "buy":         kis_conf_adj_raw += 2
+                elif sig == "sell":        kis_conf_adj_raw -= 5
+                elif sig == "strong_sell": kis_conf_adj_raw -= 8    # 동반 매도: 강한 경고 신호
+                # 체결강도 보정 (양 +2 / 음 -4)
                 cttr = kis_trade.get("cttr", 0)
-                if   cttr >= 70: kis_conf_adj += 4
-                elif cttr >= 60: kis_conf_adj += 2
-                elif cttr <= 30: kis_conf_adj -= 4
-                elif cttr <= 40: kis_conf_adj -= 2
-                confidence = max(0, min(100, confidence + kis_conf_adj))
-        except (ImportError, Exception):
+                if   cttr >= 80: kis_conf_adj_raw += 2
+                elif cttr >= 65: kis_conf_adj_raw += 1
+                elif cttr <= 20: kis_conf_adj_raw -= 4
+                elif cttr <= 35: kis_conf_adj_raw -= 2
+                # 양의 가산은 캡 적용 — 이미 점수가 높은 종목 과대평가 방지
+                # 70점 이상 종목은 KIS 양보너스를 절반만 반영, 90점 이상은 무시
+                if kis_conf_adj_raw > 0:
+                    if   confidence >= 90: kis_conf_adj_raw = 0
+                    elif confidence >= 70: kis_conf_adj_raw = min(kis_conf_adj_raw, 3) // 2
+                    else:                  kis_conf_adj_raw = min(kis_conf_adj_raw, 5)
+                # 음의 페널티는 그대로 (약점 발견용 — 풀로 반영)
+                confidence = max(0, min(100, confidence + kis_conf_adj_raw))
+        except ImportError:
             pass
+        except Exception:
+            pass
+    kis_conf_adj = kis_conf_adj_raw   # 출력용 별칭
 
     # 손절/목표/R:R (기술적 지지선 + MA + 스윙로우/하이 전달)
     targets = calc_position_targets(

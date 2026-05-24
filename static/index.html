@@ -2445,6 +2445,217 @@ function SettingsPage(){
 }
 
 // ════════════════════════════════════════════
+// 신호 적중률 트래킹 페이지
+// ════════════════════════════════════════════
+function TrackingPage(){
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState(null);
+
+  const load=useCallback(async()=>{
+    setLoading(true);setErr(null);
+    try{
+      const r=await fetch(`${API_BASE}/api/signal_accuracy`);
+      const j=await r.json();
+      if(j.error) throw new Error(j.error);
+      setData(j);
+    }catch(e){setErr(e.message);}
+    finally{setLoading(false);}
+  },[]);
+
+  useEffect(()=>{load();},[load]);
+
+  const confColor=(acc)=>{
+    if(acc==null) return C.muted;
+    if(acc>=0.6) return C.green;
+    if(acc>=0.4) return C.yellow;
+    return C.red;
+  };
+
+  const sigColor=(st)=>{
+    if(!st) return C.muted;
+    if(st.includes("BUY")) return C.green;
+    if(st.includes("SELL")) return C.red;
+    return C.muted;
+  };
+
+  const verdictBadge=(v)=>{
+    if(v==="correct") return <span style={{color:C.green,fontSize:10,fontWeight:700}}>✓ 적중</span>;
+    if(v==="wrong")   return <span style={{color:C.red,  fontSize:10,fontWeight:700}}>✗ 실패</span>;
+    return <span style={{color:C.muted,fontSize:10}}>— 중립</span>;
+  };
+
+  if(loading) return(
+    <div className="tab-content">
+      <div style={{color:C.dim,textAlign:"center",paddingTop:60}}>⟳ 데이터 로딩 중...</div>
+    </div>
+  );
+  if(err) return(
+    <div className="tab-content">
+      <div style={{color:C.red,textAlign:"center",paddingTop:60,fontSize:13}}>{err}</div>
+      <div style={{textAlign:"center",marginTop:12}}>
+        <button onClick={load} style={{padding:"8px 20px",borderRadius:8,border:`1px solid ${C.cyan}44`,
+          background:C.cyanBg,color:C.cyan,cursor:"pointer",fontSize:12}}>재시도</button>
+      </div>
+    </div>
+  );
+  if(!data) return null;
+
+  const {by_type,by_band,recent,total,evaluated,pending,overall_acc,threshold_hint,last_evaluated}=data;
+
+  return(
+    <div className="tab-content">
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+        <div style={{color:C.text,fontSize:15,fontWeight:800}}>📊 신호 적중률 트래킹</div>
+        <button onClick={load} style={{padding:"5px 12px",borderRadius:8,
+          border:`1px solid ${C.border}`,background:"transparent",
+          color:C.dim,cursor:"pointer",fontSize:11}}>새로고침</button>
+      </div>
+
+      {/* 요약 카드 */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+        {[
+          {label:"전체 신호",val:total,color:C.text},
+          {label:"평가 완료",val:evaluated,color:C.cyan},
+          {label:"평가 대기",val:pending,color:C.yellow},
+          {label:"전체 적중률",val:overall_acc!=null?`${(overall_acc*100).toFixed(1)}%`:"—",
+           color:overall_acc!=null?confColor(overall_acc):C.muted},
+        ].map(item=>(
+          <div key={item.label} style={{padding:"10px 8px",borderRadius:10,textAlign:"center",
+            background:C.cardGradient,border:`1px solid ${C.border}`}}>
+            <div style={{color:item.color,fontSize:16,fontWeight:800,fontVariantNumeric:"tabular-nums"}}>{item.val}</div>
+            <div style={{color:C.muted,fontSize:9,marginTop:3}}>{item.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* 임계값 권고 */}
+      {threshold_hint&&(
+        <div style={{padding:"10px 14px",borderRadius:10,marginBottom:14,
+          background:threshold_hint.action==="raise"?C.redBg:C.greenBg,
+          border:`1px solid ${threshold_hint.action==="raise"?C.red:C.green}44`}}>
+          <div style={{color:threshold_hint.action==="raise"?C.red:C.green,fontSize:12,fontWeight:700}}>
+            {threshold_hint.action==="raise"?"⚠️ 임계값 상향 권고":"✅ 신뢰도 임계값 양호"}
+          </div>
+          <div style={{color:C.dim,fontSize:11,marginTop:3}}>{threshold_hint.reason}</div>
+          {threshold_hint.suggested&&(
+            <div style={{color:C.muted,fontSize:10,marginTop:2}}>
+              현재 {threshold_hint.current} → 권장 {threshold_hint.suggested}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 신호 유형별 적중률 */}
+      {by_type&&Object.keys(by_type).length>0&&(
+        <div style={{padding:"12px 14px",borderRadius:12,background:C.cardGradient,
+          border:`1px solid ${C.border}`,marginBottom:14}}>
+          <div style={{color:C.dim,fontSize:10,fontWeight:700,letterSpacing:"0.06em",marginBottom:10}}>
+            신호 유형별 적중률
+          </div>
+          {Object.entries(by_type).map(([st,d])=>(
+            <div key={st} style={{marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{color:sigColor(st),fontSize:12,fontWeight:700}}>{st}</span>
+                <span style={{color:C.dim,fontSize:11}}>
+                  {d.total}건 · 적중 {(d.accuracy*100).toFixed(0)}% · 평균 {d.avg_return>0?"+":""}{d.avg_return}%
+                </span>
+              </div>
+              <div style={{height:6,borderRadius:3,background:C.border,overflow:"hidden"}}>
+                <div style={{height:"100%",borderRadius:3,
+                  background:confColor(d.accuracy),
+                  width:`${(d.accuracy*100).toFixed(0)}%`,transition:"width .4s"}}/>
+              </div>
+              <div style={{display:"flex",gap:10,marginTop:4}}>
+                <span style={{color:C.green,fontSize:10}}>✓ {d.correct}</span>
+                <span style={{color:C.red,fontSize:10}}>✗ {d.wrong}</span>
+                <span style={{color:C.muted,fontSize:10}}>— {d.neutral}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 신뢰도 구간별 적중률 */}
+      {by_band&&(
+        <div style={{padding:"12px 14px",borderRadius:12,background:C.cardGradient,
+          border:`1px solid ${C.border}`,marginBottom:14}}>
+          <div style={{color:C.dim,fontSize:10,fontWeight:700,letterSpacing:"0.06em",marginBottom:10}}>
+            신뢰도 구간별 적중률
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"auto 1fr auto auto",gap:"6px 10px",alignItems:"center"}}>
+            {Object.entries(by_band).map(([band,d])=>(
+              <React.Fragment key={band}>
+                <span style={{color:C.muted,fontSize:11,fontVariantNumeric:"tabular-nums"}}>{band}</span>
+                <div style={{height:8,borderRadius:4,background:C.border,overflow:"hidden"}}>
+                  <div style={{height:"100%",borderRadius:4,
+                    background:d.accuracy!=null?confColor(d.accuracy):C.muted,
+                    width:d.accuracy!=null?`${(d.accuracy*100).toFixed(0)}%`:"0%",transition:"width .4s"}}/>
+                </div>
+                <span style={{color:d.accuracy!=null?confColor(d.accuracy):C.muted,fontSize:11,fontWeight:700,
+                  fontVariantNumeric:"tabular-nums",textAlign:"right"}}>
+                  {d.accuracy!=null?`${(d.accuracy*100).toFixed(0)}%`:"—"}
+                </span>
+                <span style={{color:C.muted,fontSize:10,textAlign:"right"}}>({d.total}건)</span>
+              </React.Fragment>
+            ))}
+          </div>
+          <div style={{color:C.muted,fontSize:10,marginTop:8}}>
+            * 5거래일 후 ±2% 기준 (correct/wrong/neutral)
+          </div>
+        </div>
+      )}
+
+      {/* 최근 신호 20개 */}
+      {recent&&recent.length>0&&(
+        <div style={{padding:"12px 14px",borderRadius:12,background:C.cardGradient,
+          border:`1px solid ${C.border}`}}>
+          <div style={{color:C.dim,fontSize:10,fontWeight:700,letterSpacing:"0.06em",marginBottom:10}}>
+            최근 신호 이력 (최대 20개)
+          </div>
+          {recent.map((s,i)=>{
+            const oc=s.outcome;
+            return(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:8,
+                padding:"7px 0",borderBottom:i<recent.length-1?`1px solid ${C.border}33`:"none"}}>
+                <span style={{color:sigColor(s.signal_type),fontSize:10,fontWeight:700,width:72,flexShrink:0}}>{s.signal_type}</span>
+                <span style={{color:C.text,fontSize:11,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.ticker}</span>
+                <span style={{color:C.muted,fontSize:10,flexShrink:0}}>{s.confidence}%</span>
+                <span style={{color:C.dim,fontSize:10,flexShrink:0,minWidth:72,textAlign:"right"}}>
+                  {s.timestamp?s.timestamp.slice(0,10):"—"}
+                </span>
+                <span style={{width:60,textAlign:"right",flexShrink:0}}>
+                  {oc?verdictBadge(oc.verdict):<span style={{color:C.muted,fontSize:10}}>대기</span>}
+                </span>
+                {oc&&<span style={{color:oc.return_pct>=0?C.green:C.red,fontSize:10,fontWeight:700,
+                  fontVariantNumeric:"tabular-nums",width:50,textAlign:"right",flexShrink:0}}>
+                  {oc.return_pct>=0?"+":""}{oc.return_pct}%
+                </span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {evaluated===0&&(
+        <div style={{textAlign:"center",padding:"40px 20px",color:C.muted,fontSize:13}}>
+          아직 평가된 신호가 없습니다.<br/>
+          <span style={{fontSize:11,marginTop:8,display:"block",color:C.dim}}>
+            종목 분석 시 BUY/SELL 신호가 자동 기록되며,<br/>7일 후부터 결과가 평가됩니다.
+          </span>
+        </div>
+      )}
+
+      {last_evaluated&&(
+        <div style={{color:C.muted,fontSize:10,textAlign:"right",marginTop:10}}>
+          마지막 평가: {last_evaluated.slice(0,16)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
 // 사이드 네비게이션 (데스크탑)
 // ════════════════════════════════════════════
 function SideNav({tab,setTab}){
@@ -2454,6 +2665,7 @@ function SideNav({tab,setTab}){
     {id:"ranking",icon:"🏆",label:"랭킹"},
     {id:"portfolio",icon:"💼",label:"포트폴리오"},
     {id:"calendar",icon:"📅",label:"캘린더"},
+    {id:"tracking",icon:"📊",label:"트래킹"},
     {id:"settings",icon:"⚙️",label:"설정"},
   ];
   return(
@@ -2485,7 +2697,7 @@ function BottomTabBar({tab,setTab}){
     {id:"market",icon:"🏠",label:"마켓"},
     {id:"screener",icon:"🔍",label:"스크리너"},
     {id:"ranking",icon:"🏆",label:"랭킹"},
-    {id:"portfolio",icon:"💼",label:"포트폴리오"},
+    {id:"tracking",icon:"📊",label:"트래킹"},
     {id:"calendar",icon:"📅",label:"캘린더"},
     {id:"settings",icon:"⚙️",label:"설정"},
   ];
@@ -2775,6 +2987,7 @@ function App(){
         {tab==="ranking"&&<RankingPage/>}
         {tab==="portfolio"&&<PortfolioPage/>}
         {tab==="calendar"&&<CalendarPage/>}
+        {tab==="tracking"&&<TrackingPage/>}
         {tab==="settings"&&<SettingsPage/>}
       </div>
 

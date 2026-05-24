@@ -366,12 +366,13 @@ def get_stock_analysis():
         if sig_type in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL"):
             _price  = result.get("price") or 0
             _conf   = result.get("confidence") or 0
+            _name   = result.get("name") or POPULAR_STOCKS.get(ticker, {}).get("name") or ticker
             _indic  = {"rsi": result.get("rsi"), "macd_hist": result.get("macd_hist"),
                        "rs_score": result.get("rs_score")}
-            def _bg_record(t=ticker, st=sig_type, c=_conf, p=_price, i=_indic):
+            def _bg_record(t=ticker, st=sig_type, c=_conf, p=_price, i=_indic, n=_name):
                 try:
                     from signal_tracker import record_signal
-                    record_signal(t, st, c, p, i)
+                    record_signal(t, st, c, p, i, n)
                 except Exception:
                     pass
             threading.Thread(target=_bg_record, daemon=True).start()

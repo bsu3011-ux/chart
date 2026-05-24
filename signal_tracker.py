@@ -44,7 +44,8 @@ def _save(data: dict):
 # ──────────────────────────────────────────────────────────────────
 
 def record_signal(ticker: str, signal_type: str, confidence: int,
-                  price: float, indicators: dict = None) -> str:
+                  price: float, indicators: dict = None,
+                  name: str = "") -> str:
     """BUY/SELL 신호 기록 (4시간 이내 동일 종목·신호 중복 제외)
     반환: signal_id (빈 문자열이면 중복·무시됨)
     """
@@ -69,6 +70,7 @@ def record_signal(ticker: str, signal_type: str, confidence: int,
         sigs.append({
             "id":          sig_id,
             "ticker":      ticker,
+            "name":        name or ticker,
             "signal_type": signal_type,
             "confidence":  confidence,
             "price":       price,

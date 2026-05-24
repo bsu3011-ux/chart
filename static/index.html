@@ -1954,10 +1954,25 @@ function RankingPage(){
   const [loading,setLoading]=React.useState(true);
   const [sigFilter,setSigFilter]=React.useState("all");
   const [polling,setPolling]=React.useState(false);
+  const [selectedTicker,setSelectedTicker]=React.useState(null);
+  const [analysisData,setAnalysisData]=React.useState(null);
+  const [analysisLoading,setAnalysisLoading]=React.useState(false);
+
+  const openAnalysis=async(ticker)=>{
+    setSelectedTicker(ticker);
+    setAnalysisData(null);
+    setAnalysisLoading(true);
+    try{
+      const r=await fetch(`${API_BASE}/api/stock_analysis?ticker=${encodeURIComponent(ticker)}`);
+      const j=await r.json();
+      setAnalysisData(j);
+    }catch(e){}
+    setAnalysisLoading(false);
+  };
 
   const fetchRanking=(refresh=false)=>{
     setLoading(true);
-    fetch(`/api/top_stocks?n=50${refresh?"&refresh=1":""}`)
+    fetch(`/api/top_stocks?n=100${refresh?"&refresh=1":""}`)
       .then(r=>r.json())
       .then(d=>{
         setData(d);
@@ -2005,6 +2020,37 @@ function RankingPage(){
 
   return(
     <div style={{paddingBottom:80}}>
+      {/* 종목 분석 모달 */}
+      {selectedTicker&&(
+        <div onClick={e=>{if(e.target===e.currentTarget)setSelectedTicker(null);}}
+          style={{position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,0.75)",
+            backdropFilter:"blur(6px)",WebkitBackdropFilter:"blur(6px)",
+            display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+          <div style={{width:"100%",maxWidth:520,maxHeight:"90vh",overflowY:"auto",
+            borderRadius:"20px 20px 0 0",background:C.surface,
+            border:`1px solid ${C.border}`,padding:"16px 14px 32px",
+            animation:"slideUp .25s ease"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{color:C.muted,fontSize:11}}>{selectedTicker}</div>
+              <button onClick={()=>setSelectedTicker(null)} style={{background:"none",border:"none",
+                color:C.muted,fontSize:18,cursor:"pointer",padding:"0 4px"}}>✕</button>
+            </div>
+            {analysisLoading&&(
+              <div style={{textAlign:"center",padding:"40px 0",color:C.cyan}}>
+                <div style={{fontSize:28,marginBottom:8,animation:"spin .7s linear infinite"}}>⟳</div>
+                <div style={{fontSize:12}}>분석 중...</div>
+              </div>
+            )}
+            {!analysisLoading&&analysisData&&!analysisData.error&&(
+              <StockResultCard data={analysisData} onChart={()=>{}} onClose={()=>setSelectedTicker(null)}/>
+            )}
+            {!analysisLoading&&analysisData?.error&&(
+              <div style={{color:C.red,textAlign:"center",padding:20,fontSize:13}}>{analysisData.error}</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 헤더 */}
       <div style={{padding:"16px 16px 8px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
@@ -2056,10 +2102,12 @@ function RankingPage(){
         const chgCol=(r.change_pct||0)>=0?C.green:C.red;
         const rsCol=(r.rs_score||50)>=70?C.green:(r.rs_score||50)<=30?C.red:C.yellow;
         return(
-          <div key={r.ticker} style={{
+          <div key={r.ticker} onClick={()=>openAnalysis(r.ticker)} style={{
             margin:"0 12px 10px",padding:"12px 14px",borderRadius:12,
             background:C.card,border:`1px solid ${i<3?confCol+"44":C.border+"33"}`,
-            position:"relative"}}>
+            position:"relative",cursor:"pointer",transition:"background .15s"}}
+            onMouseEnter={e=>e.currentTarget.style.background=C.elevated}
+            onMouseLeave={e=>e.currentTarget.style.background=C.card}>
 
             {/* 순위 + 종목명 */}
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
@@ -2776,7 +2824,10 @@ function TrackingPage(){
               <div key={i} style={{display:"flex",alignItems:"center",gap:8,
                 padding:"7px 0",borderBottom:i<recent.length-1?`1px solid ${C.border}33`:"none"}}>
                 <span style={{color:sigColor(s.signal_type),fontSize:10,fontWeight:700,width:72,flexShrink:0}}>{s.signal_type}</span>
-                <span style={{color:C.text,fontSize:11,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.ticker}</span>
+                <div style={{flex:1,minWidth:0,overflow:"hidden"}}>
+                  <div style={{color:C.text,fontSize:11,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name&&s.name!==s.ticker?s.name:s.ticker}</div>
+                  {s.name&&s.name!==s.ticker&&<div style={{color:C.muted,fontSize:9,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.ticker}</div>}
+                </div>
                 <span style={{color:C.muted,fontSize:10,flexShrink:0}}>{s.confidence}%</span>
                 <span style={{color:C.dim,fontSize:10,flexShrink:0,minWidth:72,textAlign:"right"}}>
                   {s.timestamp?s.timestamp.slice(0,10):"—"}

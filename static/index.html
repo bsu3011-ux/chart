@@ -1707,23 +1707,42 @@ function StockResultCard({data:d,onChart,onClose}){
                   );
                 })}
               </div>
-              {/* 체결강도 바 */}
-              {cttr>0&&(
-                <div>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                    <span style={{color:C.muted,fontSize:9}}>체결강도</span>
-                    <span style={{color:cttrCol,fontSize:10,fontWeight:700}}>{cttr}%
-                      <span style={{color:C.muted,fontWeight:400}}> ({cttr>=70?"강한 매수":cttr>=55?"매수 우위":cttr<=30?"강한 매도":cttr<=45?"매도 우위":"중립"})</span>
-                    </span>
-                  </div>
-                  <div style={{position:"relative",height:6,background:C.border,borderRadius:3,overflow:"hidden"}}>
-                    <div style={{position:"absolute",left:0,top:0,bottom:0,
-                      width:`${Math.min(cttr,100)}%`,background:cttrCol,borderRadius:3,transition:"width .4s"}}/>
-                    <div style={{position:"absolute",left:"50%",top:0,bottom:0,
-                      width:1,background:C.muted+"66"}}/>
-                  </div>
+              {/* 체결강도 + 거래량 */}
+              <div style={{marginTop:4}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                  <span style={{color:C.muted,fontSize:9}}>체결강도</span>
+                  {cttr>0
+                    ?<span style={{color:cttrCol,fontSize:10,fontWeight:700}}>{cttr}%
+                        <span style={{color:C.muted,fontWeight:400}}> ({cttr>=70?"강한 매수":cttr>=55?"매수 우위":cttr<=30?"강한 매도":cttr<=45?"매도 우위":"중립"})</span>
+                      </span>
+                    :<span style={{color:C.dim,fontSize:9}}>장마감</span>
+                  }
                 </div>
-              )}
+                <div style={{position:"relative",height:6,background:C.border,borderRadius:3,overflow:"hidden"}}>
+                  <div style={{position:"absolute",left:0,top:0,bottom:0,
+                    width:`${Math.min(cttr,100)}%`,background:cttr>0?cttrCol:C.border,borderRadius:3,transition:"width .4s"}}/>
+                  <div style={{position:"absolute",left:"50%",top:0,bottom:0,
+                    width:1,background:C.muted+"66"}}/>
+                </div>
+                {/* 거래량 */}
+                {(trd.acml_vol>0||trd.prdy_vol>0)&&(
+                  <div style={{display:"flex",gap:8,marginTop:5}}>
+                    <span style={{color:C.dim,fontSize:9}}>당일 거래량
+                      <span style={{color:C.text,marginLeft:4,fontWeight:600}}>
+                        {trd.acml_vol>=10000?(trd.acml_vol/10000).toFixed(1)+"만주":trd.acml_vol?.toLocaleString()+"주"}
+                      </span>
+                    </span>
+                    {trd.vol_vs_prev!=null&&(
+                      <span style={{color:C.dim,fontSize:9}}>전일比
+                        <span style={{color:trd.vol_vs_prev>=1.5?C.green:trd.vol_vs_prev<=0.5?C.red:C.muted,
+                          marginLeft:4,fontWeight:600}}>
+                          {(trd.vol_vs_prev*100).toFixed(0)}%
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           );
         })()}

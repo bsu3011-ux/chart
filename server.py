@@ -313,12 +313,22 @@ def status():
         mtime = os.path.getmtime(SIGNALS_FILE)
         last_updated = datetime.datetime.fromtimestamp(mtime).isoformat()
     
+    try:
+        commit = subprocess.check_output(
+            ['git', 'rev-parse', '--short', 'HEAD'], cwd=BASE_DIR, text=True
+        ).strip()
+    except Exception:
+        commit = "unknown"
+
+    import kis_api as _ka
     return jsonify({
         "status": "running",
-        "version": "4.0",
+        "version": "4.1",
+        "commit": commit,
         "markets": len(MARKETS),
         "last_updated": last_updated,
         "signals_file": SIGNALS_FILE,
+        "kis_available": _ka.is_available(),
     })
 
 

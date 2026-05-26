@@ -1963,6 +1963,8 @@ function RankingPage(){
   const [selectedTicker,setSelectedTicker]=React.useState(null);
   const [analysisData,setAnalysisData]=React.useState(null);
   const [analysisLoading,setAnalysisLoading]=React.useState(false);
+  const [quickAdd,setQuickAdd]=React.useState(null);
+  const [qaForm,setQaForm]=React.useState({quantity:"",buyPrice:""});
 
   const openAnalysis=async(ticker)=>{
     setSelectedTicker(ticker);
@@ -2202,6 +2204,12 @@ function RankingPage(){
                   {r.fundamental_label}
                 </span>
               )}
+              {/* 담기 버튼 */}
+              <button onClick={e=>{e.stopPropagation();setQuickAdd({ticker:r.ticker,name:r.name,flag:r.flag||"",price:r.price});setQaForm({quantity:"",buyPrice:r.price?String(r.price):""});}}
+                style={{marginTop:4,padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,
+                  background:C.green+"15",border:`1px solid ${C.green}44`,color:C.green,cursor:"pointer"}}>
+                💼 담기
+              </button>
             </div>
           </div>
         );
@@ -2210,6 +2218,72 @@ function RankingPage(){
       {data?.status==="ok"&&ranking.length===0&&(
         <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:13}}>
           해당 조건의 종목이 없습니다
+        </div>
+      )}
+
+      {/* 빠른 담기 모달 */}
+      {quickAdd&&(
+        <div onClick={e=>{if(e.target===e.currentTarget)setQuickAdd(null);}}
+          style={{position:"fixed",inset:0,zIndex:600,background:"rgba(0,0,0,0.8)",
+            backdropFilter:"blur(6px)",WebkitBackdropFilter:"blur(6px)",
+            display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+          <div style={{width:"100%",maxWidth:480,borderRadius:"20px 20px 0 0",
+            background:C.surface,border:`1px solid ${C.border}`,
+            padding:"20px 16px 36px",animation:"slideUp .2s ease"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:22}}>{quickAdd.flag}</span>
+                <div>
+                  <div style={{color:C.text,fontSize:14,fontWeight:800}}>{quickAdd.name}</div>
+                  <div style={{color:C.muted,fontSize:10}}>{quickAdd.ticker}</div>
+                </div>
+              </div>
+              <button onClick={()=>setQuickAdd(null)} style={{background:"none",border:"none",color:C.muted,fontSize:18,cursor:"pointer"}}>✕</button>
+            </div>
+            {quickAdd.price&&(
+              <div style={{marginBottom:12,padding:"8px 12px",borderRadius:8,
+                background:C.card,border:`1px solid ${C.border}`,fontSize:12,color:C.dim}}>
+                현재가: <span style={{color:C.cyan,fontWeight:700}}>
+                  {(quickAdd.ticker.endsWith(".KS")||quickAdd.ticker.endsWith(".KQ"))
+                    ?Math.round(quickAdd.price).toLocaleString("ko-KR")+"원"
+                    :"$"+quickAdd.price.toFixed(2)}
+                </span>
+              </div>
+            )}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+              <div>
+                <div style={{color:C.muted,fontSize:10,marginBottom:4}}>수량 (주)</div>
+                <input value={qaForm.quantity} onChange={e=>setQaForm(p=>({...p,quantity:e.target.value}))}
+                  placeholder="예: 10" type="number" min="0"
+                  style={{width:"100%",padding:"10px 12px",borderRadius:8,boxSizing:"border-box",
+                    background:C.elevated,border:`1px solid ${C.border}`,color:C.text,fontSize:14}}/>
+              </div>
+              <div>
+                <div style={{color:C.muted,fontSize:10,marginBottom:4}}>매수가</div>
+                <input value={qaForm.buyPrice} onChange={e=>setQaForm(p=>({...p,buyPrice:e.target.value}))}
+                  placeholder="매수가" type="number" min="0"
+                  style={{width:"100%",padding:"10px 12px",borderRadius:8,boxSizing:"border-box",
+                    background:C.elevated,border:`1px solid ${C.border}`,color:C.text,fontSize:14}}/>
+              </div>
+            </div>
+            <button onClick={()=>{
+              if(!qaForm.quantity||!qaForm.buyPrice) return;
+              const LS_KEY="trading_bot_portfolio";
+              const ex=JSON.parse(localStorage.getItem(LS_KEY)||"[]");
+              ex.push({ticker:quickAdd.ticker,name:quickAdd.name,flag:quickAdd.flag,
+                quantity:parseFloat(qaForm.quantity),buyPrice:parseFloat(qaForm.buyPrice),
+                addedAt:new Date().toISOString()});
+              localStorage.setItem(LS_KEY,JSON.stringify(ex));
+              setQuickAdd(null);
+              alert(`✅ ${quickAdd.name} 포트폴리오에 추가됐습니다`);
+            }} disabled={!qaForm.quantity||!qaForm.buyPrice}
+              style={{width:"100%",padding:"12px",borderRadius:10,fontSize:13,fontWeight:800,cursor:"pointer",
+                background:(!qaForm.quantity||!qaForm.buyPrice)?C.surface:C.green+"22",
+                border:`1px solid ${(!qaForm.quantity||!qaForm.buyPrice)?C.border:C.green}55`,
+                color:(!qaForm.quantity||!qaForm.buyPrice)?C.muted:C.green}}>
+              💼 포트폴리오에 담기
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -2324,12 +2398,374 @@ function PortfolioPage(){
     try{return JSON.parse(localStorage.getItem(LS_KEY)||"[]");}catch(e){return [];}
   });
   const [prices,setPrices]=useState({});
-  const [form,setForm]=useState({ticker:"",name:"",quantity:"",buyPrice:""});
+  const [signals,setSignals]=useState({});
+  const [form,setForm]=useState({ticker:"",name:"",flag:"",quantity:"",buyPrice:""});
   const [adding,setAdding]=useState(false);
   const [searching,setSearching]=useState(false);
   const [sugg,setSugg]=useState([]);
   const [fetching,setFetching]=useState(false);
+  const [sigLoading,setSigLoading]=useState(false);
+  const [subTab,setSubTab]=useState("holdings");
   const debRef=useRef(null);
+
+  useEffect(()=>{localStorage.setItem(LS_KEY,JSON.stringify(holdings));},[holdings]);
+
+  const fmtP=(v,ticker)=>{
+    if(v==null||v===0) return "-";
+    const isKR=ticker&&(ticker.endsWith(".KS")||ticker.endsWith(".KQ"));
+    if(isKR) return Math.round(v).toLocaleString("ko-KR")+"원";
+    return v>=1?"$"+v.toLocaleString("en-US",{maximumFractionDigits:2}):"$"+v.toFixed(4);
+  };
+
+  const fetchPrices=useCallback(async()=>{
+    if(!holdings.length) return;
+    setFetching(true);
+    const updated={};
+    await Promise.all(holdings.map(async h=>{
+      try{
+        const r=await fetch(`${API_BASE}/api/chart?ticker=${encodeURIComponent(h.ticker)}&interval=1d`);
+        const d=await r.json();
+        const cands=d.candles||[];
+        if(cands.length) updated[h.ticker]=cands[cands.length-1].close;
+      }catch(e){}
+    }));
+    setPrices(p=>({...p,...updated}));setFetching(false);
+  },[holdings]);
+
+  const fetchSignals=useCallback(async()=>{
+    if(!holdings.length) return;
+    setSigLoading(true);
+    const updated={};
+    await Promise.all(holdings.map(async h=>{
+      try{
+        const r=await fetch(`${API_BASE}/api/stock_analysis?ticker=${encodeURIComponent(h.ticker)}`);
+        const d=await r.json();
+        updated[h.ticker]=d;
+        if(d.price) setPrices(p=>({...p,[h.ticker]:d.price}));
+      }catch(e){}
+    }));
+    setSignals(updated);setSigLoading(false);
+  },[holdings]);
+
+  useEffect(()=>{fetchPrices();},[]);
+
+  const fetchSugg=useCallback((q)=>{
+    clearTimeout(debRef.current);
+    if(!q){setSugg([]);return;}
+    debRef.current=setTimeout(async()=>{
+      try{
+        const r=await fetch(`${API_BASE}/api/search_stocks?q=${encodeURIComponent(q)}`);
+        const j=await r.json();setSugg(j.results||[]);setSearching(true);
+      }catch(e){}
+    },280);
+  },[]);
+
+  const addHolding=()=>{
+    if(!form.ticker||!form.quantity||!form.buyPrice) return;
+    setHoldings(p=>[...p,{
+      ticker:form.ticker, name:form.name||form.ticker, flag:form.flag||"",
+      quantity:parseFloat(form.quantity), buyPrice:parseFloat(form.buyPrice),
+      addedAt:new Date().toISOString()
+    }]);
+    setForm({ticker:"",name:"",flag:"",quantity:"",buyPrice:""});
+    setAdding(false);setSugg([]);
+  };
+
+  const removeHolding=(idx)=>setHoldings(p=>p.filter((_,i)=>i!==idx));
+
+  const sellAlerts=holdings.filter(h=>{
+    const s=signals[h.ticker];
+    return s&&(s.signal_type==="SELL"||s.signal_type==="STRONG_SELL");
+  });
+
+  const totalBuy=holdings.reduce((a,h)=>a+h.buyPrice*h.quantity,0);
+  const totalNow=holdings.reduce((a,h)=>a+(prices[h.ticker]||h.buyPrice)*h.quantity,0);
+  const totalPnl=totalNow-totalBuy;
+  const totalPnlPct=totalBuy>0?(totalPnl/totalBuy*100):0;
+
+  const subSt=(t)=>({
+    flex:1,padding:"8px 0",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",
+    border:`1px solid ${subTab===t?C.cyan+"55":C.border}`,
+    background:subTab===t?C.cyan+"18":"transparent",
+    color:subTab===t?C.cyan:C.muted,
+  });
+
+  return(
+    <div className="tab-content">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={{color:C.text,fontSize:15,fontWeight:800}}>💼 내 포트폴리오</div>
+        <button onClick={()=>setAdding(v=>!v)} style={{
+          padding:"5px 10px",borderRadius:8,fontSize:10,fontWeight:700,cursor:"pointer",
+          border:`1px solid ${C.green}44`,background:C.green+"12",color:C.green}}>
+          {adding?"취소":"+ 종목 담기"}
+        </button>
+      </div>
+
+      {/* 서브탭 */}
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        <button style={subSt("holdings")} onClick={()=>setSubTab("holdings")}>
+          💼 보유종목{holdings.length>0?` (${holdings.length})`:""}
+        </button>
+        <button style={{...subSt("signals"),position:"relative"}}
+          onClick={()=>{setSubTab("signals");if(!Object.keys(signals).length&&holdings.length)fetchSignals();}}>
+          🚨 매도신호
+          {sellAlerts.length>0&&(
+            <span style={{position:"absolute",top:-4,right:-4,background:C.red,color:"#fff",
+              fontSize:9,fontWeight:800,borderRadius:8,padding:"1px 4px",minWidth:14,textAlign:"center"}}>
+              {sellAlerts.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* 종목 추가 폼 */}
+      {adding&&(
+        <div style={{padding:"12px",borderRadius:12,background:C.surface,
+          border:`1px solid ${C.border}`,marginBottom:12}}>
+          <div style={{color:C.dim,fontSize:11,fontWeight:700,marginBottom:8}}>📌 종목 추가</div>
+          <div style={{position:"relative",marginBottom:8}}>
+            <input value={form.ticker}
+              onChange={e=>{setForm(p=>({...p,ticker:e.target.value,name:"",flag:""}));fetchSugg(e.target.value);}}
+              onBlur={()=>setTimeout(()=>setSearching(false),150)}
+              placeholder="티커 또는 종목명 (AAPL, 삼성전자, 005930...)"
+              style={{width:"100%",padding:"9px 12px",borderRadius:8,boxSizing:"border-box",
+                background:C.elevated,border:`1px solid ${C.border}`,color:C.text,fontSize:13}}/>
+            {searching&&sugg.length>0&&(
+              <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,right:0,
+                background:C.elevated,borderRadius:8,border:`1px solid ${C.border}`,zIndex:100,overflow:"hidden"}}>
+                {sugg.slice(0,6).map((s,i)=>(
+                  <div key={s.ticker} onMouseDown={()=>{setForm(p=>({...p,ticker:s.ticker,name:s.name,flag:s.flag||""}));setSearching(false);setSugg([]);}}
+                    style={{display:"flex",gap:8,padding:"8px 12px",cursor:"pointer",
+                      borderBottom:i<5?`1px solid ${C.border}44`:"none"}}
+                    onMouseEnter={e=>e.currentTarget.style.background=C.card}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <span style={{fontSize:16}}>{s.flag}</span>
+                    <div style={{flex:1}}>
+                      <div style={{color:C.text,fontSize:12,fontWeight:600}}>{s.name}</div>
+                      <div style={{color:C.muted,fontSize:10}}>{s.ticker}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+            <input value={form.quantity} onChange={e=>setForm(p=>({...p,quantity:e.target.value}))}
+              placeholder="수량 (주)" type="number" min="0"
+              style={{padding:"9px 12px",borderRadius:8,background:C.elevated,
+                border:`1px solid ${C.border}`,color:C.text,fontSize:13}}/>
+            <input value={form.buyPrice} onChange={e=>setForm(p=>({...p,buyPrice:e.target.value}))}
+              placeholder="매수가" type="number" min="0"
+              style={{padding:"9px 12px",borderRadius:8,background:C.elevated,
+                border:`1px solid ${C.border}`,color:C.text,fontSize:13}}/>
+          </div>
+          <button onClick={addHolding} disabled={!form.ticker||!form.quantity||!form.buyPrice}
+            style={{width:"100%",padding:"10px",borderRadius:8,
+              background:(!form.ticker||!form.quantity||!form.buyPrice)?C.surface:C.green+"22",
+              border:`1px solid ${(!form.ticker||!form.quantity||!form.buyPrice)?C.border:C.green}44`,
+              color:(!form.ticker||!form.quantity||!form.buyPrice)?C.muted:C.green,
+              fontSize:12,fontWeight:700,cursor:"pointer"}}>
+            ✅ 포트폴리오에 추가
+          </button>
+        </div>
+      )}
+
+      {/* ── 보유종목 탭 ── */}
+      {subTab==="holdings"&&(
+        <>
+          {holdings.length>0&&(
+            <div style={{padding:"10px 14px",borderRadius:12,background:C.cardGradient,
+              border:`1px solid ${totalPnl>=0?C.green+"44":C.red+"44"}`,marginBottom:12}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,textAlign:"center"}}>
+                <div>
+                  <div style={{color:C.muted,fontSize:9}}>보유 종목</div>
+                  <div style={{color:C.text,fontSize:18,fontWeight:900}}>{holdings.length}</div>
+                </div>
+                <div>
+                  <div style={{color:C.muted,fontSize:9}}>총 수익률</div>
+                  <div style={{color:totalPnl>=0?C.green:C.red,fontSize:18,fontWeight:900}}>
+                    {totalPnlPct>=0?"+":""}{totalPnlPct.toFixed(2)}%
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  <button onClick={fetchPrices} disabled={fetching} style={{
+                    padding:"6px 10px",borderRadius:8,border:`1px solid ${C.cyan}44`,
+                    background:C.cyan+"12",color:C.cyan,fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                    {fetching?"⟳":"🔄"} 현재가
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {holdings.length===0&&!adding&&(
+            <div style={{textAlign:"center",padding:"50px 20px",color:C.muted}}>
+              <div style={{fontSize:36,marginBottom:10}}>💼</div>
+              <div style={{fontSize:13}}>보유 종목이 없습니다</div>
+              <div style={{fontSize:11,marginTop:6,color:C.dim,lineHeight:1.6}}>
+                랭킹 탭 카드의 💼 담기 버튼이나<br/>위 종목 담기 버튼으로 추가하세요
+              </div>
+            </div>
+          )}
+
+          {holdings.map((h,i)=>{
+            const cur=prices[h.ticker]||h.buyPrice;
+            const pnl=(cur-h.buyPrice)*h.quantity;
+            const pnlPct=(cur-h.buyPrice)/h.buyPrice*100;
+            const isKR=h.ticker.endsWith(".KS")||h.ticker.endsWith(".KQ");
+            return(
+              <div key={i} style={{padding:"12px",borderRadius:12,marginBottom:8,
+                background:C.cardGradient,
+                border:`1px solid ${pnl>=0?C.green+"44":C.red+"44"}`,
+                borderLeft:`3px solid ${pnl>=0?C.green:C.red}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={{display:"flex",alignItems:"center",gap:7}}>
+                    {h.flag&&<span style={{fontSize:20}}>{h.flag}</span>}
+                    <div>
+                      <div style={{color:C.text,fontSize:13,fontWeight:700}}>{h.name}</div>
+                      <div style={{color:C.muted,fontSize:10}}>
+                        {h.ticker} · {h.quantity}{isKR?"주":"개"} · 매수 {fmtP(h.buyPrice,h.ticker)}
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={()=>removeHolding(i)} style={{background:"none",border:"none",
+                    color:C.muted,cursor:"pointer",fontSize:18,padding:"0 2px"}}>🗑</button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,textAlign:"center"}}>
+                  <div style={{padding:"6px",borderRadius:8,background:"rgba(255,255,255,0.02)",border:`1px solid ${C.border}`}}>
+                    <div style={{color:C.muted,fontSize:8}}>매수가</div>
+                    <div style={{color:C.text,fontSize:11,fontWeight:700}}>{fmtP(h.buyPrice,h.ticker)}</div>
+                  </div>
+                  <div style={{padding:"6px",borderRadius:8,background:"rgba(255,255,255,0.02)",border:`1px solid ${C.border}`}}>
+                    <div style={{color:C.muted,fontSize:8}}>현재가</div>
+                    <div style={{color:C.text,fontSize:11,fontWeight:700}}>{fmtP(cur,h.ticker)}</div>
+                  </div>
+                  <div style={{padding:"6px",borderRadius:8,
+                    background:pnl>=0?C.greenBg:C.redBg,border:`1px solid ${pnl>=0?C.green:C.red}33`}}>
+                    <div style={{color:C.muted,fontSize:8}}>손익</div>
+                    <div style={{color:pnl>=0?C.green:C.red,fontSize:13,fontWeight:800}}>
+                      {pnlPct>=0?"+":""}{pnlPct.toFixed(2)}%
+                    </div>
+                  </div>
+                </div>
+                {h.addedAt&&<div style={{color:C.muted,fontSize:9,marginTop:6,textAlign:"right"}}>
+                  추가일: {h.addedAt.slice(0,10)}
+                </div>}
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* ── 매도신호 탭 ── */}
+      {subTab==="signals"&&(
+        <>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{color:C.dim,fontSize:11}}>보유 종목의 현재 매도 신호 모니터링</div>
+            <button onClick={fetchSignals} disabled={sigLoading} style={{
+              padding:"5px 12px",borderRadius:8,border:`1px solid ${C.cyan}44`,
+              background:C.cyan+"12",color:C.cyan,fontSize:10,fontWeight:700,cursor:"pointer"}}>
+              {sigLoading?"⟳ 분석 중...":"🔄 신호 확인"}
+            </button>
+          </div>
+
+          {holdings.length===0&&(
+            <div style={{textAlign:"center",padding:40,color:C.muted,fontSize:13}}>
+              보유 종목 탭에서 먼저 종목을 추가해주세요
+            </div>
+          )}
+
+          {sellAlerts.length>0&&(
+            <div style={{padding:"10px 14px",borderRadius:10,marginBottom:12,
+              background:C.redBg,border:`1px solid ${C.red}55`}}>
+              <div style={{color:C.red,fontSize:13,fontWeight:800,marginBottom:6}}>
+                🚨 매도 신호 {sellAlerts.length}개 종목
+              </div>
+              {sellAlerts.map(h=>(
+                <div key={h.ticker} style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}>
+                  <span style={{fontSize:16}}>{h.flag}</span>
+                  <span style={{color:C.red,fontSize:12,fontWeight:700}}>{h.name}</span>
+                  <span style={{color:C.muted,fontSize:10}}>— {signals[h.ticker]?.signal_text}</span>
+                  <span style={{marginLeft:"auto",color:C.red,fontSize:10,fontWeight:700}}>
+                    신뢰도 {signals[h.ticker]?.confidence}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!sigLoading&&Object.keys(signals).length===0&&holdings.length>0&&(
+            <div style={{textAlign:"center",padding:"30px 20px",color:C.dim,fontSize:12,
+              background:C.surface,borderRadius:12,border:`1px solid ${C.border}`}}>
+              🔄 신호 확인 버튼을 눌러주세요<br/>
+              <span style={{fontSize:10,color:C.muted}}>종목당 5~10초 소요</span>
+            </div>
+          )}
+
+          {holdings.map((h,i)=>{
+            const s=signals[h.ticker];
+            const cur=s?.price||prices[h.ticker]||h.buyPrice;
+            const pnlPct=h.buyPrice>0?(cur-h.buyPrice)/h.buyPrice*100:0;
+            const sigType=s?.signal_type||"NEUTRAL";
+            const sty=SIG[sigType]||SIG.NEUTRAL;
+            const isSell=sigType==="SELL"||sigType==="STRONG_SELL";
+            const isBuy=sigType==="BUY"||sigType==="STRONG_BUY";
+            return(
+              <div key={i} style={{padding:"12px",borderRadius:12,marginBottom:8,
+                background:C.cardGradient,
+                border:`1px solid ${isSell?C.red+"55":isBuy?C.green+"33":C.border}`,
+                borderLeft:`3px solid ${isSell?C.red:isBuy?C.green:C.muted}`,
+                opacity:sigLoading?0.5:1,transition:"opacity .3s"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:s?8:0}}>
+                  {h.flag&&<span style={{fontSize:18}}>{h.flag}</span>}
+                  <div style={{flex:1}}>
+                    <div style={{color:C.text,fontSize:13,fontWeight:700}}>{h.name}</div>
+                    <div style={{color:C.muted,fontSize:10}}>{h.ticker} · 매수가 {fmtP(h.buyPrice,h.ticker)}</div>
+                  </div>
+                  {s?(
+                    <div style={{textAlign:"right"}}>
+                      <div style={{padding:"3px 8px",borderRadius:6,fontSize:10,fontWeight:800,
+                        background:`${sty.c}18`,color:sty.c,border:`1px solid ${sty.c}33`}}>
+                        {s.signal_text||sigType}
+                      </div>
+                      <div style={{color:sty.c,fontSize:10,marginTop:2}}>신뢰도 {s.confidence}</div>
+                    </div>
+                  ):(
+                    <span style={{color:C.muted,fontSize:11,fontStyle:"italic"}}>미확인</span>
+                  )}
+                </div>
+                {s&&(
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:4}}>
+                    {[
+                      {label:"현재가",val:fmtP(cur,h.ticker),color:C.text},
+                      {label:"RSI",val:s.rsi?.toFixed(0)||"-",color:s.rsi>70?C.red:s.rsi<30?C.green:C.cyan},
+                      {label:"MA50",val:s.price>s.ma50?"위":"아래",color:s.price>s.ma50?C.green:C.red},
+                      {label:"손익",val:`${pnlPct>=0?"+":""}${pnlPct.toFixed(1)}%`,color:pnlPct>=0?C.green:C.red},
+                    ].map(({label,val,color})=>(
+                      <div key={label} style={{textAlign:"center",padding:"5px 2px",borderRadius:6,
+                        background:"rgba(255,255,255,0.025)",border:`1px solid ${C.border}33`}}>
+                        <div style={{color:C.muted,fontSize:8}}>{label}</div>
+                        <div style={{color,fontSize:11,fontWeight:700}}>{val}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {s?.analysis_text&&isSell&&(
+                  <div style={{marginTop:8,padding:"7px 10px",borderRadius:8,
+                    background:"rgba(239,68,68,0.08)",border:`1px solid ${C.red}33`}}>
+                    <div style={{color:C.red,fontSize:10,lineHeight:1.6}}>
+                      {s.analysis_text.length>150?s.analysis_text.slice(0,150)+"…":s.analysis_text}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
 
   // 저장
   useEffect(()=>{

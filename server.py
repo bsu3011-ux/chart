@@ -61,38 +61,97 @@ def _load_krx_cache():
             pass
     return False
 
-def _fetch_krx_via_http() -> dict:
-    """KRX 정보데이터시스템 API로 코스피·코스닥 전종목 조회 (외부 라이브러리 불필요)"""
-    import urllib.request, urllib.parse
+def _fetch_via_naver() -> dict:
+    """네이버 금융 시세 페이지에서 코스피·코스닥 전종목 수집 (외부 패키지·인증 불필요)"""
+    import re, http.cookiejar
+    from html import unescape
+    stocks: dict = {}
+
+    cj      = http.cookiejar.CookieJar()
+    opener  = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    HEADERS = {
+        "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer":         "https://finance.naver.com/",
+    }
+    # 초기 요청으로 쿠키 획득
+    try:
+        opener.open(urllib.request.Request("https://finance.naver.com/sise/", headers=HEADERS), timeout=10)
+    except Exception:
+        pass
+
+    for sosok, market, suffix in (("0", "KOSPI", ".KS"), ("1", "KOSDAQ", ".KQ")):
+        page, empty_streak = 1, 0
+        while empty_streak < 2:
+            try:
+                url = (f"https://finance.naver.com/sise/sise_market_sum.nhn"
+                       f"?sosok={sosok}&page={page}")
+                req = urllib.request.Request(url, headers=HEADERS)
+                with opener.open(req, timeout=15) as r:
+                    raw = r.read()
+                try:
+                    body = raw.decode("euc-kr")
+                except Exception:
+                    body = raw.decode("utf-8", errors="replace")
+                found = re.findall(
+                    r'href="/item/main\.nhn\?code=(\d{6})"[^>]*>\s*([^<]{1,40})\s*</a>',
+                    body
+                )
+                new = 0
+                for code, name in found:
+                    t = code + suffix
+                    if t not in stocks:
+                        stocks[t] = {"name": unescape(name.strip()), "market": market}
+                        new += 1
+                empty_streak = 0 if new else empty_streak + 1
+                page += 1
+                time.sleep(0.1)
+            except Exception as e:
+                print(f"[NAVER] {market} p{page}: {e}")
+                break
+        cnt = sum(1 for k in stocks if k.endswith(suffix))
+        print(f"[NAVER] {market}: {cnt}개")
+    return stocks
+
+
+def _fetch_krx_via_post() -> dict:
+    """KRX 정보데이터시스템 POST API로 코스피·코스닥 전종목 조회"""
     stocks: dict = {}
     for mkt_id, market, suffix in (("STK", "KOSPI", ".KS"), ("KSQ", "KOSDAQ", ".KQ")):
         try:
-            params = urllib.parse.urlencode({
-                "bld":          "dbms/MDC/STAT/standard/MDCSTAT01901",
-                "mktId":        mkt_id,
-                "share":        "1",
-                "csvxls_isNo":  "false",
-            })
-            url = f"http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd?{params}"
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer":    "http://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd",
-            })
+            body = urllib.parse.urlencode({
+                "bld":         "dbms/MDC/STAT/standard/MDCSTAT01901",
+                "mktId":       mkt_id,
+                "share":       "1",
+                "csvxls_isNo": "false",
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                "http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd",
+                data=body,
+                headers={
+                    "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer":         "http://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd",
+                    "Content-Type":    "application/x-www-form-urlencoded; charset=UTF-8",
+                    "X-Requested-With":"XMLHttpRequest",
+                    "Accept":          "application/json, text/javascript, */*; q=0.01",
+                },
+            )
             with urllib.request.urlopen(req, timeout=20) as r:
                 data = json.loads(r.read())
             for item in data.get("OutBlock_1", []):
                 code = item.get("ISU_SRT_CD", "").strip()
                 name = item.get("ISU_ABBRV", "").strip()
                 if code and name and len(code) == 6:
-                    stocks[code + suffix] = {"name": name, "market": market, "krx_code": code}
-            print(f"[KRX HTTP] {market}: {len([k for k in stocks if k.endswith(suffix)])}개")
+                    stocks[code + suffix] = {"name": name, "market": market}
+            print(f"[KRX POST] {market}: {sum(1 for k in stocks if k.endswith(suffix))}개")
         except Exception as e:
-            print(f"[KRX HTTP] {market} 조회 실패: {e}")
+            print(f"[KRX POST] {market} 실패: {e}")
     return stocks
 
 
 def _build_krx_cache():
-    """KRX 전종목 목록 수집 (FDR → pykrx → KRX HTTP API 순으로 시도)"""
+    """KRX 전종목 목록 수집 (FDR → KRX POST → 네이버 금융 순으로 시도)"""
     global _krx_cache
     stocks: dict = {}
     try:
@@ -107,24 +166,18 @@ def _build_krx_cache():
                 code = str(row[code_col]).zfill(6)
                 name = str(row[name_col])
                 stocks[code + suffix] = {"name": name, "market": market, "krx_code": code}
+        print(f"[KRX] FDR 성공: {len(stocks)}개")
     except Exception as e1:
-        print(f"[KRX] FDR 실패: {e1} — pykrx 시도")
-        try:
-            from pykrx import stock as krx_stock
-            import datetime as dt
-            today = dt.date.today().strftime("%Y%m%d")
-            for market, suffix in (("KOSPI", ".KS"), ("KOSDAQ", ".KQ")):
-                try:
-                    tickers = krx_stock.get_market_ticker_list(today, market=market)
-                except Exception:
-                    tickers = krx_stock.get_market_ticker_list(
-                        (dt.date.today()-dt.timedelta(days=1)).strftime("%Y%m%d"), market=market)
-                for t in tickers:
-                    name = krx_stock.get_market_ticker_name(t)
-                    stocks[t + suffix] = {"name": name, "market": market, "krx_code": t}
-        except Exception as e2:
-            print(f"[KRX] pykrx도 실패: {e2} — KRX HTTP API 시도")
-            stocks = _fetch_krx_via_http()
+        print(f"[KRX] FDR 실패: {e1} — KRX POST API 시도")
+        stocks = _fetch_krx_via_post()
+        if not stocks:
+            print("[KRX] KRX POST 실패 — 네이버 금융 시도")
+            try:
+                stocks = _fetch_via_naver()
+                if stocks:
+                    print(f"[KRX] 네이버 금융 성공: {len(stocks)}개")
+            except Exception as e2:
+                print(f"[KRX] 네이버 금융도 실패: {e2}")
 
     if not stocks:
         print("[KRX] 전종목 캐시 빌드 불가.")

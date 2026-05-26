@@ -2406,9 +2406,65 @@ function PortfolioPage(){
   const [fetching,setFetching]=useState(false);
   const [sigLoading,setSigLoading]=useState(false);
   const [subTab,setSubTab]=useState("holdings");
+  const [syncMsg,setSyncMsg]=useState("");
   const debRef=useRef(null);
+  const saveTimerRef=useRef(null);
+  const importRef=useRef(null);
+  const initRef=useRef(false);
 
-  useEffect(()=>{localStorage.setItem(LS_KEY,JSON.stringify(holdings));},[holdings]);
+  // 마운트 시 서버에서 최신 데이터 로드
+  useEffect(()=>{
+    fetch(`${API_BASE}/api/portfolio`)
+      .then(r=>r.json())
+      .then(data=>{
+        if(Array.isArray(data)&&data.length>0){
+          setHoldings(data);
+          localStorage.setItem(LS_KEY,JSON.stringify(data));
+        }
+        initRef.current=true;
+      })
+      .catch(()=>{initRef.current=true;});
+  },[]);
+
+  // holdings 변경 시 localStorage + 서버에 저장 (1s 디바운스)
+  useEffect(()=>{
+    localStorage.setItem(LS_KEY,JSON.stringify(holdings));
+    if(!initRef.current) return;
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current=setTimeout(()=>{
+      fetch(`${API_BASE}/api/portfolio`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(holdings)
+      }).then(r=>r.json()).then(d=>{
+        if(d.ok){setSyncMsg("✓ 저장됨");setTimeout(()=>setSyncMsg(""),2000);}
+      }).catch(()=>{});
+    },1000);
+  },[holdings]);
+
+  const exportHoldings=()=>{
+    const blob=new Blob([JSON.stringify(holdings,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;a.download=`portfolio_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();URL.revokeObjectURL(url);
+  };
+
+  const importHoldings=(e)=>{
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{
+        const data=JSON.parse(ev.target.result);
+        if(!Array.isArray(data))throw new Error();
+        setHoldings(data);
+        setSyncMsg(`✓ ${data.length}개 종목 가져옴`);
+        setTimeout(()=>setSyncMsg(""),3000);
+      }catch{setSyncMsg("❌ 파일 오류");}
+    };
+    reader.readAsText(file);
+    e.target.value="";
+  };
 
   const fmtP=(v,ticker)=>{
     if(v==null||v===0) return "-";
@@ -2492,13 +2548,30 @@ function PortfolioPage(){
 
   return(
     <div className="tab-content">
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+      <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={importHoldings}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
         <div style={{color:C.text,fontSize:15,fontWeight:800}}>💼 내 포트폴리오</div>
-        <button onClick={()=>setAdding(v=>!v)} style={{
-          padding:"5px 10px",borderRadius:8,fontSize:10,fontWeight:700,cursor:"pointer",
-          border:`1px solid ${C.green}44`,background:C.green+"12",color:C.green}}>
-          {adding?"취소":"+ 종목 담기"}
-        </button>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          {syncMsg&&<span style={{color:C.green,fontSize:10}}>{syncMsg}</span>}
+          <button onClick={exportHoldings} title="JSON으로 내보내기" style={{
+            padding:"5px 8px",borderRadius:8,fontSize:10,fontWeight:700,cursor:"pointer",
+            border:`1px solid ${C.cyan}44`,background:C.cyan+"12",color:C.cyan}}>
+            ⬇ 백업
+          </button>
+          <button onClick={()=>importRef.current?.click()} title="JSON에서 가져오기" style={{
+            padding:"5px 8px",borderRadius:8,fontSize:10,fontWeight:700,cursor:"pointer",
+            border:`1px solid ${C.yellow}44`,background:C.yellow+"12",color:C.yellow}}>
+            ⬆ 복원
+          </button>
+          <button onClick={()=>setAdding(v=>!v)} style={{
+            padding:"5px 8px",borderRadius:8,fontSize:10,fontWeight:700,cursor:"pointer",
+            border:`1px solid ${C.green}44`,background:C.green+"12",color:C.green}}>
+            {adding?"취소":"+ 담기"}
+          </button>
+        </div>
+      </div>
+      <div style={{color:C.muted,fontSize:9,marginBottom:10}}>
+        서버에 자동 저장 · 브라우저 기록 삭제해도 유지
       </div>
 
       {/* 서브탭 */}
@@ -2779,8 +2852,17 @@ function HoldingsMonitorPage(){
   const [loading,setLoading]=useState(false);
   const [fetched,setFetched]=useState(false);
 
+  // 서버에서 최신 종목 로드 (localStorage보다 서버 우선)
   useEffect(()=>{
-    try{setHoldings(JSON.parse(localStorage.getItem(LS_KEY)||"[]"));}catch(e){}
+    fetch(`${API_BASE}/api/portfolio`)
+      .then(r=>r.json())
+      .then(data=>{
+        if(Array.isArray(data)&&data.length>0){
+          setHoldings(data);
+          localStorage.setItem(LS_KEY,JSON.stringify(data));
+        }
+      })
+      .catch(()=>{});
   },[]);
 
   const fmtP=(v,ticker)=>{

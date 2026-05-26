@@ -41,6 +41,7 @@ OUTPUT_DIR           = os.environ.get("OUTPUT_DIR", os.path.join(BASE_DIR, "outp
 SIGNALS_FILE         = os.path.join(OUTPUT_DIR, "signals_v4.json")
 SIGNAL_HISTORY_FILE  = os.path.join(OUTPUT_DIR, "signal_history.json")
 BACKTEST_CACHE_FILE  = os.path.join(OUTPUT_DIR, "backtest_cache_v2.json")  # v2: stop/target 전략 반영
+PORTFOLIO_FILE       = os.path.join(OUTPUT_DIR, "portfolio.json")
 os.makedirs(OUTPUT_DIR,   exist_ok=True)
 
 # ── KRX 전종목 캐시 ──
@@ -1123,6 +1124,35 @@ def get_signal_accuracy():
         return jsonify(_clean(stats))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+_portfolio_lock = threading.Lock()
+
+@app.route('/api/portfolio', methods=['GET'])
+def get_portfolio():
+    """보유종목 불러오기"""
+    with _portfolio_lock:
+        try:
+            if os.path.exists(PORTFOLIO_FILE):
+                with open(PORTFOLIO_FILE, encoding='utf-8') as f:
+                    return jsonify(json.load(f))
+        except Exception:
+            pass
+    return jsonify([])
+
+@app.route('/api/portfolio', methods=['POST'])
+def save_portfolio():
+    """보유종목 저장"""
+    try:
+        data = request.get_json(force=True)
+        if not isinstance(data, list):
+            return jsonify({"ok": False, "error": "array expected"}), 400
+        with _portfolio_lock:
+            with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False)
+        return jsonify({"ok": True, "count": len(data)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route('/guide')

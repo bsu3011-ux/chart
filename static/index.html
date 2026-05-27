@@ -1963,6 +1963,7 @@ function RankingPage(){
   const [selectedTicker,setSelectedTicker]=React.useState(null);
   const [analysisData,setAnalysisData]=React.useState(null);
   const [analysisLoading,setAnalysisLoading]=React.useState(false);
+  const [rankChartMarket,setRankChartMarket]=React.useState(null);
   const [quickAdd,setQuickAdd]=React.useState(null);
   const [qaForm,setQaForm]=React.useState({quantity:"",buyPrice:""});
 
@@ -2050,7 +2051,7 @@ function RankingPage(){
               </div>
             )}
             {!analysisLoading&&analysisData&&!analysisData.error&&(
-              <StockResultCard data={analysisData} onChart={()=>{}} onClose={()=>setSelectedTicker(null)}/>
+              <StockResultCard data={analysisData} onChart={(m)=>{setSelectedTicker(null);setRankChartMarket(m);}} onClose={()=>setSelectedTicker(null)}/>
             )}
             {!analysisLoading&&analysisData?.error&&(
               <div style={{color:C.red,textAlign:"center",padding:20,fontSize:13}}>{analysisData.error}</div>
@@ -2286,6 +2287,7 @@ function RankingPage(){
           </div>
         </div>
       )}
+      {rankChartMarket&&<ChartModal market={rankChartMarket} onClose={()=>setRankChartMarket(null)}/>}
     </div>
   );
 }

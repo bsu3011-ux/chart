@@ -113,6 +113,28 @@ def _scan_via_yfinance() -> dict:
             pass
         print(f"[yfinance scan] {market}: {found}개 신규 발견 (누계 {len(stocks)}개)")
 
+    # 이름이 숫자(코드)인 종목 → yfinance info로 이름 채우기
+    unnamed = [t for t, v in stocks.items() if v.get("name", "") == t[:6]]
+    if unnamed:
+        import yfinance as yf
+        print(f"[yfinance scan] 이름 보완 중: {len(unnamed)}개")
+        for t in unnamed:
+            try:
+                info = yf.Ticker(t).info
+                name = info.get("longName") or info.get("shortName")
+                if name:
+                    stocks[t]["name"] = name
+                time.sleep(0.1)
+            except Exception:
+                pass
+        # 최종 저장
+        try:
+            with open(KRX_CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump({"updated": datetime.datetime.now().isoformat(),
+                           "stocks": {**_krx_cache, **stocks}}, f, ensure_ascii=False)
+        except Exception:
+            pass
+
     return stocks
 
 

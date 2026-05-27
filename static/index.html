@@ -2267,14 +2267,16 @@ function RankingPage(){
                     background:C.elevated,border:`1px solid ${C.border}`,color:C.text,fontSize:14}}/>
               </div>
             </div>
-            <button onClick={()=>{
+            <button onClick={async()=>{
               if(!qaForm.quantity||!qaForm.buyPrice) return;
               const LS_KEY="trading_bot_portfolio";
               const ex=JSON.parse(localStorage.getItem(LS_KEY)||"[]");
-              ex.push({ticker:quickAdd.ticker,name:quickAdd.name,flag:quickAdd.flag,
+              const newEntry={ticker:quickAdd.ticker,name:quickAdd.name,flag:quickAdd.flag,
                 quantity:parseFloat(qaForm.quantity),buyPrice:parseFloat(qaForm.buyPrice),
-                addedAt:new Date().toISOString()});
+                addedAt:new Date().toISOString()};
+              ex.push(newEntry);
               localStorage.setItem(LS_KEY,JSON.stringify(ex));
+              try{await fetch(`${API_BASE}/api/portfolio`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(ex)});}catch(e){}
               setQuickAdd(null);
               alert(`✅ ${quickAdd.name} 포트폴리오에 추가됐습니다`);
             }} disabled={!qaForm.quantity||!qaForm.buyPrice}

@@ -2105,19 +2105,30 @@ def _bt_positions_leverage(df, params, profile):
     v60_s = close.pct_change().rolling(60).std()
     slope_s = (ma_mid - ma_mid.shift(5)) / ma_mid.shift(5).replace(0, np.nan) * 100
 
+    c_arr  = close.values.astype(float)
+    mm_arr = ma_mid.values.astype(float)
+    ml_arr = ma_long.values.astype(float)
+    rs_arr = rsi_s.values.astype(float)
+    ax_arr = adx_s.values.astype(float)
+    pd_arr = pdi_s.values.astype(float)
+    md_arr = mdi_s.values.astype(float)
+    v2_arr = v20_s.values.astype(float)
+    v6_arr = v60_s.values.astype(float)
+    sl_arr = slope_s.values.astype(float)
+
     positions = np.zeros(n)
     start = max(ma_l + 10, 60)
     for i in range(start, n):
-        c   = float(close.iloc[i])
-        mm  = float(ma_mid.iloc[i])  if not pd.isna(ma_mid.iloc[i])  else c
-        ml  = float(ma_long.iloc[i]) if not pd.isna(ma_long.iloc[i]) else c
-        rsi = float(rsi_s.iloc[i])   if not pd.isna(rsi_s.iloc[i])   else 50
-        adx = float(adx_s.iloc[i])   if not pd.isna(adx_s.iloc[i])   else 15
-        pdi = float(pdi_s.iloc[i])   if not pd.isna(pdi_s.iloc[i])   else 0
-        mdi = float(mdi_s.iloc[i])   if not pd.isna(mdi_s.iloc[i])   else 0
-        v20 = float(v20_s.iloc[i])   if not pd.isna(v20_s.iloc[i])   else 0.01
-        v60 = float(v60_s.iloc[i])   if not pd.isna(v60_s.iloc[i])   else 0.01
-        sl  = float(slope_s.iloc[i]) if not pd.isna(slope_s.iloc[i]) else 0
+        c   = c_arr[i]
+        mm  = mm_arr[i] if not np.isnan(mm_arr[i]) else c
+        ml  = ml_arr[i] if not np.isnan(ml_arr[i]) else c
+        rsi = rs_arr[i] if not np.isnan(rs_arr[i]) else 50
+        adx = ax_arr[i] if not np.isnan(ax_arr[i]) else 15
+        pdi = pd_arr[i] if not np.isnan(pd_arr[i]) else 0
+        mdi = md_arr[i] if not np.isnan(md_arr[i]) else 0
+        v20 = v2_arr[i] if not np.isnan(v2_arr[i]) else 0.01
+        v60 = v6_arr[i] if not np.isnan(v6_arr[i]) else 0.01
+        sl  = sl_arr[i] if not np.isnan(sl_arr[i]) else 0
 
         vs = v20 > v60 * vol_mult if v60 > 0 else False
         ts = adx >= adx_min
@@ -2154,16 +2165,21 @@ def _bt_positions_dual(df, params, profile):
     n = len(close)
     adx_s, pdi_s, mdi_s = calc_adx(df, period=14)
 
+    c_arr  = close.values.astype(float)
+    ax_arr = adx_s.values.astype(float)
+    pd_arr = pdi_s.values.astype(float)
+    md_arr = mdi_s.values.astype(float)
+
     positions = np.zeros(n)
     start = max(w_long + 5, 30)
     for i in range(start, n):
-        c = float(close.iloc[i])
-        mom_s = (c / float(close.iloc[i - w_short]) - 1) if i >= w_short else 0
-        mom_m = (c / float(close.iloc[i - w_mid])   - 1) if i >= w_mid   else 0
-        mom_l = (c / float(close.iloc[i - w_long])  - 1) if i >= w_long  else 0
-        adx = float(adx_s.iloc[i]) if not pd.isna(adx_s.iloc[i]) else 15
-        pdi = float(pdi_s.iloc[i]) if not pd.isna(pdi_s.iloc[i]) else 0
-        mdi = float(mdi_s.iloc[i]) if not pd.isna(mdi_s.iloc[i]) else 0
+        c     = c_arr[i]
+        mom_s = (c / c_arr[i - w_short] - 1) if i >= w_short else 0
+        mom_m = (c / c_arr[i - w_mid]   - 1) if i >= w_mid   else 0
+        mom_l = (c / c_arr[i - w_long]  - 1) if i >= w_long  else 0
+        adx = ax_arr[i] if not np.isnan(ax_arr[i]) else 15
+        pdi = pd_arr[i] if not np.isnan(pd_arr[i]) else 0
+        mdi = md_arr[i] if not np.isnan(md_arr[i]) else 0
         pos_count = sum(1 for m in (mom_s, mom_m, mom_l) if m > 0)
         ts = adx >= adx_min
         tu = pdi > mdi
@@ -2183,14 +2199,20 @@ def _bt_positions_minervini(df, params):
     rsi_s = calc_rsi(close)
     slope_s = (ma_s - ma_s.shift(5)) / ma_s.shift(5).replace(0, np.nan) * 100
 
+    c_arr  = close.values.astype(float)
+    mf_arr = ma_f.values.astype(float)
+    ms_arr = ma_s.values.astype(float)
+    rs_arr = rsi_s.values.astype(float)
+    sl_arr = slope_s.values.astype(float)
+
     positions = np.zeros(n)
     start = max(params['ma_slow'] + 10, 30)
     for i in range(start, n):
-        c   = float(close.iloc[i])
-        mf  = float(ma_f.iloc[i])  if not pd.isna(ma_f.iloc[i])  else c
-        ms  = float(ma_s.iloc[i])  if not pd.isna(ma_s.iloc[i])  else c
-        rsi = float(rsi_s.iloc[i]) if not pd.isna(rsi_s.iloc[i]) else 50
-        sl  = float(slope_s.iloc[i]) if not pd.isna(slope_s.iloc[i]) else 0
+        c   = c_arr[i]
+        mf  = mf_arr[i] if not np.isnan(mf_arr[i]) else c
+        ms  = ms_arr[i] if not np.isnan(ms_arr[i]) else c
+        rsi = rs_arr[i] if not np.isnan(rs_arr[i]) else 50
+        sl  = sl_arr[i] if not np.isnan(sl_arr[i]) else 0
         if c > mf > ms and sl > 0 and rsi >= params['entry_rsi']:
             positions[i] = 1.0
     return positions
@@ -2211,19 +2233,29 @@ def _bt_positions_risk(df, params, profile):
     v20_s = close.pct_change().rolling(20).std() * np.sqrt(252) * 100
     v60_s = close.pct_change().rolling(60).std() * np.sqrt(252) * 100
 
+    c_arr  = close.values.astype(float)
+    mm_arr = ma_mid.values.astype(float)
+    ml_arr = ma_long.values.astype(float)
+    rs_arr = rsi_s.values.astype(float)
+    ax_arr = adx_s.values.astype(float)
+    pd_arr = pdi_s.values.astype(float)
+    md_arr = mdi_s.values.astype(float)
+    v2_arr = v20_s.values.astype(float)
+    v6_arr = v60_s.values.astype(float)
+
     positions = np.zeros(n)
     start = max(ma_l + 10, 60)
     for i in range(start, n):
-        c   = float(close.iloc[i])
-        mm  = float(ma_mid.iloc[i])  if not pd.isna(ma_mid.iloc[i])  else c
-        ml  = float(ma_long.iloc[i]) if not pd.isna(ma_long.iloc[i]) else c
-        rsi = float(rsi_s.iloc[i])   if not pd.isna(rsi_s.iloc[i])   else 50
-        adx = float(adx_s.iloc[i])   if not pd.isna(adx_s.iloc[i])   else 15
-        pdi = float(pdi_s.iloc[i])   if not pd.isna(pdi_s.iloc[i])   else 0
-        mdi = float(mdi_s.iloc[i])   if not pd.isna(mdi_s.iloc[i])   else 0
-        v20 = float(v20_s.iloc[i])   if not pd.isna(v20_s.iloc[i])   else 20
-        v60 = float(v60_s.iloc[i])   if not pd.isna(v60_s.iloc[i])   else 20
-        r20 = (c / float(close.iloc[i - 20]) - 1) * 100 if i >= 20 else 0
+        c   = c_arr[i]
+        mm  = mm_arr[i] if not np.isnan(mm_arr[i]) else c
+        ml  = ml_arr[i] if not np.isnan(ml_arr[i]) else c
+        rsi = rs_arr[i] if not np.isnan(rs_arr[i]) else 50
+        adx = ax_arr[i] if not np.isnan(ax_arr[i]) else 15
+        pdi = pd_arr[i] if not np.isnan(pd_arr[i]) else 0
+        mdi = md_arr[i] if not np.isnan(md_arr[i]) else 0
+        v20 = v2_arr[i] if not np.isnan(v2_arr[i]) else 20
+        v60 = v6_arr[i] if not np.isnan(v6_arr[i]) else 20
+        r20 = (c / c_arr[i - 20] - 1) * 100 if i >= 20 else 0
 
         risk = 0
         if c < ml: risk += 25
@@ -2792,7 +2824,8 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
 # ════════════════════════════════════════════════════════════════
 import time as _time_mod
 
-_bm_close_cache: dict = {}  # {ticker: (timestamp, Series)}
+_bm_close_cache: dict = {}      # {ticker: (timestamp, Series)}
+_macro_overlay_cache: dict = {}  # {"kr"|"gl": (timestamp, result)}
 
 def _get_benchmark_close(bm_ticker: str, period: str = "1y"):
     """벤치마크 종가 캐시 (1시간 TTL, 실패시 stale 반환)"""
@@ -3132,19 +3165,42 @@ def calc_fundamental_score(pe_ratio, roe, eps_growth) -> dict:
 
 def calc_macro_overlay(is_korean: bool = True) -> dict:
     """글로벌 매크로 — VKOSPI, 미국 금리(TNX), 달러(DXY), 구리(HG=F)
-    반환: score_adj (±15 캡), details
+    반환: score_adj (max +11/-15), details. 10분 TTL 캐시.
+    TNX/DXY는 get_macro_context()가 이미 _bm_close_cache에 동기화했으면 재사용.
     """
+    _now = _time_mod.time()
+    cache_key = "kr" if is_korean else "gl"
+    _cached = _macro_overlay_cache.get(cache_key)
+    if _cached and _now - _cached[0] < 600:
+        return _cached[1]
+
     score = 0
     details: dict = {}
     try:
-        raw = yf.download(["^VKOSPI","^TNX","DX-Y.NYB","HG=F"],
-                          period="1mo", interval="1d",
-                          auto_adjust=True, progress=False, threads=True)
-        if raw.empty:
-            return {"score_adj": 0, "details": {}}
-        cl = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+        # _bm_close_cache에서 TNX/DXY 재사용 (get_macro_context() 배치 캐시)
+        def _from_bm(sym):
+            entry = _bm_close_cache.get(sym)
+            if entry and _now - entry[0] < 3600 and entry[1] is not None:
+                s = entry[1]
+                return s if len(s) >= 2 else None
+            return None
 
-        def _s(sym):
+        tnx_s = _from_bm("^TNX")
+        dxy_s = _from_bm("DX-Y.NYB")
+
+        # VKOSPI/HG=F는 get_macro_context에 없으므로 항상 다운로드
+        # TNX/DXY 캐시 미스 시 함께 포함
+        to_dl = ["^VKOSPI", "HG=F"]
+        if tnx_s is None: to_dl.append("^TNX")
+        if dxy_s is None: to_dl.append("DX-Y.NYB")
+
+        raw = yf.download(to_dl, period="1mo", interval="1d",
+                          auto_adjust=True, progress=False, threads=True)
+        cl = (raw["Close"] if not raw.empty and isinstance(raw.columns, pd.MultiIndex)
+              else raw) if not raw.empty else None
+
+        def _s_dl(sym):
+            if cl is None: return None
             try:
                 s = cl[sym].dropna()
                 return s if len(s) >= 2 else None
@@ -3152,33 +3208,33 @@ def calc_macro_overlay(is_korean: bool = True) -> dict:
                 return None
 
         # VKOSPI (한국 공포지수)
-        s = _s("^VKOSPI")
+        s = _s_dl("^VKOSPI")
         if s is not None:
-            v = float(s.iloc[-1]); details["vkospi"] = round(v,1)
+            v = float(s.iloc[-1]); details["vkospi"] = round(v, 1)
             if   v < 15: score += 3;  details["vkospi_label"] = "안정"
             elif v < 25: score += 0;  details["vkospi_label"] = "보통"
             elif v < 35: score -= 4;  details["vkospi_label"] = "불안"
             else:        score -= 10; details["vkospi_label"] = "공포"
 
-        # 미국 10년물 금리
-        s = _s("^TNX")
+        # 미국 10년물 금리 — 캐시 우선, 없으면 배치에서
+        s = tnx_s if tnx_s is not None else _s_dl("^TNX")
         if s is not None and len(s) >= 10:
-            now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
-            chg = round(now - d10, 2)
-            details["tnx"] = round(now, 2); details["tnx_chg"] = chg
+            cur, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+            chg = round(cur - d10, 2)
+            details["tnx"] = round(cur, 2); details["tnx_chg"] = chg
             if   chg >  0.20: score -= 5; details["tnx_label"] = "급등↑"
             elif chg >  0.10: score -= 2; details["tnx_label"] = "상승"
             elif chg < -0.20: score += 3; details["tnx_label"] = "급락↓"
             elif chg < -0.10: score += 1; details["tnx_label"] = "하락"
             else:                          details["tnx_label"] = "보합"
 
-        # 달러 인덱스 — 한국 종목 외국인 영향
+        # 달러 인덱스 — 한국 종목 외국인 영향, 캐시 우선
         if is_korean:
-            s = _s("DX-Y.NYB")
+            s = dxy_s if dxy_s is not None else _s_dl("DX-Y.NYB")
             if s is not None and len(s) >= 10:
-                now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
-                pct = round((now-d10)/d10*100, 1)
-                details["dxy"] = round(now, 1); details["dxy_pct"] = pct
+                cur, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+                pct = round((cur - d10) / d10 * 100, 1)
+                details["dxy"] = round(cur, 1); details["dxy_pct"] = pct
                 if   pct >  1.0: score -= 4; details["dxy_label"] = "강세(외인매도↑)"
                 elif pct >  0.4: score -= 2; details["dxy_label"] = "소폭강세"
                 elif pct < -1.0: score += 3; details["dxy_label"] = "약세(외인유입↑)"
@@ -3186,11 +3242,11 @@ def calc_macro_overlay(is_korean: bool = True) -> dict:
                 else:                         details["dxy_label"] = "보합"
 
         # 구리 선물 (경기선행)
-        s = _s("HG=F")
+        s = _s_dl("HG=F")
         if s is not None and len(s) >= 10:
-            now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
-            pct = round((now-d10)/d10*100, 1)
-            details["copper"] = round(now, 2); details["copper_pct"] = pct
+            cur, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+            pct = round((cur - d10) / d10 * 100, 1)
+            details["copper"] = round(cur, 2); details["copper_pct"] = pct
             if   pct >  2.5: score += 2; details["copper_label"] = "급등(경기확장)"
             elif pct >  0.8: score += 1; details["copper_label"] = "상승"
             elif pct < -2.5: score -= 3; details["copper_label"] = "급락(경기우려)"
@@ -3198,7 +3254,10 @@ def calc_macro_overlay(is_korean: bool = True) -> dict:
             else:                         details["copper_label"] = "보합"
     except Exception:
         pass
-    return {"score_adj": max(-15, min(8, score)), "details": details}
+
+    result = {"score_adj": max(-15, min(11, score)), "details": details}
+    _macro_overlay_cache[cache_key] = (_now, result)
+    return result
 
 
 def calc_volume_zscore(volume_series) -> dict:

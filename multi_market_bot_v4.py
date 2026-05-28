@@ -2404,93 +2404,93 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
                        rs_score=50, momentum_composite=50, vcp_detected=False,
                        regime_adj=0, liquidity_adj=0, fundamental_adj=0,
                        macro_adj=0, vol_z_adj=0):
-    """가중치 기반 신호 생성 (0~100점, 기본점수 25)
-    - MA200/MA50 추세: 30점 (장기 가장 중요)
-    - 모멘텀 (RSI/MACD): 25점 (MACD 최대 ±8점)
-    - 단기 추세 (MA20·기울기): 15점
-    - 변동성/거래량 (BB/Vol): 10점
-    - 다이버전스·캔들 보정: ±10점
-    - 상대강도(RS): ±5점 (선행)
-    - 모멘텀 복합 스코어: ±3점 (선행, 이중카운팅 축소)
-    - VCP 패턴: +5점 (선행)
-    - 시장 환경(벤치마크 추세): ±10점
-    - 유동성(거래대금): ±5점
-    - 펀더멘털(PER/ROE/EPS): ±8점
-    신호 기준: STRONG_BUY≥80, BUY≥63, SELL≤40, STRONG_SELL≤20
+    """가중치 기반 신호 생성 (0~100점, 기본 50 중립)
+
+    카테고리별 캡으로 단일 카테고리 과대평가 방지:
+    - 장기추세 (MA200/50/기울기 통합)  : ±15
+    - 단기모멘텀 (RSI/MACD/MA20 통합)   : ±10
+    - 변동성 (BB %B)                    : ±3
+    - 거래량 (Z-score 단일 사용)        : ±5
+    - 보정 (다이버전스/캔들)            : ±9
+    - 선행 (RS/모멘텀복합/VCP)          : ±8
+    - 매크로 (regime + macro 통합)      : ±15
+    - 유동성                            : ±3
+    - 펀더멘털                          : ±5
+    임계값(대칭): STRONG_BUY≥75, BUY≥60, SELL≤40, STRONG_SELL≤25
     """
-    score = 25  # 낮은 기본점수 — 조건 충족 시만 상승
+    score = 50  # 중립 기준점
 
-    # 장기 추세 (30점)
-    if ma200 and price > ma200: score += 15
-    elif ma200:                  score -= 15
-    if price > ma50:             score += 10
-    else:                        score -= 10
-    if ma50_slope > 0.5:         score += 5
-    elif ma50_slope < -0.5:      score -= 5
+    # 가격과 MA 비교: ±0.2% 이내는 동률(0)로 처리해 노이즈 흡수
+    def _cmp(v, ref, buffer=0.002):
+        if not ref: return 0
+        d = (v - ref) / ref
+        return 1 if d > buffer else (-1 if d < -buffer else 0)
 
-    # 모멘텀 (25점)
-    if   50 < rsi < 70:          score += 10
-    elif rsi >= 80:              score -= 12  # 극단 과매수
-    elif rsi >= 70:              score -= 8   # 과매수 경계
-    elif rsi <= 20:              score += 7   # 극단 과매도 반등
-    elif rsi <= 30:              score += 5   # 과매도 반등 가능
-    else:                        score -= 5
-    # MACD 히스토그램: 크기 비례 점수 (최대 ±8점, 이중카운팅 방지)
-    if macd_hist != 0:
-        # 가격 대비 히스토그램 비율로 정규화 (0.5% 기준 ±6점, 최대 ±8점)
-        _macd_norm = (macd_hist / price) * 100 if price else 0
-        _macd_pts = max(-8, min(8, _macd_norm / 0.5 * 6))
-        score += int(_macd_pts)
+    # === 1. 장기 추세 (±15 캡) — MA200/MA50/기울기 통합 ===
+    trend = 0
+    trend += _cmp(price, ma200) * 8
+    trend += _cmp(price, ma50)  * 5
+    if ma50_slope > 0.5:         trend += 2
+    elif ma50_slope < -0.5:      trend -= 2
+    score += max(-15, min(15, trend))
 
-    # 단기 추세 (15점)
-    if price > ma20:             score += 8
-    else:                        score -= 8
+    # === 2. 단기 모멘텀 (±10 캡) — RSI/MACD/MA20 통합 (3중 중복 해소) ===
+    mom = 0
+    if   rsi >= 80:              mom -= 6   # 극단 과매수
+    elif rsi >= 70:              mom -= 3
+    elif rsi >  55:              mom += 5   # 강세 모멘텀
+    elif rsi >= 45:              mom += 0   # 중립 (45~55)
+    elif rsi >  30:              mom -= 2
+    elif rsi >  20:              mom += 2
+    else:                        mom += 3   # 극단 과매도 반등
+    if macd_hist and price:
+        _macd_norm = (macd_hist / price) * 100
+        mom += int(max(-4, min(4, _macd_norm / 0.5 * 3)))
+    mom += _cmp(price, ma20) * 3
+    score += max(-10, min(10, mom))
 
-    # 변동성/거래량 (15점)
-    if 0.3 < bb_pct_b < 0.7:     score += 5   # 중심부 = 안정
-    elif bb_pct_b > 0.9:         score -= 3   # 상단 이탈 = 단기 조정 위험
-    elif bb_pct_b < 0.1:         score += 3   # 하단 = 단기 반등 가능
-    if vol_ratio > 1.5:          score += 5   # 거래량 동반 추세
-    elif vol_ratio < 0.7:        score -= 3   # 거래량 위축 = 모멘텀 약화
+    # === 3. 변동성 (±3) — BB %B ===
+    if 0.3 < bb_pct_b < 0.7:     score += 3
+    elif bb_pct_b > 0.9:         score -= 2
+    elif bb_pct_b < 0.1:         score += 2
 
-    # 다이버전스 보정 (±10점)
-    if divergence == "bullish":  score += 10
-    elif divergence == "bearish": score -= 10
+    # === 4. 거래량 (±5) — Z-score만 사용 (vol_ratio 제거: 같은 정보 중복) ===
+    score += max(-5, min(5, vol_z_adj))
 
-    # 캔들 패턴 보정 (±5점)
-    if candle_pattern in ("강세 장악형", "해머 (저점 반전)"):     score += 5
-    elif candle_pattern in ("약세 장악형", "슈팅스타 (고점 반전)"): score -= 5
+    # === 5. 보정 (±9) — 다이버전스 + 캔들 ===
+    if divergence == "bullish":  score += 6
+    elif divergence == "bearish": score -= 6
+    if candle_pattern in ("강세 장악형", "해머 (저점 반전)"):     score += 3
+    elif candle_pattern in ("약세 장악형", "슈팅스타 (고점 반전)"): score -= 3
 
-    # ── 선행 지표 보정 ──────────────────────────────────────────
-    # 상대강도 (±5점): 시장 대비 초과 강세/약세
-    if   rs_score >= 80: score += 5
-    elif rs_score >= 65: score += 2
-    elif rs_score <= 20: score -= 5
-    elif rs_score <= 35: score -= 2
+    # === 6. 선행 지표 (±8 캡) — RS 위주, momentum_composite는 극단값에서만 ===
+    lead = 0
+    if   rs_score >= 80: lead += 4
+    elif rs_score >= 65: lead += 2
+    elif rs_score <= 20: lead -= 4
+    elif rs_score <= 35: lead -= 2
+    # momentum_composite: 이미 RSI/MACD/MA50slope에 반영됨 → 극단값(±15)에서만 ±1
+    if   momentum_composite >= 85: lead += 1
+    elif momentum_composite <= 15: lead -= 1
+    # VCP: 변동성 수축 패턴 (다른 지표가 못 잡는 고유 정보)
+    if vcp_detected:               lead += 3
+    score += max(-8, min(8, lead))
 
-    # 모멘텀 복합 (±3점, 이중카운팅 축소): RSI/MACD/MA기울기와 정보 중복 → 극단값에서만 보정
-    if   momentum_composite >= 80: score += 3
-    elif momentum_composite <= 20: score -= 3
+    # === 7. 매크로 (±15 캡) — regime + macro 통합 (같은 거시환경 중복 카운팅 방지) ===
+    score += max(-15, min(10, regime_adj + macro_adj))
 
-    # VCP 패턴 (+5점): 변동성 수축 후 돌파 임박
-    if vcp_detected:               score += 5
+    # === 8. 유동성 (±3) ===
+    score += max(-3, min(2, liquidity_adj))
 
-    # ── 매크로/품질 필터 ────────────────────────────────────────
-    # 시장 환경 (±10점): 벤치마크가 약세장이면 매수 신호 약화
-    score += regime_adj
-    # 유동성 (±5점): 거래대금 부족 종목은 신호 신뢰도 하락
-    score += liquidity_adj
-    # 펀더멘털 (±8점): 저PER·고ROE·EPS성장 보너스, 적자·고PER 패널티
-    score += fundamental_adj
-    # 글로벌 매크로 (±15점): VKOSPI·금리·달러·구리
-    score += macro_adj
-    # 거래량 Z-score (±5점): 이상 거래 감지
-    score += vol_z_adj
+    # === 9. 펀더멘털 (±5, 기존 ±8에서 축소) ===
+    score += max(-5, min(5, fundamental_adj))
 
     score = max(0, min(100, score))
-    if score >= 80: return "STRONG_BUY",  "🟢 강력 매수", score
-    if score >= 63: return "BUY",         "🟢 매수",     score
-    if score <= 20: return "STRONG_SELL", "🔴 강력 매도", score
+
+    # 대칭 임계값 (기본 50 기준 ±15/±25)
+    if score >= 75: return "STRONG_BUY",  "🟢 강력 매수", score
+    if score >= 60: return "BUY",         "🟢 매수",     score
+    if score <= 25: return "STRONG_SELL", "🔴 강력 매도", score
     if score <= 40: return "SELL",        "🔴 매도",     score
     return "NEUTRAL", "⚪ 중립", score
 

@@ -13,6 +13,23 @@ import os, json, math, asyncio, datetime, threading, urllib.request, hmac, hashl
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 
+# ── .env 파일 로드 (python-dotenv 없이) ──
+def _load_dotenv():
+    _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.exists(_env_path):
+        return
+    with open(_env_path, encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line:
+                continue
+            _k, _, _v = _line.partition("=")
+            _k = _k.strip()
+            _v = _v.strip().strip('"').strip("'")
+            if _k and _k not in os.environ:  # 환경변수 우선, .env는 폴백
+                os.environ[_k] = _v
+_load_dotenv()
+
 def _clean(obj):
     """NaN/Infinity → None (JSON 직렬화 안전)"""
     if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):

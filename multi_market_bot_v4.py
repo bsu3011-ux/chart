@@ -1500,16 +1500,49 @@ def get_country_profile(ticker):
 # ════════════════════════════════════════════════════════════════
 # 데이터 로드
 # ════════════════════════════════════════════════════════════════
+_load_data_cache: dict = {}   # {(ticker, period): (timestamp, df)}
+_ticker_info_cache: dict = {} # {ticker: (timestamp, info_dict)} — 펀더멘털 1시간 캐시
+
+
+def get_ticker_info(ticker: str) -> dict:
+    """yf.Ticker(t).info 결과 1시간 캐시 (펀더멘털은 분기단위로만 변경됨).
+    실패시 stale 반환. 빈 dict 반환 시에도 빈 결과 캐시 (반복 fetch 시도 방지)."""
+    import time as _t
+    now = _t.time()
+    cached = _ticker_info_cache.get(ticker)
+    if cached and now - cached[0] < 3600:
+        return cached[1]
+    try:
+        info = yf.Ticker(ticker).info or {}
+        _ticker_info_cache[ticker] = (now, info)
+        return info
+    except Exception:
+        if cached:
+            return cached[1]
+        _ticker_info_cache[ticker] = (now, {})   # 실패도 캐시 (빈 dict)
+        return {}
+
 def load_data(ticker, period="2y"):
+    """yfinance 다운로드 + (ticker, period)별 15분 TTL 캐시.
+    실패시 stale 캐시 반환 (네트워크 장애 안정성)."""
+    import time as _t
+    key = (ticker, period)
+    now = _t.time()
+    cached = _load_data_cache.get(key)
+    if cached and now - cached[0] < 900:   # 15분
+        return cached[1]
     try:
         df = yf.download(ticker, period=period, auto_adjust=True,
                          progress=False, threads=False)
         if df is None or df.empty:
-            return pd.DataFrame()
+            return cached[1] if cached else pd.DataFrame()
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
+        _load_data_cache[key] = (now, df)
         return df
     except Exception as e:
+        if cached:
+            return cached[1]  # stale 반환
         print(f"  ⚠️ {ticker}: {e}")
         return pd.DataFrame()
 
@@ -1780,7 +1813,8 @@ def analyze_dual_filter(df, params, profile=None):
     mom_m = (current / float(close.iloc[-w_mid])   - 1) * 100 if n >= w_mid   else 0
     mom_l = (current / float(close.iloc[-w_long])  - 1) * 100 if n >= w_long  else 0
 
-    rsi_val = float(calc_rsi(close).iloc[-1]) if not pd.isna(calc_rsi(close).iloc[-1]) else 50
+    _rsi_series = calc_rsi(close)
+    rsi_val = float(_rsi_series.iloc[-1]) if not pd.isna(_rsi_series.iloc[-1]) else 50
     adx, plus_di, minus_di = calc_adx(df, period=14)
     _adx = float(adx.iloc[-1]) if not pd.isna(adx.iloc[-1]) else 15
     _pdi = float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0
@@ -2800,27 +2834,34 @@ def get_macro_context() -> dict:
         'warnings': [],
     }
 
+    # 4종목 일괄 다운로드 (4 RTT → 1 RTT) + 개별 캐시도 갱신
     try:
-        vix_close = _get_benchmark_close('^VIX', period='3mo')
+        raw = yf.download(["^VIX","^TNX","^IRX","DX-Y.NYB"], period="3mo",
+                          auto_adjust=True, progress=False, threads=True)
+        cl = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+        def _ser(sym):
+            try:
+                s = cl[sym].dropna()
+                if len(s) > 0:
+                    _bm_close_cache[sym] = (now, s)   # 개별 캐시 동기 갱신
+                    return s
+            except Exception:
+                pass
+            return _bm_close_cache.get(sym, (0, None))[1]   # stale fallback
+
+        vix_close = _ser("^VIX")
         if vix_close is not None and len(vix_close) >= 5:
             ctx['vix'] = round(float(vix_close.iloc[-1]), 2)
             ctx['vix_change_5d'] = round(float(vix_close.iloc[-1] - vix_close.iloc[-5]), 2)
-    except Exception:
-        pass
 
-    try:
-        t10 = _get_benchmark_close('^TNX', period='3mo')
-        t3m = _get_benchmark_close('^IRX', period='3mo')
+        t10 = _ser("^TNX"); t3m = _ser("^IRX")
         if t10 is not None and t3m is not None and len(t10) > 0 and len(t3m) > 0:
             ctx['us_10y'] = round(float(t10.iloc[-1]), 2)
             ctx['us_3m']  = round(float(t3m.iloc[-1]), 2)
             ctx['yield_spread']  = round(ctx['us_10y'] - ctx['us_3m'], 2)
             ctx['yield_inverted'] = ctx['yield_spread'] < 0
-    except Exception:
-        pass
 
-    try:
-        dxy = _get_benchmark_close('DX-Y.NYB', period='3mo')
+        dxy = _ser("DX-Y.NYB")
         if dxy is not None and len(dxy) >= 20:
             ctx['dxy'] = round(float(dxy.iloc[-1]), 2)
             ma20 = float(dxy.rolling(20).mean().iloc[-1])
@@ -3093,7 +3134,6 @@ def calc_macro_overlay(is_korean: bool = True) -> dict:
     """글로벌 매크로 — VKOSPI, 미국 금리(TNX), 달러(DXY), 구리(HG=F)
     반환: score_adj (±15 캡), details
     """
-    import yfinance as yf, pandas as pd
     score = 0
     details: dict = {}
     try:
@@ -3164,7 +3204,6 @@ def calc_macro_overlay(is_korean: bool = True) -> dict:
 def calc_volume_zscore(volume_series) -> dict:
     """20일 거래량 Z-score — 이상 거래 감지 (score_adj: +5 ~ -2)"""
     try:
-        import pandas as pd
         vs = pd.Series(volume_series).dropna()
         if len(vs) < 22:
             return {"z": 0.0, "label": "데이터부족", "score_adj": 0}
@@ -3202,7 +3241,7 @@ def analyze_stock(ticker: str) -> dict:
         t_obj = yf.Ticker(ticker)
         fi = t_obj.fast_info
         market_cap = getattr(fi, 'market_cap', None)
-        full_info  = t_obj.info or {}
+        full_info  = get_ticker_info(ticker)   # 1시간 캐시
         pe_ratio   = full_info.get('trailingPE') or full_info.get('forwardPE')
         if pe_ratio and (pe_ratio < 0 or pe_ratio > 1000): pe_ratio = None
         dy = full_info.get('dividendYield')
@@ -3235,8 +3274,9 @@ def analyze_stock(ticker: str) -> dict:
     ma20_slope = _slope(close.rolling(20).mean())
     ma50_slope = _slope(close.rolling(50).mean())
 
-    # RSI
-    rsi = float(calc_rsi(close).iloc[-1])
+    # RSI (series는 아래 다이버전스용으로 재사용)
+    rsi_series = calc_rsi(close)
+    rsi = float(rsi_series.iloc[-1])
     if pd.isna(rsi): rsi = 50.0
 
     # MACD
@@ -3265,8 +3305,7 @@ def analyze_stock(ticker: str) -> dict:
     atr_series = calc_atr(df, p=14)
     atr_val    = float(atr_series.iloc[-1]) if not pd.isna(atr_series.iloc[-1]) else None
 
-    # RSI 다이버전스
-    rsi_series = calc_rsi(close)
+    # RSI 다이버전스 (rsi_series 위에서 재사용)
     divergence = detect_rsi_divergence(close, rsi_series, lookback=20)
 
     # 캔들 패턴

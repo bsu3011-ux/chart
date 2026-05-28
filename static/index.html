@@ -2986,8 +2986,14 @@ function HoldingsMonitorPage(){
         const isBuy=sigType==="BUY"||sigType==="STRONG_BUY";
         const targets=s?.targets||null;
         const isKR=h.ticker.endsWith(".KS")||h.ticker.endsWith(".KQ");
+        // 매도 신호: target=하락예상, stop=반전저항(현재가 위)
+        // 매수 신호: target=상승목표, stop=손절선(현재가 아래)
         const tgtPct=targets?.target&&cur>0?(targets.target-cur)/cur*100:null;
-        const stopPct=targets?.stop&&cur>0?(cur-targets.stop)/cur*100:null;
+        const stopFromCurPct=targets?.stop&&cur>0?(targets.stop-cur)/cur*100:null;
+        const tgtLabel=isSell?"하락예상":"목표가";
+        const stopLabel=isSell?"반전저항":"손절가";
+        const tgtColor=isSell?C.red:C.green;
+        const stopColor=isSell?"#f59e0b":C.red;
         return(
           <div key={i} style={{padding:"14px",borderRadius:14,marginBottom:10,
             background:C.cardGradient,
@@ -3022,27 +3028,31 @@ function HoldingsMonitorPage(){
                 background:"rgba(255,255,255,0.03)",border:`1px solid ${C.border}44`}}>
                 <div style={{color:C.muted,fontSize:8}}>현재가</div>
                 <div style={{color:C.text,fontSize:11,fontWeight:700}}>{fmtP(cur,h.ticker)}</div>
-                <div style={{color:pnl>=0?C.green:C.red,fontSize:9,fontWeight:700,marginTop:1}}>
+                <div style={{color:pnlPct>=0?C.green:C.red,fontSize:9,fontWeight:700,marginTop:1}}>
                   {pnlPct>=0?"+":""}{pnlPct.toFixed(2)}%
                 </div>
               </div>
               <div style={{textAlign:"center",padding:"7px 4px",borderRadius:8,
-                background:targets?`${C.green}10`:"rgba(255,255,255,0.03)",
-                border:`1px solid ${targets?C.green+"44":C.border+"44"}`}}>
-                <div style={{color:C.muted,fontSize:8}}>목표가</div>
-                <div style={{color:targets?C.green:C.muted,fontSize:11,fontWeight:700}}>
+                background:targets?`${tgtColor}10`:"rgba(255,255,255,0.03)",
+                border:`1px solid ${targets?tgtColor+"44":C.border+"44"}`}}>
+                <div style={{color:C.muted,fontSize:8}}>{tgtLabel}</div>
+                <div style={{color:targets?tgtColor:C.muted,fontSize:11,fontWeight:700}}>
                   {targets?fmtP(targets.target,h.ticker):"-"}
                 </div>
-                {tgtPct!=null&&<div style={{color:C.green,fontSize:8}}>+{tgtPct.toFixed(1)}%</div>}
+                {tgtPct!=null&&<div style={{color:tgtColor,fontSize:8}}>
+                  {tgtPct>=0?"+":""}{tgtPct.toFixed(1)}%
+                </div>}
               </div>
               <div style={{textAlign:"center",padding:"7px 4px",borderRadius:8,
-                background:targets?`${C.red}10`:"rgba(255,255,255,0.03)",
-                border:`1px solid ${targets?C.red+"44":C.border+"44"}`}}>
-                <div style={{color:C.muted,fontSize:8}}>손절가</div>
-                <div style={{color:targets?C.red:C.muted,fontSize:11,fontWeight:700}}>
+                background:targets?`${stopColor}10`:"rgba(255,255,255,0.03)",
+                border:`1px solid ${targets?stopColor+"44":C.border+"44"}`}}>
+                <div style={{color:C.muted,fontSize:8}}>{stopLabel}</div>
+                <div style={{color:targets?stopColor:C.muted,fontSize:11,fontWeight:700}}>
                   {targets?fmtP(targets.stop,h.ticker):"-"}
                 </div>
-                {stopPct!=null&&<div style={{color:C.red,fontSize:8}}>-{stopPct.toFixed(1)}%</div>}
+                {stopFromCurPct!=null&&<div style={{color:stopColor,fontSize:8}}>
+                  {stopFromCurPct>=0?"+":""}{stopFromCurPct.toFixed(1)}%
+                </div>}
               </div>
             </div>
 
@@ -3051,8 +3061,8 @@ function HoldingsMonitorPage(){
                 {[
                   {label:"RSI",val:s.rsi?.toFixed(0)||"-",color:s.rsi>70?C.red:s.rsi<30?C.green:C.cyan},
                   {label:"MA50",val:s.price>s.ma50?"위":"아래",color:s.price>s.ma50?C.green:C.red},
-                  {label:"리스크",val:targets?`-${targets.risk_pct}%`:"-",color:C.red},
-                  {label:"리워드",val:targets?`+${targets.reward_pct}%`:"-",color:C.green},
+                  {label:isSell?"반전리스크":"리스크",val:targets?`${isSell?"+":"−"}${targets.risk_pct}%`:"-",color:isSell?"#f59e0b":C.red},
+                  {label:isSell?"하락예상폭":"리워드",val:targets?`${isSell?"−":"+"}${targets.reward_pct}%`:"-",color:isSell?C.red:C.green},
                 ].map(({label,val,color})=>(
                   <div key={label} style={{textAlign:"center",padding:"5px 2px",borderRadius:6,
                     background:"rgba(255,255,255,0.025)",border:`1px solid ${C.border}33`}}>

@@ -214,7 +214,8 @@ OUTPUT_DIR           = os.environ.get("OUTPUT_DIR", os.path.join(BASE_DIR, "outp
 SIGNALS_FILE         = os.path.join(OUTPUT_DIR, "signals_v4.json")
 SIGNAL_HISTORY_FILE  = os.path.join(OUTPUT_DIR, "signal_history.json")
 BACKTEST_CACHE_FILE  = os.path.join(OUTPUT_DIR, "backtest_cache_v2.json")  # v2: stop/target 전략 반영
-PORTFOLIO_FILE       = os.path.join(OUTPUT_DIR, "portfolio.json")
+PORTFOLIO_FILE         = os.path.join(OUTPUT_DIR, "portfolio.json")
+PORTFOLIO_SIGNALS_FILE = os.path.join(OUTPUT_DIR, "portfolio_signals.json")
 os.makedirs(OUTPUT_DIR,   exist_ok=True)
 
 # ── KRX 전종목 캐시 ──
@@ -456,6 +457,143 @@ def _save_signal_history(new_data: dict) -> list:
     return changes
 
 
+# ── 보유종목 신호 감시 ──
+_portfolio_sig_prev: dict = {}   # {ticker: signal_type}
+_portfolio_check_lock = threading.Lock()
+
+_SIG_LABEL = {
+    "STRONG_BUY":  "🟢 강력매수",
+    "BUY":         "🟡 매수",
+    "HOLD_1X":     "⚪ 보유",
+    "NEUTRAL":     "⚪ 관망",
+    "CASH":        "⚪ 현금",
+    "SELL":        "🔴 매도",
+    "STRONG_SELL": "🔴 강력매도",
+}
+
+
+def _load_portfolio_sig_prev():
+    global _portfolio_sig_prev
+    try:
+        if os.path.exists(PORTFOLIO_SIGNALS_FILE):
+            with open(PORTFOLIO_SIGNALS_FILE, encoding="utf-8") as f:
+                _portfolio_sig_prev = json.load(f)
+    except Exception:
+        _portfolio_sig_prev = {}
+
+
+def _save_portfolio_sig_prev():
+    try:
+        with open(PORTFOLIO_SIGNALS_FILE, "w", encoding="utf-8") as f:
+            json.dump(_portfolio_sig_prev, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _check_portfolio_signals():
+    """보유종목 신호 변경 감지 → 텔레그램 알림 (1시간 주기 또는 봇 실행 후 호출)"""
+    global _portfolio_sig_prev
+    with _portfolio_check_lock:
+        # 포트폴리오 로드
+        holdings = []
+        try:
+            if os.path.exists(PORTFOLIO_FILE):
+                with open(PORTFOLIO_FILE, encoding="utf-8") as f:
+                    holdings = json.load(f)
+        except Exception:
+            return
+        if not holdings:
+            return
+
+        print(f"[portfolio] 신호 점검: {len(holdings)}개 종목")
+        alerts = []
+
+        for h in holdings:
+            ticker = (h.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            try:
+                res       = analyze_stock(ticker)
+                new_sig   = res.get("signal_type") or "NEUTRAL"
+                new_conf  = res.get("confidence") or 0
+                new_price = res.get("price") or h.get("buyPrice") or 0
+
+                prev_sig = _portfolio_sig_prev.get(ticker)
+                _portfolio_sig_prev[ticker] = new_sig  # 갱신
+
+                if prev_sig is None:
+                    continue   # 첫 체크 — 기준값만 저장, 알림 없음
+
+                # 방향 전환 감지 (buy ↔ neutral ↔ sell)
+                if _signal_group(prev_sig) != _signal_group(new_sig):
+                    buy_price = h.get("buyPrice") or 0
+                    quantity  = h.get("quantity") or 0
+                    pnl_pct   = (new_price - buy_price) / buy_price * 100 if buy_price > 0 else 0
+                    alerts.append({
+                        "ticker":     ticker,
+                        "name":       h.get("name", ticker),
+                        "flag":       h.get("flag", ""),
+                        "old_sig":    prev_sig,
+                        "new_sig":    new_sig,
+                        "confidence": new_conf,
+                        "price":      new_price,
+                        "buy_price":  buy_price,
+                        "quantity":   quantity,
+                        "pnl_pct":    pnl_pct,
+                    })
+            except Exception as e:
+                print(f"[portfolio] {ticker} 오류: {e}")
+
+        _save_portfolio_sig_prev()
+
+        if not alerts:
+            print("[portfolio] 신호 변경 없음")
+            return
+
+        # 텔레그램 메시지 구성
+        is_kr = lambda t: t.endswith(".KS") or t.endswith(".KQ")
+        fmt_price = lambda p, t: f"{round(p):,}원" if is_kr(t) else f"${p:.2f}"
+
+        ts    = datetime.datetime.now().strftime("%m/%d %H:%M")
+        lines = [f"📋 <b>보유종목 신호 변경</b> ({ts})\n"]
+        for a in alerts:
+            old_lbl  = _SIG_LABEL.get(a["old_sig"], a["old_sig"])
+            new_lbl  = _SIG_LABEL.get(a["new_sig"], a["new_sig"])
+            pnl_sign = "+" if a["pnl_pct"] >= 0 else ""
+            to_sell  = a["new_sig"] in ("SELL", "STRONG_SELL")
+            to_buy   = a["new_sig"] in ("BUY", "STRONG_BUY")
+            lines.append(f"{a['flag']} <b>{a['name']}</b> ({a['ticker']})")
+            lines.append(f"  {old_lbl} → {new_lbl}  (신뢰도 {a['confidence']})")
+            lines.append(f"  현재가: {fmt_price(a['price'], a['ticker'])}  ({pnl_sign}{a['pnl_pct']:.1f}%)")
+            if a["buy_price"] and a["quantity"]:
+                lines.append(f"  매수가: {fmt_price(a['buy_price'], a['ticker'])} · {int(a['quantity'])}주")
+            if to_sell and a["pnl_pct"] < 0:
+                lines.append("  ⚠️ 손실 중 매도신호 — 손절 검토 권고")
+            elif to_sell and a["pnl_pct"] > 0:
+                lines.append("  💰 수익 중 매도신호 — 익절 고려")
+            elif to_buy:
+                lines.append("  ✅ 추가매수 신호 발생")
+            lines.append("")
+        send_telegram("\n".join(lines))
+        print(f"[portfolio] 알림 전송: {len(alerts)}개 변경")
+
+
+def _portfolio_watcher():
+    """보유종목 신호 감시 루프 (1시간 주기, 장 마감 후 제외)"""
+    time.sleep(120)  # 서버 시작 후 2분 대기
+    while True:
+        try:
+            kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+            # 평일 09:00~18:00 KST 사이에만 체크
+            if kst.weekday() < 5 and 9 <= kst.hour < 18:
+                _check_portfolio_signals()
+            else:
+                print(f"[portfolio] 장외 시간 — 점검 생략 (KST {kst.hour}시)")
+        except Exception as e:
+            print(f"[portfolio_watcher] 오류: {e}")
+        time.sleep(3600)  # 1시간마다
+
+
 def _run_bot_background():
     """백그라운드에서 봇 분석 → 히스토리 저장 → 텔레그램 알림"""
     try:
@@ -470,6 +608,8 @@ def _run_bot_background():
             changes = _save_signal_history(data)
             if changes:
                 print(f"[bot] 신호 변경 {len(changes)}개 → Telegram 알림 전송")
+        # 봇 실행 후 보유종목도 함께 점검
+        threading.Thread(target=_check_portfolio_signals, daemon=True).start()
     except Exception as e:
         print(f"[bot] 분석 오류: {e}")
 
@@ -1375,6 +1515,13 @@ def save_portfolio():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route('/api/portfolio/check')
+def portfolio_check_now():
+    """보유종목 신호 즉시 점검 + 텔레그램 알림 (수동 트리거)"""
+    threading.Thread(target=_check_portfolio_signals, daemon=True).start()
+    return jsonify({"ok": True, "message": "보유종목 신호 점검 시작됨 (백그라운드)"})
+
+
 @app.route('/guide')
 def guide():
     return send_from_directory(STATIC_DIR, 'guide.html')
@@ -1440,6 +1587,9 @@ if __name__ == '__main__':
     print(f"  텔레그램: {'설정됨' if TELEGRAM_TOKEN else '미설정 (TELEGRAM_TOKEN 환경변수 필요)'}\n")
     # 일일 스케줄러 (KST 08:00, 16:00) — 시작 시 자동 분석은 하지 않음
     threading.Thread(target=_daily_scheduler, daemon=True).start()
+    # 보유종목 이전 신호 로드 + 감시 스레드 시작
+    _load_portfolio_sig_prev()
+    threading.Thread(target=_portfolio_watcher, daemon=True).start()
     # KRX 전종목 캐시 초기화 (없거나 7일 초과면 백그라운드 갱신)
     _init_krx_cache()
     app.run(host='0.0.0.0', port=port, debug=False)

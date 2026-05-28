@@ -2964,16 +2964,34 @@ function HoldingsMonitorPage(){
   const totalPnl=totalNow-totalBuy;
   const totalPnlPct=totalBuy>0?(totalPnl/totalBuy*100):0;
 
+  const [tgMsg,setTgMsg]=useState("");
+  const triggerCheck=async()=>{
+    try{
+      const r=await fetch(`${API_BASE}/api/portfolio/check`);
+      const j=await r.json();
+      setTgMsg(j.ok?"✅ 텔레그램 점검 시작":"❌ 실패");
+      setTimeout(()=>setTgMsg(""),3000);
+    }catch(e){setTgMsg("❌ 오류");setTimeout(()=>setTgMsg(""),3000);}
+  };
   return(
     <div className="tab-content">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
         <div style={{color:C.text,fontSize:15,fontWeight:800}}>📋 보유종목 모니터</div>
-        <button onClick={()=>fetchAll()} disabled={loading||!holdings.length} style={{
-          padding:"5px 12px",borderRadius:8,border:`1px solid ${C.cyan}44`,
-          background:C.cyan+"12",color:loading||!holdings.length?C.muted:C.cyan,
-          fontSize:10,fontWeight:700,cursor:holdings.length?"pointer":"default"}}>
-          {loading?"⟳ 분석 중...":"🔄 전체 분석"}
-        </button>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          {tgMsg&&<span style={{fontSize:10,color:C.cyan}}>{tgMsg}</span>}
+          <button onClick={triggerCheck} disabled={!holdings.length} title="텔레그램 신호 즉시 점검"
+            style={{padding:"5px 10px",borderRadius:8,border:`1px solid #f59e0b44`,
+              background:"#f59e0b12",color:holdings.length?"#f59e0b":C.muted,
+              fontSize:10,fontWeight:700,cursor:holdings.length?"pointer":"default"}}>
+            🔔 점검
+          </button>
+          <button onClick={()=>fetchAll()} disabled={loading||!holdings.length} style={{
+            padding:"5px 12px",borderRadius:8,border:`1px solid ${C.cyan}44`,
+            background:C.cyan+"12",color:loading||!holdings.length?C.muted:C.cyan,
+            fontSize:10,fontWeight:700,cursor:holdings.length?"pointer":"default"}}>
+            {loading?"⟳ 분석 중...":"🔄 전체 분석"}
+          </button>
+        </div>
       </div>
 
       {holdings.length>0&&(

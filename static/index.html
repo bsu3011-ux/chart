@@ -1876,6 +1876,66 @@ function StockResultCard({data:d,onChart,onClose}){
           </div>
           );
         })()}
+        {/* 외부 충격/뉴스 신호 */}
+        {d.ext&&(()=>{
+          const e=d.ext;
+          const shock=e.shock_level;
+          const chg1d=e.price_chg_1d;
+          const vr=e.vol_ratio;
+          const ed=e.earnings_days;
+          const ns=e.news_sentiment;
+          const nh=e.news_headlines||[];
+          const sigType=d.signal_type||"";
+          const isBuy=sigType==="BUY"||sigType==="STRONG_BUY";
+          const hasWarning=(shock==="major"||shock==="severe")&&chg1d<-3;
+          const hasEarnings=ed!=null&&ed<=14;
+          const hasNegNews=ns==="negative";
+          const hasAlert=hasWarning||hasEarnings||hasNegNews;
+          if(!hasAlert&&nh.length===0) return null;
+          return(
+            <div style={{marginTop:8,borderRadius:8,overflow:"hidden",
+              border:`1px solid ${hasAlert&&isBuy?C.red+"55":"#f59e0b55"}`}}>
+              {hasAlert&&(
+                <div style={{padding:"7px 10px",background:hasAlert&&isBuy?"rgba(239,68,68,0.1)":"rgba(245,158,11,0.1)"}}>
+                  <div style={{color:hasAlert&&isBuy?C.red:"#f59e0b",fontSize:9,fontWeight:800,marginBottom:3}}>
+                    ⚡ 외부 리스크 감지 {d.confidence_adj_reason?"— 신뢰도 자동 하향":""}
+                  </div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                    {hasWarning&&<span style={{padding:"2px 6px",borderRadius:4,fontSize:9,
+                      background:"rgba(239,68,68,0.15)",color:C.red,fontWeight:700}}>
+                      📉 {chg1d?.toFixed(1)}% · 거래량 {vr}x
+                    </span>}
+                    {hasEarnings&&<span style={{padding:"2px 6px",borderRadius:4,fontSize:9,
+                      background:"rgba(245,158,11,0.15)",color:"#f59e0b",fontWeight:700}}>
+                      📅 실적발표 D-{ed}
+                    </span>}
+                    {hasNegNews&&<span style={{padding:"2px 6px",borderRadius:4,fontSize:9,
+                      background:"rgba(239,68,68,0.12)",color:C.red,fontWeight:700}}>
+                      📰 부정 뉴스
+                    </span>}
+                    {ns==="positive"&&<span style={{padding:"2px 6px",borderRadius:4,fontSize:9,
+                      background:`${C.green}18`,color:C.green,fontWeight:700}}>
+                      📰 긍정 뉴스
+                    </span>}
+                  </div>
+                </div>
+              )}
+              {nh.length>0&&(
+                <div style={{padding:"6px 10px",background:"rgba(255,255,255,0.02)",
+                  borderTop:hasAlert?`1px solid ${C.border}33`:"none"}}>
+                  <div style={{color:C.muted,fontSize:8,fontWeight:700,marginBottom:3}}>📰 최근 뉴스</div>
+                  {nh.map((h,i)=>(
+                    <div key={i} style={{color:C.dim,fontSize:10,lineHeight:1.5,
+                      paddingBottom:i<nh.length-1?3:0,
+                      borderBottom:i<nh.length-1?`1px solid ${C.border}22`:"none"}}>
+                      {h.length>70?h.slice(0,70)+"…":h}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:`${C.cyan}08`,border:`1px solid ${C.cyan}22`}}>
           <div style={{color:C.cyan,fontSize:9,fontWeight:700,marginBottom:3}}>🤖 AI 분석</div>
           {d.data_unavailable&&<div style={{color:C.yellow,fontSize:10,marginBottom:4}}>⚠️ 실시간 시세 조회 불가 — 기본 정보만 표시</div>}
@@ -3081,6 +3141,68 @@ function HoldingsMonitorPage(){
                 </div>
               </div>
             )}
+
+            {/* 외부 충격/뉴스 신호 */}
+            {s?.ext&&(()=>{
+              const e=s.ext;
+              const shock=e.shock_level;
+              const chg1d=e.price_chg_1d;
+              const vr=e.vol_ratio;
+              const ed=e.earnings_days;
+              const ns=e.news_sentiment;
+              const nh=e.news_headlines||[];
+              const hasShock=(shock==="major"||shock==="severe");
+              const hasEarnings=ed!=null&&ed<=14;
+              const hasNegNews=ns==="negative";
+              const hasPosNews=ns==="positive";
+              const hasAlert=hasShock||hasEarnings||hasNegNews;
+              if(!hasAlert&&!hasPosNews&&nh.length===0) return null;
+              return(
+                <div style={{marginTop:8,borderRadius:8,overflow:"hidden",
+                  border:`1px solid ${hasAlert?C.red+"44":"#f59e0b44"}`}}>
+                  {(hasAlert||hasPosNews)&&(
+                    <div style={{padding:"7px 10px",
+                      background:hasAlert?"rgba(239,68,68,0.08)":"rgba(34,197,94,0.07)"}}>
+                      <div style={{color:hasAlert?C.red:C.green,fontSize:9,fontWeight:800,marginBottom:3}}>
+                        {hasAlert?"⚡ 외부 리스크 감지":"✅ 긍정 시그널"}
+                        {s.confidence_adj_reason?` — ${s.confidence_adj_reason}`:""}
+                      </div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                        {hasShock&&<span style={{padding:"2px 6px",borderRadius:4,fontSize:9,
+                          background:"rgba(239,68,68,0.15)",color:C.red,fontWeight:700}}>
+                          📉 {chg1d?.toFixed(1)}% · 거래량 {vr}x
+                        </span>}
+                        {hasEarnings&&<span style={{padding:"2px 6px",borderRadius:4,fontSize:9,
+                          background:"rgba(245,158,11,0.15)",color:"#f59e0b",fontWeight:700}}>
+                          📅 실적발표 D-{ed}
+                        </span>}
+                        {hasNegNews&&<span style={{padding:"2px 6px",borderRadius:4,fontSize:9,
+                          background:"rgba(239,68,68,0.12)",color:C.red,fontWeight:700}}>
+                          📰 부정 뉴스
+                        </span>}
+                        {hasPosNews&&<span style={{padding:"2px 6px",borderRadius:4,fontSize:9,
+                          background:`${C.green}18`,color:C.green,fontWeight:700}}>
+                          📰 긍정 뉴스
+                        </span>}
+                      </div>
+                    </div>
+                  )}
+                  {nh.length>0&&(
+                    <div style={{padding:"6px 10px",background:"rgba(255,255,255,0.02)",
+                      borderTop:(hasAlert||hasPosNews)?`1px solid ${C.border}33`:"none"}}>
+                      <div style={{color:C.muted,fontSize:8,fontWeight:700,marginBottom:3}}>📰 최근 뉴스</div>
+                      {nh.map((headline,ni)=>(
+                        <div key={ni} style={{color:C.dim,fontSize:10,lineHeight:1.5,
+                          paddingBottom:ni<nh.length-1?3:0,
+                          borderBottom:ni<nh.length-1?`1px solid ${C.border}22`:"none"}}>
+                          {headline.length>70?headline.slice(0,70)+"…":headline}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         );
       })}

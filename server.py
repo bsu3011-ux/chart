@@ -24,11 +24,184 @@ def _clean(obj):
     return obj
 
 # ── 봇 임포트 ──
-import time
+import time, re as _re
 from multi_market_bot_v4 import (
     main as run_bot, MARKETS, load_data, analyze_market, save_json,
     analyze_stock, POPULAR_STOCKS, backtest_strategy, backtest_stock,
 )
+
+# ── 외부 충격/뉴스 캐시 ──
+_ext_cache: dict = {}   # {ticker: {ts, data}}
+_EXT_TTL = 1800         # 30분
+
+
+def _get_external_signals(ticker: str, name: str = "") -> dict:
+    """거래량/가격 쇼크 + 실적일 + 뉴스 감성 분석
+    yfinance 데이터만 사용 (외부 뉴스 API 불필요).
+    결과:
+        shock_level   : 'none' | 'minor' | 'major' | 'severe'
+        vol_ratio     : 오늘 거래량 / 20일 평균
+        price_chg_1d  : 1일 등락률 (%)
+        price_chg_5d  : 5일 등락률 (%)
+        earnings_days : 실적발표까지 남은 일수 (없으면 None)
+        news_headlines: 최근 헤드라인 목록 (최대 3개, 없으면 [])
+        news_sentiment: 'positive' | 'neutral' | 'negative'
+        news_score    : -1.0 ~ 1.0
+        confidence_adj: 신뢰도 보정값 (음수 = 하향)
+    """
+    now = time.time()
+    cached = _ext_cache.get(ticker)
+    if cached and now - cached["ts"] < _EXT_TTL:
+        return cached["data"]
+
+    import yfinance as yf
+    import pandas as pd
+
+    result = {
+        "shock_level": "none",
+        "vol_ratio": None,
+        "price_chg_1d": None,
+        "price_chg_5d": None,
+        "earnings_days": None,
+        "news_headlines": [],
+        "news_sentiment": "neutral",
+        "news_score": 0,
+        "confidence_adj": 0,
+    }
+
+    try:
+        t = yf.Ticker(ticker)
+
+        # ── 1) 가격·거래량 쇼크 감지 ──
+        try:
+            df = t.history(period="30d")
+            if not df.empty and len(df) >= 5:
+                avg_vol = float(df["Volume"].iloc[:-1].mean())
+                today_vol = float(df["Volume"].iloc[-1])
+                vol_ratio = today_vol / avg_vol if avg_vol > 0 else 1.0
+
+                p_now  = float(df["Close"].iloc[-1])
+                p_prev = float(df["Close"].iloc[-2])
+                p_5d   = float(df["Close"].iloc[-5])
+                chg_1d = (p_now - p_prev) / p_prev * 100 if p_prev > 0 else 0.0
+                chg_5d = (p_now - p_5d)   / p_5d   * 100 if p_5d   > 0 else 0.0
+
+                if abs(chg_1d) > 10 or vol_ratio > 5:
+                    shock = "severe"
+                elif abs(chg_1d) > 5 or vol_ratio > 3:
+                    shock = "major"
+                elif abs(chg_1d) > 2.5 or vol_ratio > 2:
+                    shock = "minor"
+                else:
+                    shock = "none"
+
+                result.update({
+                    "vol_ratio": round(vol_ratio, 1),
+                    "price_chg_1d": round(chg_1d, 2),
+                    "price_chg_5d": round(chg_5d, 2),
+                    "shock_level": shock,
+                })
+        except Exception:
+            pass
+
+        # ── 2) 실적발표일 경고 ──
+        try:
+            cal = t.calendar
+            if cal is not None and not (hasattr(cal, "empty") and cal.empty):
+                # calendar는 dict 또는 DataFrame일 수 있음
+                dates = None
+                if isinstance(cal, dict):
+                    dates = cal.get("Earnings Date")
+                elif hasattr(cal, "loc"):
+                    try: dates = cal.loc["Earnings Date"]
+                    except KeyError: pass
+                if dates is not None:
+                    import pandas as pd
+                    ds = [dates] if not hasattr(dates, "__iter__") else list(dates)
+                    for d in ds:
+                        try:
+                            ts = pd.Timestamp(d)
+                            if pd.notna(ts):
+                                days_left = (ts - pd.Timestamp.now()).days
+                                if 0 <= days_left <= 30:
+                                    result["earnings_days"] = days_left
+                                    break
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # ── 3) 뉴스 감성 ──
+        try:
+            news = t.news or []
+            NEG = ["급락","폭락","하락","쇼크","악재","부진","손실","적자","위기","충격",
+                   "소송","제재","경고","취소","철수","파산","리콜","하향","조사","압수"]
+            POS = ["급등","상승","호실적","수혜","계약","신고가","상향","호재","성장",
+                   "흑자","수주","승인","선정","특허","협약","수출","최대","기대"]
+            score = 0
+            headlines = []
+            for n in news[:6]:
+                title = n.get("title", "")
+                if not title:
+                    continue
+                headlines.append(title)
+                for w in NEG:
+                    if w in title: score -= 1
+                for w in POS:
+                    if w in title: score += 1
+            norm = max(-1.0, min(1.0, score / max(len(headlines), 1)))
+            sentiment = "negative" if norm < -0.2 else "positive" if norm > 0.2 else "neutral"
+            result.update({
+                "news_headlines": headlines[:3],
+                "news_sentiment": sentiment,
+                "news_score": round(norm, 2),
+            })
+        except Exception:
+            pass
+
+        # ── 4) 신뢰도 보정 계산 ──
+        adj = 0
+        shock = result["shock_level"]
+        chg1d = result.get("price_chg_1d") or 0
+        ed = result.get("earnings_days")
+        ns = result["news_sentiment"]
+
+        if shock == "severe" and chg1d < -5:   adj -= 30
+        elif shock == "major" and chg1d < -3:  adj -= 20
+        elif shock == "minor" and chg1d < 0:   adj -= 8
+        if ed is not None:
+            if ed <= 3:    adj -= 20
+            elif ed <= 7:  adj -= 13
+            elif ed <= 14: adj -= 6
+        if ns == "negative":  adj -= 15
+        elif ns == "positive": adj += 5
+        result["confidence_adj"] = adj
+
+    except Exception:
+        pass
+
+    _ext_cache[ticker] = {"ts": now, "data": result}
+    return result
+
+
+def _build_adj_reason(ext: dict) -> str:
+    """신뢰도 하향 이유 요약 문장 생성"""
+    reasons = []
+    shock = ext.get("shock_level", "none")
+    chg1d = ext.get("price_chg_1d") or 0
+    vr    = ext.get("vol_ratio") or 1
+    ed    = ext.get("earnings_days")
+    ns    = ext.get("news_sentiment", "neutral")
+    if shock in ("major", "severe") and chg1d < 0:
+        reasons.append(f"최근 {abs(chg1d):.1f}% 급락 / 거래량 {vr}x 이상")
+    elif shock == "minor" and chg1d < 0:
+        reasons.append(f"최근 {abs(chg1d):.1f}% 하락")
+    if ed is not None:
+        reasons.append(f"실적발표 {ed}일 전 (불확실성 ↑)")
+    if ns == "negative":
+        reasons.append("부정적 뉴스 감지")
+    return " · ".join(reasons) if reasons else ""
+
 
 # ── 절대 경로 기준 설정 ──
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -442,6 +615,20 @@ def get_stock_analysis():
                     pass
             threading.Thread(target=_bg_record, daemon=True).start()
 
+        # 외부 충격/뉴스 신호 통합
+        name = result.get("name") or POPULAR_STOCKS.get(ticker, {}).get("name", "")
+        ext = _get_external_signals(ticker, name)
+        sig_type = result.get("signal_type", "NEUTRAL")
+        raw_conf = result.get("confidence") or 0
+        adj = ext.get("confidence_adj", 0)
+        # 매수 시그널에 부정적 외부신호 → 신뢰도 하향
+        if sig_type in ("STRONG_BUY", "BUY") and adj < 0:
+            result["confidence"] = max(0, raw_conf + adj)
+            result["confidence_adj_reason"] = _build_adj_reason(ext)
+        # 매도 시그널에 쇼크 감지 → 신뢰도 상향 (쇼크가 매도 확인)
+        elif sig_type in ("SELL", "STRONG_SELL") and ext.get("shock_level") in ("major","severe") and (ext.get("price_chg_1d") or 0) < -3:
+            result["confidence"] = min(100, raw_conf + 10)
+        result["ext"] = _clean(ext)
         return jsonify(_clean(result))
     except ValueError:
         # yfinance 실패 → POPULAR_STOCKS 기본 정보 폴백

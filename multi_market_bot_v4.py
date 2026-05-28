@@ -1572,15 +1572,30 @@ def analyze_minervini(df, params):
         signal = "⚪ 관망"
         signal_type = "NEUTRAL"
 
+    # ── confidence 동적 산출 (레버리지 전략과 동일 스케일 0~100) ──
+    conf = 50
+    if current > _mf:                         conf += 8   # MA빠른선 위
+    if current > _ms:                         conf += 7   # MA느린선 위
+    if _mf > _ms:                             conf += 5   # 정배열
+    if slope > 0:                             conf += 5   # 느린 MA 상향
+    if p.get('entry_rsi', 50) <= _rsi < 70:  conf += 5   # RSI 적정
+    elif _rsi >= 70:                          conf -= 5   # 과매수
+    if rr >= 2.0:                             conf += 5   # R:R 양호
+    if is_stage2:                             conf += 10  # Stage2 확정
+    else:                                     conf -= 5   # 조건 미충족
+    confidence = max(0, min(100, conf))
+
     # ── 매크로 가드 (크립토는 VIX와 약한 상관, 패닉장만 경고) ──
     macro = get_macro_context()
     _vix = macro.get('vix')
     macro_note = None
     if _vix is not None and _vix >= 30 and signal_type == "BUY":
         macro_note = f"⚠️ VIX {_vix:.1f} 패닉 - 진입 신중"
+        confidence = max(0, confidence - 15)
 
     return {
         "signal": signal, "signal_type": signal_type,
+        "confidence": confidence,
         "is_stage2": is_stage2,
         "price": current, "change_pct": (current-prev)/prev*100,
         "ma_fast": _mf, "ma_slow": _ms, "ma_slope": slope,
@@ -1791,57 +1806,57 @@ def analyze_dual_filter(df, params, profile=None):
         signal = "🟢 강력 매수 (3모멘텀+추세확정)"
         signal_type = "STRONG_BUY"
         action = "강력 매수"
-        confidence = 85
     elif pos_count == 3 and (trend_strong or trend_up):
-        # 3모멘텀 but ADX or 방향 하나만 확정 → 일반 매수
         signal = "🟢 매수 (3모멘텀·추세 부분확정)"
         signal_type = "BUY"
         action = "매수"
-        confidence = 72
     elif pos_count == 2 and trend_strong and trend_up:
-        # 2모멘텀 + 추세 확정 → 투자 유지
         signal = "🟢 투자 유지 (2모멘텀+추세확정)"
         signal_type = "INVESTED"
         action = "투자 유지"
-        confidence = 65
     elif pos_count == 2:
-        # 2모멘텀 but 추세 미확정 → 소극적 관망
         signal = "⚪ 관망 (2모멘텀·추세 미확정)"
         signal_type = "NEUTRAL"
         action = "관망"
-        confidence = 48
     elif rsi_extreme_low and pos_count == 0:
         signal = "🟡 반등 대기 (과매도 극단)"
         signal_type = "CAUTION"
         action = "분할 매수 검토"
-        confidence = 55
     elif neg_count == 3 and trend_strong and not trend_up:
-        # 전구간 음모멘텀 + 하락추세 확인 → 강한 현금
         signal = "🔴 현금 (전 구간 음모멘텀+하락추세)"
         signal_type = "CASH"
         action = "현금 전환"
-        confidence = 80
     elif neg_count == 3:
         signal = "🔴 현금 (전 구간 음모멘텀)"
         signal_type = "CASH"
         action = "현금 전환"
-        confidence = 70
     elif rsi_extreme_high and trend_strong and not trend_up:
         signal = "🔴 매도 (과열+하락추세)"
         signal_type = "SELL"
         action = "분할 매도"
-        confidence = 70
     else:
         signal = "⚪ 관망"
         signal_type = "NEUTRAL"
         action = "관망"
-        confidence = 40
+
+    # ── confidence 동적 산출 (레버리지·미너비니와 동일 스케일 0~100) ──
+    # 기본 50 → 모멘텀·ADX·RSI 상태에 따라 가감
+    conf = 50
+    conf += pos_count * 8          # 양전 모멘텀 1개당 +8 (최대 +24)
+    conf -= neg_count * 8          # 음전 모멘텀 1개당 -8 (최대 -24)
+    if trend_strong:  conf += 6    # ADX 추세강도 확인
+    if trend_up:      conf += 4    # +DI > -DI
+    if rsi_extreme_low:  conf -= 8 # 과매도 극단 = 하락 모멘텀 강함
+    if rsi_extreme_high: conf -= 6 # 과열 = 단기 조정 위험
+    elif rsi_lo < rsi_val < rsi_hi: conf += 3  # RSI 정상 범위
 
     # ── 모멘텀 가속도 보정 ──
     if accelerating and pos_count >= 2:
-        confidence = min(100, confidence + 5)
+        conf += 5
     elif decelerating and pos_count >= 2:
-        confidence = max(0, confidence - 5)
+        conf -= 5
+
+    confidence = max(0, min(100, conf))
 
     # ── 매크로 가드 ──
     macro = get_macro_context()
@@ -1969,7 +1984,10 @@ def analyze_risk_defense(df, params, profile=None):
         signal = f"⚪ 관망 (위험 {risk_score}점)"
         signal_type = "NEUTRAL"
 
-    confidence = 100 - risk_score if signal_type == "INVESTED" else risk_score
+    # confidence = 방어 신뢰도: 위험 낮을수록 높음 (레버리지·미너비니와 동일 방향)
+    # INVESTED(안전) → 100-risk, CASH/CAUTION(위험 포착) → 위험점수만큼
+    # 두 방향 모두 "해당 신호가 얼마나 확실한가" = 위험점수 극단일수록 신호 선명
+    confidence = 100 - risk_score
 
     return {
         "signal": signal, "signal_type": signal_type,
@@ -2399,11 +2417,11 @@ def _slope(series, n=5):
     v_prev = float(s.iloc[-(n + 1)])
     return (v_now - v_prev) / v_prev * 100 if v_prev != 0 else 0.0
 
-def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
+def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio=1.0,
                        divergence=None, candle_pattern=None, ma50_slope=0,
                        rs_score=50, momentum_composite=50, vcp_detected=False,
                        regime_adj=0, liquidity_adj=0, fundamental_adj=0,
-                       macro_adj=0, vol_z_adj=0):
+                       macro_adj=0, vol_z_adj=0, atr=None):
     """가중치 기반 신호 생성 (0~100점, 기본 50 중립)
 
     카테고리별 캡으로 단일 카테고리 과대평가 방지:
@@ -2444,8 +2462,11 @@ def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_rat
     elif rsi >  20:              mom += 2
     else:                        mom += 3   # 극단 과매도 반등
     if macd_hist and price:
-        _macd_norm = (macd_hist / price) * 100
-        mom += int(max(-4, min(4, _macd_norm / 0.5 * 3)))
+        # ATR 기반 정규화: 변동성 크기 독립적 (BTC $100k vs 삼성 $60)
+        # ATR 미제공시 가격의 1.5% 추정 (평균 일변동)
+        _atr_est = atr if atr else price * 0.015
+        _macd_norm = macd_hist / _atr_est  # MACD를 ATR 단위로 환산
+        mom += int(max(-4, min(4, _macd_norm / 0.3 * 3)))
     mom += _cmp(price, ma20) * 3
     score += max(-10, min(10, mom))
 
@@ -2740,21 +2761,22 @@ import time as _time_mod
 _bm_close_cache: dict = {}  # {ticker: (timestamp, Series)}
 
 def _get_benchmark_close(bm_ticker: str, period: str = "1y"):
-    """벤치마크 종가 캐시 (1시간 TTL)"""
+    """벤치마크 종가 캐시 (1시간 TTL, 실패시 stale 반환)"""
     now = _time_mod.time()
-    if bm_ticker in _bm_close_cache:
-        ts, series = _bm_close_cache[bm_ticker]
-        if now - ts < 3600:
-            return series
+    cached = _bm_close_cache.get(bm_ticker)
+    if cached and now - cached[0] < 3600:
+        return cached[1]
     try:
         df_bm = load_data(bm_ticker, period=period)
-        if df_bm.empty:
-            return None
+        if df_bm is None or df_bm.empty:
+            return cached[1] if cached else None  # stale 반환
         series = df_bm['Close'].dropna()
+        if len(series) == 0:
+            return cached[1] if cached else None
         _bm_close_cache[bm_ticker] = (now, series)
         return series
     except Exception:
-        return None
+        return cached[1] if cached else None  # 실패시 stale 반환
 
 
 _macro_cache: dict = {}
@@ -2766,7 +2788,7 @@ def get_macro_context() -> dict:
     - DXY: 달러지수 (>105 강달러 → 신흥국·원자재 압력)
     """
     now = _time_mod.time()
-    if 'ts' in _macro_cache and now - _macro_cache['ts'] < 3600:
+    if 'ts' in _macro_cache and now - _macro_cache['ts'] < 600:   # 10분 TTL
         return _macro_cache['data']
 
     ctx = {
@@ -3015,48 +3037,47 @@ def calc_liquidity_score(current_vol: int, price: float, is_korean: bool) -> dic
 
 
 def calc_fundamental_score(pe_ratio, roe, eps_growth) -> dict:
-    """펀더멘털 점수 (±8점 캡)
-    PER:      <10 +3, 10~25 +1, 25~50 0, ≥50 -2, None/음수 0
-    ROE:      >20% +3, 15~20% +2, 10~15% +1, 0~10% 0, <0% -3
-    EPS성장:  >30% +3, 15~30% +2, 0~15% +1, <0% -3
+    """펀더멘털 점수 (±5점 캡 — _generate_signal 내 카테고리 캡과 일치)
+    PER:      <10 +2, 10~25 +1, 25~50 0, ≥50 -1, None/음수 0
+    ROE:      >20% +2, 15~20% +1, 10~15% +0, 0~10% 0, <0% -2
+    EPS성장:  >30% +2, 15~30% +1, 0~15% 0, <0% -2
     """
     parts = []
     details = {}
 
     # PER
     if pe_ratio is not None:
-        if   pe_ratio <= 0:   pe_pts = 0     # 적자기업 (PER 의미 없음)
-        elif pe_ratio < 10:   pe_pts = 3
+        if   pe_ratio <= 0:   pe_pts = 0
+        elif pe_ratio < 10:   pe_pts = 2
         elif pe_ratio < 25:   pe_pts = 1
         elif pe_ratio < 50:   pe_pts = 0
-        else:                 pe_pts = -2
+        else:                 pe_pts = -1
         parts.append(pe_pts); details["per"] = pe_pts
     else:
         details["per"] = None
 
     # ROE
     if roe is not None:
-        if   roe >= 20:  roe_pts = 3
-        elif roe >= 15:  roe_pts = 2
-        elif roe >= 10:  roe_pts = 1
+        if   roe >= 20:  roe_pts = 2
+        elif roe >= 15:  roe_pts = 1
         elif roe >= 0:   roe_pts = 0
-        else:            roe_pts = -3
+        else:            roe_pts = -2
         parts.append(roe_pts); details["roe"] = roe_pts
     else:
         details["roe"] = None
 
     # EPS 성장
     if eps_growth is not None:
-        if   eps_growth >= 30: eps_pts = 3
-        elif eps_growth >= 15: eps_pts = 2
-        elif eps_growth >= 0:  eps_pts = 1
-        else:                  eps_pts = -3
+        if   eps_growth >= 30: eps_pts = 2
+        elif eps_growth >= 15: eps_pts = 1
+        elif eps_growth >= 0:  eps_pts = 0
+        else:                  eps_pts = -2
         parts.append(eps_pts); details["eps_growth"] = eps_pts
     else:
         details["eps_growth"] = None
 
     total = sum(parts) if parts else 0
-    total = max(-8, min(8, total))   # 캡 ±8
+    total = max(-5, min(5, total))   # 캡 ±5
 
     if   total >= 5:  label = "🟢 우량"
     elif total >= 2:  label = "🟢 양호"
@@ -3268,7 +3289,7 @@ def analyze_stock(ticker: str) -> dict:
 
     # 신호 생성 (가중치 + 다이버전스 + 캔들 + 선행지표 + 매크로 + 품질)
     signal_type, signal_text, confidence = _generate_signal(
-        current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
+        current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b,
         divergence=divergence, candle_pattern=candle_pattern, ma50_slope=ma50_slope,
         rs_score=rs_score, momentum_composite=momentum["composite"],
         vcp_detected=vcp["detected"],
@@ -3277,6 +3298,7 @@ def analyze_stock(ticker: str) -> dict:
         fundamental_adj=fundamental["score_adj"],
         macro_adj=macro["score_adj"],
         vol_z_adj=vol_z["score_adj"],
+        atr=atr_val,   # ATR 기반 MACD 정규화
     )
 
     # ── KIS Open API: 외국인·기관 순매수 + 체결강도 (한국 종목만) ──

@@ -220,6 +220,202 @@ def _build_adj_reason(ext: dict) -> str:
     return " · ".join(reasons) if reasons else ""
 
 
+
+# ══════════════════════════════════════════════════════
+# 시장 전체 흐름 + 섹터 컨텍스트
+# ══════════════════════════════════════════════════════
+
+_market_ctx_cache: dict = {}
+_sector_ctx_cache: dict = {}
+_MARKET_CTX_TTL = 900    # 15분
+_SECTOR_CTX_TTL = 1800   # 30분
+
+
+def _get_market_context() -> dict:
+    """오늘 KOSPI/KOSDAQ/S&P500 등락률 + 시장 상태
+    primary  : signals_v4.json (봇이 주기 분석한 지수)
+    secondary: ranking_cache.json 내 KR 종목 상승비율(breadth)
+    fallback : yfinance 직접 조회
+    """
+    now = time.time()
+    if _market_ctx_cache.get("ts") and now - _market_ctx_cache["ts"] < _MARKET_CTX_TTL:
+        return _market_ctx_cache["data"]
+
+    result = {
+        "kospi_chg": None, "kosdaq_chg": None, "spx_chg": None,
+        "market_state": "unknown", "market_label": "확인 중",
+        "breadth_pct": None,   # 상승 종목 비율 (ranking cache 기반)
+    }
+
+    # 1) signals_v4.json 에서 지수 등락률 읽기
+    try:
+        if os.path.exists(SIGNALS_FILE):
+            with open(SIGNALS_FILE, encoding="utf-8") as f:
+                sig = json.load(f)
+            for m in sig.get("markets", []):
+                t   = m.get("ticker", "")
+                chg = m.get("change_pct")
+                if t == "^KS11":   result["kospi_chg"]  = round(chg, 2) if chg else None
+                elif t == "^KQ11": result["kosdaq_chg"] = round(chg, 2) if chg else None
+                elif t == "^GSPC": result["spx_chg"]    = round(chg, 2) if chg else None
+    except Exception:
+        pass
+
+    # 2) yfinance 폴백 (signals가 없거나 오래된 경우)
+    if result["kospi_chg"] is None and result["kosdaq_chg"] is None:
+        try:
+            import yfinance as yf
+            for sym, key in [("^KS11","kospi_chg"), ("^KQ11","kosdaq_chg"), ("^GSPC","spx_chg")]:
+                df = yf.download(sym, period="2d", progress=False)
+                if not df.empty and len(df) >= 2:
+                    c = df["Close"]
+                    result[key] = round(float((c.iloc[-1]-c.iloc[-2])/c.iloc[-2]*100), 2)
+        except Exception:
+            pass
+
+    # 3) 시장 상태 결정 (KOSPI 우선, 없으면 KOSDAQ)
+    ref = result["kospi_chg"] if result["kospi_chg"] is not None else result["kosdaq_chg"]
+    if ref is not None:
+        if   ref <= -3:  result["market_state"] = "crash";   result["market_label"] = f"시장 급락 ({ref:+.1f}%)"
+        elif ref <= -1:  result["market_state"] = "bear";    result["market_label"] = f"시장 약세 ({ref:+.1f}%)"
+        elif ref <   1:  result["market_state"] = "neutral"; result["market_label"] = f"보합 ({ref:+.1f}%)"
+        elif ref <   3:  result["market_state"] = "bull";    result["market_label"] = f"시장 강세 ({ref:+.1f}%)"
+        else:            result["market_state"] = "surge";   result["market_label"] = f"시장 급등 ({ref:+.1f}%)"
+
+    # 4) 시장 넓이 (ranking cache — KR 종목 상승:하락 비율)
+    try:
+        if os.path.exists(RANKING_CACHE_FILE):
+            with open(RANKING_CACHE_FILE, encoding="utf-8") as f:
+                rc = json.load(f)
+            stocks = [r for r in rc.get("ranking", [])
+                      if r.get("ticker","").endswith((".KS",".KQ"))
+                      and r.get("change_pct") is not None]
+            if stocks:
+                up = sum(1 for s in stocks if s["change_pct"] > 0)
+                result["breadth_pct"] = round(up / len(stocks) * 100, 1)
+    except Exception:
+        pass
+
+    _market_ctx_cache["ts"]   = now
+    _market_ctx_cache["data"] = result
+    return result
+
+
+def _get_sector_context(sector: str) -> dict:
+    """섹터 평균 오늘 등락률
+    primary: ranking_cache.json (같은 섹터 종목)
+    fallback: POPULAR_STOCKS 동일 섹터 yfinance 샘플 (최대 5개)
+    """
+    if not sector:
+        return {}
+    now = time.time()
+    cached = _sector_ctx_cache.get(sector)
+    if cached and now - cached["ts"] < _SECTOR_CTX_TTL:
+        return cached["data"]
+
+    chgs = []
+    try:
+        # ranking cache에서 동일 섹터
+        if os.path.exists(RANKING_CACHE_FILE):
+            with open(RANKING_CACHE_FILE, encoding="utf-8") as f:
+                rc = json.load(f)
+            for s in rc.get("ranking", []):
+                if s.get("sector") == sector and s.get("change_pct") is not None:
+                    chgs.append(s["change_pct"])
+    except Exception:
+        pass
+
+    if not chgs:
+        # POPULAR_STOCKS 동일 섹터 샘플
+        peers = [t for t, info in POPULAR_STOCKS.items() if info.get("sector") == sector][:5]
+        if peers:
+            try:
+                import yfinance as yf
+                for pt in peers:
+                    df = yf.download(pt, period="2d", progress=False)
+                    if not df.empty and len(df) >= 2:
+                        c = df["Close"]
+                        chgs.append(round(float((c.iloc[-1]-c.iloc[-2])/c.iloc[-2]*100), 2))
+            except Exception:
+                pass
+
+    if not chgs:
+        return {}
+
+    avg = round(sum(chgs)/len(chgs), 2)
+    data = {
+        "sector":   sector,
+        "avg_chg":  avg,
+        "n":        len(chgs),
+        "label":    f"{sector} {avg:+.1f}%",
+        "state":    "강세" if avg > 1 else "약세" if avg < -1 else "보합",
+    }
+    _sector_ctx_cache[sector] = {"ts": now, "data": data}
+    return data
+
+
+def _build_market_signal_context(
+    stock_chg: float,
+    signal_type: str,
+    confidence: int,
+    mkt: dict,
+    sec: dict,
+    is_kosdaq: bool = False,
+) -> dict:
+    """종목 등락을 시장·섹터와 비교 → 원인 분류 + 신뢰도 조정값 반환"""
+    ref_chg = (mkt.get("kosdaq_chg") if is_kosdaq else mkt.get("kospi_chg")) or 0
+    sec_chg = sec.get("avg_chg")
+
+    vs_market = round(stock_chg - ref_chg, 2) if ref_chg is not None else None
+    vs_sector = round(stock_chg - sec_chg,  2) if sec_chg  is not None else None
+
+    # 원인 분류
+    cause = "unknown"
+    cause_label = ""
+    if vs_market is not None:
+        if abs(stock_chg) < 1.5:
+            cause = "stable";        cause_label = "안정적"
+        elif vs_market > 2:
+            cause = "stock_strong";  cause_label = f"시장 대비 강세 (+{vs_market:.1f}p)"
+        elif vs_market < -5:
+            cause = "stock_specific";cause_label = f"종목 고유 악재 (시장 대비 {vs_market:.1f}p)"
+        elif vs_market < -2:
+            cause = "stock_weak";    cause_label = f"시장 대비 추가 약세 ({vs_market:.1f}p)"
+        else:
+            cause = "market_driven"; cause_label = f"시장 전반 영향 (vs시장 {vs_market:+.1f}p)"
+
+    # 신뢰도 조정
+    adj = 0
+    mkt_state = mkt.get("market_state","unknown")
+    if signal_type in ("STRONG_BUY","BUY"):
+        if mkt_state == "crash":  adj -= 20
+        elif mkt_state == "bear": adj -= 10
+        if cause == "stock_specific": adj -= 10   # 시장보다 훨씬 나쁘면 매수 신뢰도↓
+        if cause == "stock_strong":   adj += 5    # 시장보다 강하면 매수 신뢰도↑
+    elif signal_type in ("SELL","STRONG_SELL"):
+        if cause == "market_driven":  adj += 5    # 시장 전반 하락이면 매도 신호 신뢰도↑ (확인)
+        if mkt_state in ("bull","surge") and cause == "stable": adj -= 10  # 강세장 속 보합은 매도 신호 경계
+
+    note_parts = []
+    if mkt.get("kospi_chg") is not None or mkt.get("kosdaq_chg") is not None:
+        idx = "KOSDAQ" if is_kosdaq else "KOSPI"
+        ref_v = mkt.get("kosdaq_chg") if is_kosdaq else mkt.get("kospi_chg")
+        note_parts.append(f"{idx} {ref_v:+.1f}%")
+    if sec_chg is not None:
+        note_parts.append(f"{sec.get('sector','')} {sec_chg:+.1f}%")
+    if cause_label:
+        note_parts.append(cause_label)
+
+    return {
+        "vs_market":   vs_market,
+        "vs_sector":   vs_sector,
+        "cause":       cause,
+        "cause_label": cause_label,
+        "conf_adj":    adj,
+        "note":        " · ".join(note_parts),
+    }
+
+
 # ── 절대 경로 기준 설정 ──
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -710,8 +906,16 @@ def _build_dart_report(force: bool = False):
         print("[DART] 공시 내용 없음 — 메시지 생략")
         return
 
-    ts     = datetime.datetime.now().strftime("%m/%d %H:%M")
-    header = f"📊 <b>보유종목 공시 보고</b> ({ts})\n총 {total_cnt}건 확인"
+    ts  = datetime.datetime.now().strftime("%m/%d %H:%M")
+    mkt = _get_market_context()
+    mkt_line = ""
+    if mkt.get("kospi_chg") is not None or mkt.get("kosdaq_chg") is not None:
+        parts = []
+        if mkt.get("kospi_chg")  is not None: parts.append(f"KOSPI {mkt['kospi_chg']:+.1f}%")
+        if mkt.get("kosdaq_chg") is not None: parts.append(f"KOSDAQ {mkt['kosdaq_chg']:+.1f}%")
+        if mkt.get("spx_chg")    is not None: parts.append(f"S&P {mkt['spx_chg']:+.1f}%")
+        mkt_line = "\n📊 " + " · ".join(parts) + f"  ({mkt.get('market_label','')})"
+    header = f"📋 <b>보유종목 공시 보고</b> ({ts})\n총 {total_cnt}건 확인{mkt_line}"
     body   = "\n━━━━━━━━━━━━━━".join([header] + sections)
 
     if len(body) > 4000:
@@ -789,6 +993,7 @@ def _check_portfolio_signals():
                         "buy_price":  buy_price,
                         "quantity":   quantity,
                         "pnl_pct":    pnl_pct,
+                        "chg_pct":    res.get("change_pct") or 0,
                     })
             except Exception as e:
                 print(f"[portfolio] {ticker} 오류: {e}")
@@ -799,23 +1004,51 @@ def _check_portfolio_signals():
             print("[portfolio] 신호 변경 없음")
             return
 
-        # 텔레그램 메시지 구성
-        is_kr = lambda t: t.endswith(".KS") or t.endswith(".KQ")
+        # 시장 컨텍스트 수집
+        mkt = _get_market_context()
+
+        is_kr     = lambda t: t.endswith(".KS") or t.endswith(".KQ")
         fmt_price = lambda p, t: f"{round(p):,}원" if is_kr(t) else f"${p:.2f}"
 
+        # 시장 환경 요약줄
+        mkt_parts = []
+        if mkt.get("kospi_chg")  is not None: mkt_parts.append(f"KOSPI {mkt['kospi_chg']:+.1f}%")
+        if mkt.get("kosdaq_chg") is not None: mkt_parts.append(f"KOSDAQ {mkt['kosdaq_chg']:+.1f}%")
+        if mkt.get("spx_chg")    is not None: mkt_parts.append(f"S&P {mkt['spx_chg']:+.1f}%")
+        if mkt.get("breadth_pct") is not None: mkt_parts.append(f"상승종목 {mkt['breadth_pct']:.0f}%")
+        mkt_summary = "  📊 " + " · ".join(mkt_parts) if mkt_parts else ""
+
         ts    = datetime.datetime.now().strftime("%m/%d %H:%M")
-        lines = [f"📋 <b>보유종목 신호 변경</b> ({ts})\n"]
+        lines = [f"📋 <b>보유종목 신호 변경</b> ({ts})"]
+        if mkt_summary:
+            lines.append(mkt_summary)
+        lines.append("")
+
         for a in alerts:
-            old_lbl  = _SIG_LABEL.get(a["old_sig"], a["old_sig"])
-            new_lbl  = _SIG_LABEL.get(a["new_sig"], a["new_sig"])
-            pnl_sign = "+" if a["pnl_pct"] >= 0 else ""
-            to_sell  = a["new_sig"] in ("SELL", "STRONG_SELL")
-            to_buy   = a["new_sig"] in ("BUY", "STRONG_BUY")
+            old_lbl   = _SIG_LABEL.get(a["old_sig"], a["old_sig"])
+            new_lbl   = _SIG_LABEL.get(a["new_sig"], a["new_sig"])
+            pnl_sign  = "+" if a["pnl_pct"] >= 0 else ""
+            to_sell   = a["new_sig"] in ("SELL", "STRONG_SELL")
+            to_buy    = a["new_sig"] in ("BUY", "STRONG_BUY")
+            is_kosdaq = a["ticker"].endswith(".KQ")
+
+            # 시장/섹터 대비 분석
+            sector  = POPULAR_STOCKS.get(a["ticker"], {}).get("sector", "")
+            sec_ctx = _get_sector_context(sector) if sector else {}
+            ctx     = _build_market_signal_context(
+                a.get("chg_pct", 0), a["new_sig"], a["confidence"],
+                mkt, sec_ctx, is_kosdaq,
+            )
+
             lines.append(f"{a['flag']} <b>{a['name']}</b> ({a['ticker']})")
             lines.append(f"  {old_lbl} → {new_lbl}  (신뢰도 {a['confidence']})")
             lines.append(f"  현재가: {fmt_price(a['price'], a['ticker'])}  ({pnl_sign}{a['pnl_pct']:.1f}%)")
             if a["buy_price"] and a["quantity"]:
                 lines.append(f"  매수가: {fmt_price(a['buy_price'], a['ticker'])} · {int(a['quantity'])}주")
+            # 원인 분석
+            if ctx.get("note"):
+                lines.append(f"  🔍 {ctx['note']}")
+            # 권고
             if to_sell and a["pnl_pct"] < 0:
                 lines.append("  ⚠️ 손실 중 매도신호 — 손절 검토 권고")
             elif to_sell and a["pnl_pct"] > 0:
@@ -1027,6 +1260,34 @@ def get_stock_analysis():
         elif sig_type in ("SELL", "STRONG_SELL") and ext.get("shock_level") in ("major","severe") and (ext.get("price_chg_1d") or 0) < -3:
             result["confidence"] = min(100, raw_conf + 10)
         result["ext"] = _clean(ext)
+
+        # 시장/섹터 컨텍스트
+        mkt    = _get_market_context()
+        sector = result.get("sector") or POPULAR_STOCKS.get(ticker, {}).get("sector", "")
+        sec    = _get_sector_context(sector) if sector else {}
+        is_kq  = ticker.endswith(".KQ")
+        ctx    = _build_market_signal_context(
+            result.get("change_pct") or 0, sig_type,
+            result.get("confidence") or 0, mkt, sec, is_kq,
+        )
+        # 시장 컨텍스트 기반 신뢰도 재조정
+        if ctx["conf_adj"] != 0:
+            result["confidence"] = max(0, min(100, (result.get("confidence") or 0) + ctx["conf_adj"]))
+        result["market_context"] = _clean({
+            "market_label":  mkt.get("market_label"),
+            "market_state":  mkt.get("market_state"),
+            "kospi_chg":     mkt.get("kospi_chg"),
+            "kosdaq_chg":    mkt.get("kosdaq_chg"),
+            "spx_chg":       mkt.get("spx_chg"),
+            "breadth_pct":   mkt.get("breadth_pct"),
+            "sector_label":  sec.get("label"),
+            "sector_state":  sec.get("state"),
+            "vs_market":     ctx["vs_market"],
+            "vs_sector":     ctx["vs_sector"],
+            "cause":         ctx["cause"],
+            "cause_label":   ctx["cause_label"],
+            "note":          ctx["note"],
+        })
         return jsonify(_clean(result))
     except ValueError:
         # yfinance 실패 → POPULAR_STOCKS 기본 정보 폴백

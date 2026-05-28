@@ -3008,6 +3008,37 @@ function HoldingsMonitorPage(){
         </div>
       </div>
 
+      {/* 시장 컨텍스트 배너 — 분석 완료 후 표시 */}
+      {fetched&&Object.keys(analysis).length>0&&(()=>{
+        const firstAnalysis=Object.values(analysis).find(a=>a?.market_context);
+        const mc=firstAnalysis?.market_context;
+        if(!mc) return null;
+        const state=mc.market_state||"unknown";
+        const isDown=state==="crash"||state==="bear";
+        const isUp=state==="surge"||state==="bull";
+        const bColor=isDown?"rgba(239,68,68,0.1)":isUp?"rgba(34,197,94,0.08)":"rgba(100,116,139,0.1)";
+        const bBorder=isDown?C.red+"44":isUp?C.green+"44":C.border;
+        const tColor=isDown?C.red:isUp?C.green:C.muted;
+        const parts=[];
+        if(mc.kospi_chg!=null) parts.push(`KOSPI ${mc.kospi_chg>=0?"+":""}${mc.kospi_chg.toFixed(1)}%`);
+        if(mc.kosdaq_chg!=null) parts.push(`KOSDAQ ${mc.kosdaq_chg>=0?"+":""}${mc.kosdaq_chg.toFixed(1)}%`);
+        if(mc.spx_chg!=null) parts.push(`S&P ${mc.spx_chg>=0?"+":""}${mc.spx_chg.toFixed(1)}%`);
+        if(mc.breadth_pct!=null) parts.push(`상승종목 ${mc.breadth_pct.toFixed(0)}%`);
+        return(
+          <div style={{padding:"8px 12px",borderRadius:10,background:bColor,border:`1px solid ${bBorder}`,marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{color:tColor,fontSize:11,fontWeight:800}}>
+                📊 {mc.market_label||"시장 현황"}
+              </div>
+              {mc.breadth_pct!=null&&<div style={{color:C.muted,fontSize:9}}>
+                상승 {mc.breadth_pct.toFixed(0)}% · 하락 {(100-mc.breadth_pct).toFixed(0)}%
+              </div>}
+            </div>
+            {parts.length>0&&<div style={{color:C.dim,fontSize:10,marginTop:3}}>{parts.join(" · ")}</div>}
+          </div>
+        );
+      })()}
+
       {holdings.length>0&&(
         <div style={{padding:"10px 14px",borderRadius:12,background:C.cardGradient,
           border:`1px solid ${totalPnl>=0?C.green+"44":C.red+"44"}`,marginBottom:12}}>
@@ -3114,6 +3145,28 @@ function HoldingsMonitorPage(){
                 </div>
               )}
             </div>
+
+            {/* 시장/섹터 대비 컨텍스트 */}
+            {s?.market_context&&(()=>{
+              const mc=s.market_context;
+              const cause=mc.cause||"unknown";
+              const causeColor=cause==="stock_specific"?C.red:cause==="stock_strong"?C.green:cause==="market_driven"?"#f59e0b":C.muted;
+              const causeIcon=cause==="stock_specific"?"⚠️":cause==="stock_strong"?"💪":cause==="market_driven"?"📊":cause==="stock_weak"?"📉":"—";
+              return(
+                <div style={{marginBottom:8,padding:"5px 10px",borderRadius:8,
+                  background:"rgba(255,255,255,0.025)",border:`1px solid ${C.border}33`,
+                  display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
+                  {mc.market_label&&<span style={{color:C.muted,fontSize:9}}>{mc.market_label}</span>}
+                  {mc.sector_label&&<span style={{color:C.muted,fontSize:9}}>·  {mc.sector_label}</span>}
+                  {mc.cause_label&&<span style={{color:causeColor,fontSize:9,fontWeight:700}}>
+                    {causeIcon} {mc.cause_label}
+                  </span>}
+                  {mc.vs_market!=null&&<span style={{marginLeft:"auto",color:mc.vs_market>=0?C.green:C.red,fontSize:9,fontWeight:700}}>
+                    시장대비 {mc.vs_market>=0?"+":""}{mc.vs_market.toFixed(1)}p
+                  </span>}
+                </div>
+              );
+            })()}
 
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:s?8:0}}>
               <div style={{textAlign:"center",padding:"7px 4px",borderRadius:8,

@@ -458,7 +458,7 @@ def _yf_lookup_kr_code(code6: str):
             price = getattr(info, "last_price", None)
             if price and price > 0:
                 full_info = t.info
-                name = full_info.get("longName") or full_info.get("shortName") or ticker
+                name = full_info.get("longName") or full_info.get("shortName") or code6
                 return {"ticker": ticker, "name": name, "name_en": name,
                         "sector": market, "flag": "🇰🇷"}
         except Exception:

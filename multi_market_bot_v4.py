@@ -710,7 +710,7 @@ POPULAR_STOCKS = {
     "META":  {"name": "메타",           "name_en": "Meta Platforms",     "sector": "Social Media",   "flag": "🇺🇸"},
     "NFLX":  {"name": "넷플릭스",       "name_en": "Netflix",            "sector": "Streaming",      "flag": "🇺🇸"},
     # ════════════ 미국 반도체 ════════════
-    "AMD":   {"name": "AMD",            "name_en": "AMD",                "sector": "Semiconductors", "flag": "🇺🇸"},
+    "AMD":   {"name": "AMD",            "name_en": "Advanced Micro Devices","sector": "Semiconductors","flag": "🇺🇸"},
     "INTC":  {"name": "인텔",           "name_en": "Intel",              "sector": "Semiconductors", "flag": "🇺🇸"},
     "AVGO":  {"name": "브로드컴",       "name_en": "Broadcom",           "sector": "Semiconductors", "flag": "🇺🇸"},
     "QCOM":  {"name": "퀄컴",           "name_en": "Qualcomm",           "sector": "Semiconductors", "flag": "🇺🇸"},
@@ -718,7 +718,7 @@ POPULAR_STOCKS = {
     "AMAT":  {"name": "어플라이드머티리얼","name_en":"Applied Materials", "sector": "Semiconductor Eq","flag": "🇺🇸"},
     "LRCX":  {"name": "램리서치",       "name_en": "Lam Research",       "sector": "Semiconductor Eq","flag": "🇺🇸"},
     "KLAC":  {"name": "KLA",            "name_en": "KLA Corp",           "sector": "Semiconductor Eq","flag": "🇺🇸"},
-    "ASML":  {"name": "ASML",           "name_en": "ASML Holding",       "sector": "Semiconductor Eq","flag": "🇳🇱"},
+    "ASML":  {"name": "ASML홀딩스",    "name_en": "ASML Holding",       "sector": "Semiconductor Eq","flag": "🇳🇱"},
     "ARM":   {"name": "ARM홀딩스",      "name_en": "ARM Holdings",       "sector": "Semiconductors", "flag": "🇬🇧"},
     "SMCI":  {"name": "슈퍼마이크로",   "name_en": "Super Micro Computer","sector": "Servers",       "flag": "🇺🇸"},
     # ════════════ 미국 소프트웨어/클라우드 ════════════
@@ -727,7 +727,7 @@ POPULAR_STOCKS = {
     "ADBE":  {"name": "어도비",         "name_en": "Adobe",              "sector": "Software",       "flag": "🇺🇸"},
     "NOW":   {"name": "서비스나우",     "name_en": "ServiceNow",         "sector": "Cloud/SaaS",     "flag": "🇺🇸"},
     "INTU":  {"name": "인튜이트",       "name_en": "Intuit",             "sector": "Fintech/SW",     "flag": "🇺🇸"},
-    "IBM":   {"name": "IBM",            "name_en": "IBM",                "sector": "Technology",     "flag": "🇺🇸"},
+    "IBM":   {"name": "IBM",            "name_en": "IBM Corp",           "sector": "Technology",     "flag": "🇺🇸"},
     "CSCO":  {"name": "시스코",         "name_en": "Cisco",              "sector": "Networking",     "flag": "🇺🇸"},
     "ACN":   {"name": "액센추어",       "name_en": "Accenture",          "sector": "IT Services",    "flag": "🇮🇪"},
     "PLTR":  {"name": "팔란티어",       "name_en": "Palantir",           "sector": "AI/Data",        "flag": "🇺🇸"},
@@ -3296,6 +3296,7 @@ def analyze_stock(ticker: str) -> dict:
     # 펀더멘털 (PER, 시총, 배당, 베타, ROE, EPS성장)
     pe_ratio = None;  market_cap = None;  dividend_yield = None
     beta = None;      roe = None;         eps_growth = None
+    full_info: dict = {}
     try:
         t_obj = yf.Ticker(ticker)
         fi = t_obj.fast_info
@@ -3545,11 +3546,15 @@ def analyze_stock(ticker: str) -> dict:
 
     # 메타 정보
     info = POPULAR_STOCKS.get(ticker, {})
+    _yf_name = full_info.get("longName") or full_info.get("shortName") or ""
+    _display_name = (info.get("name")
+                     or _yf_name
+                     or ticker.split(".")[0])  # 최후 폴백: .KS/.KQ 제거
 
     return {
         "ticker": ticker,
-        "name": info.get("name", ticker),
-        "name_en": info.get("name_en", ""),
+        "name": _display_name,
+        "name_en": info.get("name_en") or _yf_name,
         "sector": info.get("sector", ""),
         "flag": info.get("flag", "🌐"),
         "is_korean": is_korean,

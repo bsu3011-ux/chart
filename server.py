@@ -233,6 +233,7 @@ SIGNAL_HISTORY_FILE  = os.path.join(OUTPUT_DIR, "signal_history.json")
 BACKTEST_CACHE_FILE  = os.path.join(OUTPUT_DIR, "backtest_cache_v2.json")  # v2: stop/target 전략 반영
 PORTFOLIO_FILE         = os.path.join(OUTPUT_DIR, "portfolio.json")
 PORTFOLIO_SIGNALS_FILE = os.path.join(OUTPUT_DIR, "portfolio_signals.json")
+DART_CORP_CACHE_FILE   = os.path.join(OUTPUT_DIR, "dart_corp_cache.json")
 os.makedirs(OUTPUT_DIR,   exist_ok=True)
 
 # ── KRX 전종목 캐시 ──
@@ -489,6 +490,237 @@ _SIG_LABEL = {
 }
 
 
+# ══════════════════════════════════════════════════════
+# DART 전자공시 연동
+# ══════════════════════════════════════════════════════
+
+_dart_corp_cache: dict = {}
+
+_DART_PBLNTF_LABEL = {
+    "A": "정기공시", "B": "주요사항", "C": "발행공시",
+    "D": "지분공시", "E": "기타공시", "F": "감사공시",
+    "G": "펀드공시", "H": "유동화공시", "I": "거래소공시",
+}
+# 중요도 높은 공시 유형 (거래소 결정, 지분변동, 주요사항, 정기공시)
+_DART_IMPORTANT = {"A", "B", "D", "I"}
+
+
+def _dart_api_key() -> str:
+    return os.environ.get("DART_API_KEY", "")
+
+
+def _dart_get(path: str, params: dict, timeout: int = 10) -> dict:
+    """DART OpenAPI GET 요청 (urllib, 외부 의존 없음)"""
+    import urllib.parse
+    key = _dart_api_key()
+    if not key:
+        raise ValueError("DART_API_KEY 환경변수 미설정")
+    qs  = urllib.parse.urlencode({"crtfc_key": key, **params})
+    url = f"https://opendart.fss.or.kr/api/{path}?{qs}"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def _load_dart_corp_cache():
+    global _dart_corp_cache
+    try:
+        if os.path.exists(DART_CORP_CACHE_FILE):
+            with open(DART_CORP_CACHE_FILE, encoding="utf-8") as f:
+                _dart_corp_cache = json.load(f)
+    except Exception:
+        _dart_corp_cache = {}
+
+
+def _save_dart_corp_cache():
+    try:
+        with open(DART_CORP_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_dart_corp_cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _get_dart_corp(stock_code6: str) -> dict:
+    """6자리 종목코드 → DART corp_code (캐시 사용)"""
+    if stock_code6 in _dart_corp_cache:
+        return _dart_corp_cache[stock_code6]
+    try:
+        data = _dart_get("company.json", {"stock_code": stock_code6})
+        if data.get("status") == "000":
+            info = {
+                "corp_code": data["corp_code"],
+                "corp_name": data.get("corp_name", ""),
+            }
+            _dart_corp_cache[stock_code6] = info
+            _save_dart_corp_cache()
+            return info
+        else:
+            print(f"[DART] company 조회 실패 {stock_code6}: {data.get('message')}")
+    except Exception as e:
+        print(f"[DART] company 조회 오류 {stock_code6}: {e}")
+    return {}
+
+
+def _get_dart_disclosures(corp_code: str, days: int = 7) -> list:
+    """최근 N일 공시 목록"""
+    bgn = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y%m%d")
+    try:
+        data = _dart_get("list.json", {
+            "corp_code":  corp_code,
+            "bgn_de":     bgn,
+            "sort":       "date",
+            "sort_mth":   "desc",
+            "page_no":    1,
+            "page_count": 20,
+        })
+        if data.get("status") == "000":
+            return data.get("list") or []
+        if data.get("status") == "013":  # 정상 조회지만 결과 없음
+            return []
+        print(f"[DART] list 오류: {data.get('status')} {data.get('message')}")
+    except Exception as e:
+        print(f"[DART] list 조회 오류: {e}")
+    return []
+
+
+def _get_dart_financial_summary(corp_code: str) -> dict:
+    """최근 분기 주요 재무지표 (매출·영업이익·순이익)"""
+    try:
+        # 연결재무제표 우선, 없으면 별도
+        for fs_div in ("CFS", "OFS"):
+            data = _dart_get("fnlttSinglAcntAll.json", {
+                "corp_code":   corp_code,
+                "bsns_year":   str(datetime.datetime.now().year),
+                "reprt_code":  "11013",   # 1분기보고서 (가장 최신)
+                "fs_div":      fs_div,
+            })
+            if data.get("status") == "000" and data.get("list"):
+                rows = data["list"]
+                result = {}
+                acnt_map = {
+                    "ifrs-full_Revenue":           "매출액",
+                    "ifrs-full_OperatingIncome":    "영업이익",
+                    "ifrs-full_ProfitLoss":         "당기순이익",
+                    "dart_OperatingIncomeLoss":     "영업이익",
+                    "dart_NetIncome":               "당기순이익",
+                }
+                for row in rows:
+                    label = acnt_map.get(row.get("account_id", ""))
+                    if not label:
+                        label = acnt_map.get(row.get("account_nm", ""), "")
+                    if label and label not in result:
+                        val = (row.get("thstrm_amount") or "").replace(",", "")
+                        try:
+                            result[label] = int(val)
+                        except Exception:
+                            pass
+                if result:
+                    return result
+    except Exception as e:
+        print(f"[DART] 재무 조회 오류: {e}")
+    return {}
+
+
+def _fmt_dart_amount(v: int) -> str:
+    """원 단위 → 억 단위 포맷"""
+    if abs(v) >= 100_000_000:
+        return f"{v / 100_000_000:,.0f}억"
+    if abs(v) >= 10_000:
+        return f"{v / 10_000:,.0f}만"
+    return f"{v:,}"
+
+
+def _build_dart_report(force: bool = False):
+    """보유종목 DART 공시 일일 보고서 생성 → 텔레그램 발송"""
+    if not _dart_api_key():
+        print("[DART] API 키 없음 — 건너뜀")
+        return
+
+    holdings = []
+    try:
+        if os.path.exists(PORTFOLIO_FILE):
+            with open(PORTFOLIO_FILE, encoding="utf-8") as f:
+                holdings = json.load(f)
+    except Exception:
+        return
+    if not holdings:
+        return
+
+    # 한국 종목만
+    kr_holdings = [h for h in holdings
+                   if (h.get("ticker") or "").upper().endswith((".KS", ".KQ"))]
+    if not kr_holdings:
+        print("[DART] 한국 종목 없음")
+        return
+
+    print(f"[DART] 보고서 생성 시작: {len(kr_holdings)}개 종목")
+    sections  = []
+    total_cnt = 0
+
+    for h in kr_holdings:
+        ticker  = h["ticker"].strip().upper()
+        code6   = ticker.split(".")[0]
+        name    = h.get("name", ticker)
+        flag    = h.get("flag", "")
+
+        corp = _get_dart_corp(code6)
+        if not corp:
+            continue
+
+        corp_code    = corp["corp_code"]
+        disclosures  = _get_dart_disclosures(corp_code, days=7)
+        fin          = _get_dart_financial_summary(corp_code)
+
+        if not disclosures and not fin:
+            continue
+
+        total_cnt += len(disclosures)
+        important = [d for d in disclosures if d.get("pblntf_ty") in _DART_IMPORTANT]
+        show      = important[:5] if important else disclosures[:3]
+
+        lines = [f"\n{flag} <b>{name}</b>"]
+
+        # 재무 요약
+        if fin:
+            parts = []
+            for lbl in ("매출액", "영업이익", "당기순이익"):
+                if lbl in fin:
+                    parts.append(f"{lbl} {_fmt_dart_amount(fin[lbl])}")
+            if parts:
+                lines.append("  💰 " + " · ".join(parts))
+
+        # 공시 목록
+        if disclosures:
+            lines.append(f"  📋 최근 7일 공시 {len(disclosures)}건" +
+                         (f" (중요 {len(important)}건)" if important else ""))
+            for d in show:
+                ptype = _DART_PBLNTF_LABEL.get(d.get("pblntf_ty", ""), "기타")
+                raw_dt = d.get("rcept_dt", "")[:8]
+                date   = f"{raw_dt[4:6]}/{raw_dt[6:]}" if len(raw_dt) == 8 else raw_dt
+                title  = d.get("report_nm", "")
+                if len(title) > 32:
+                    title = title[:32] + "…"
+                lines.append(f"  • [{ptype}] {date} — {title}")
+
+        # DART 링크
+        lines.append(f'  🔗 dart.fss.or.kr → {code6}')
+        sections.append("\n".join(lines))
+
+    if not sections:
+        print("[DART] 공시 내용 없음 — 메시지 생략")
+        return
+
+    ts     = datetime.datetime.now().strftime("%m/%d %H:%M")
+    header = f"📊 <b>보유종목 공시 보고</b> ({ts})\n총 {total_cnt}건 확인"
+    body   = "\n━━━━━━━━━━━━━━".join([header] + sections)
+
+    if len(body) > 4000:
+        body = body[:4000] + "\n…(이하 생략)"
+
+    send_telegram(body)
+    print(f"[DART] 보고서 전송 완료: {len(sections)}개 종목, {total_cnt}건 공시")
+
+
 def _load_portfolio_sig_prev():
     global _portfolio_sig_prev
     try:
@@ -632,21 +864,30 @@ def _run_bot_background():
 
 
 def _daily_scheduler():
-    """매일 오전 8시·오후 4시 (KST = UTC+9) 자동 분석 + 매시 신호 평가"""
+    """매일 KST 08:00 · 16:00 자동 분석 + 08:00 DART 보고서 + 매시 신호 평가"""
     import time
-    run_hours   = {8, 16}
-    _last_fired = set()
+    run_hours       = {8, 16}
+    dart_hour       = 8          # DART 보고서는 오전 8시에만
+    _last_fired     = set()
+    _last_dart_day  = None
     _last_eval_hour = -1
     while True:
         try:
-            kst  = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
-            key  = (kst.date(), kst.hour)
+            kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+            key = (kst.date(), kst.hour)
+
             if kst.hour in run_hours and key not in _last_fired:
                 _last_fired.add(key)
-                today = kst.date()
-                _last_fired = {k for k in _last_fired if k[0] >= today}
+                _last_fired = {k for k in _last_fired if k[0] >= kst.date()}
                 print(f"[scheduler] KST {kst.hour}시 자동 분석 시작")
                 _run_bot_background()
+
+                # 08시 → DART 공시 보고서 발송 (하루 1회)
+                if kst.hour == dart_hour and kst.date() != _last_dart_day:
+                    _last_dart_day = kst.date()
+                    threading.Thread(target=_build_dart_report, daemon=True).start()
+                    print("[scheduler] DART 보고서 요청")
+
             # 매시 정각 신호 정확도 평가
             if kst.hour != _last_eval_hour:
                 _last_eval_hour = kst.hour
@@ -1539,6 +1780,16 @@ def portfolio_check_now():
     return jsonify({"ok": True, "message": "보유종목 신호 점검 시작됨 (백그라운드)"})
 
 
+@app.route('/api/portfolio/dart')
+def portfolio_dart_now():
+    """보유종목 DART 공시 보고서 즉시 생성 → 텔레그램 발송 (수동 트리거)"""
+    dart_ok = bool(_dart_api_key())
+    if not dart_ok:
+        return jsonify({"ok": False, "message": "DART_API_KEY 미설정 (.env에 추가 필요)"}), 400
+    threading.Thread(target=_build_dart_report, daemon=True).start()
+    return jsonify({"ok": True, "message": "DART 보고서 생성 중... (백그라운드, 약 30초)"})
+
+
 @app.route('/guide')
 def guide():
     return send_from_directory(STATIC_DIR, 'guide.html')
@@ -1606,6 +1857,7 @@ if __name__ == '__main__':
     threading.Thread(target=_daily_scheduler, daemon=True).start()
     # 보유종목 이전 신호 로드 + 감시 스레드 시작
     _load_portfolio_sig_prev()
+    _load_dart_corp_cache()
     threading.Thread(target=_portfolio_watcher, daemon=True).start()
     # KRX 전종목 캐시 초기화 (없거나 7일 초과면 백그라운드 갱신)
     _init_krx_cache()

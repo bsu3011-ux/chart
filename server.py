@@ -1090,10 +1090,17 @@ def get_top_stocks():
     if cache_data is None or refresh:
         threading.Thread(target=_build_ranking_cache, daemon=True).start()
         if cache_data is None:
-            total_count = len(POPULAR_STOCKS) + len(_krx_cache)
+            # 실제 분석 대상과 동일하게 set union으로 중복 제거
+            unique_tickers = set(POPULAR_STOCKS.keys()) | set(_krx_cache.keys())
+            kr_count = len([t for t in unique_tickers if t.endswith(".KS") or t.endswith(".KQ")])
+            total_count = len(unique_tickers)
+            if _krx_cache:
+                label = f"코스피·코스닥 {kr_count}개 포함 총 {total_count}개"
+            else:
+                label = f"주요 종목 {total_count}개"
             return jsonify({
                 "status":  "analyzing",
-                "message": f"코스피·코스닥 전종목 포함 {total_count}개 분석 중... (약 5~10분 소요)",
+                "message": f"{label} 분석 중... (약 5~10분 소요)",
                 "ranking": [],
                 "total_analyzed": 0,
             })

@@ -90,8 +90,46 @@ def _fetch_krx_via_http() -> dict:
     return stocks
 
 
+def _fetch_krx_via_naver() -> dict:
+    """네이버 증권 모바일 API로 코스피·코스닥 전종목 조회 (시가총액순)"""
+    import urllib.request
+    stocks: dict = {}
+    for index_code, market, suffix in (("KOSPI", "KOSPI", ".KS"), ("KOSDAQ", "KOSDAQ", ".KQ")):
+        page = 1
+        total_fetched = 0
+        while True:
+            try:
+                url = (f"https://m.stock.naver.com/api/index/{index_code}/stocks"
+                       f"?page={page}&pageSize=100&sortType=marketValue&sortOrder=desc")
+                req = urllib.request.Request(url, headers={
+                    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
+                    "Referer":    "https://m.stock.naver.com/",
+                })
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    data = json.loads(r.read())
+                items = data.get("stocks", [])
+                if not items:
+                    break
+                for item in items:
+                    code = item.get("itemCode", "").strip()
+                    name = item.get("itemName", "").strip()
+                    if code and name and len(code) == 6:
+                        stocks[code + suffix] = {"name": name, "market": market, "krx_code": code}
+                total_fetched += len(items)
+                total_count = data.get("totalCount", 0)
+                if total_fetched >= total_count or len(items) < 100:
+                    break
+                page += 1
+            except Exception as e:
+                print(f"[Naver API] {market} page {page} 실패: {e}")
+                break
+        cnt = len([k for k in stocks if k.endswith(suffix)])
+        print(f"[Naver API] {market}: {cnt}개")
+    return stocks
+
+
 def _build_krx_cache():
-    """KRX 전종목 목록 수집 (FDR → pykrx → KRX HTTP API 순으로 시도)"""
+    """KRX 전종목 목록 수집 (FDR → pykrx → KRX HTTP → Naver API 순으로 시도)"""
     global _krx_cache
     stocks: dict = {}
     try:
@@ -106,6 +144,9 @@ def _build_krx_cache():
                 code = str(row[code_col]).zfill(6)
                 name = str(row[name_col])
                 stocks[code + suffix] = {"name": name, "market": market, "krx_code": code}
+        if not stocks:
+            raise ValueError("FDR 결과 없음")
+        print(f"[KRX] FDR 성공: {len(stocks)}개")
     except Exception as e1:
         print(f"[KRX] FDR 실패: {e1} — pykrx 시도")
         try:
@@ -124,9 +165,12 @@ def _build_krx_cache():
         except Exception as e2:
             print(f"[KRX] pykrx도 실패: {e2} — KRX HTTP API 시도")
             stocks = _fetch_krx_via_http()
+            if not stocks:
+                print("[KRX] KRX HTTP 실패 — Naver 증권 API 시도")
+                stocks = _fetch_krx_via_naver()
 
     if not stocks:
-        print("[KRX] 전종목 캐시 빌드 불가.")
+        print("[KRX] 전종목 캐시 빌드 불가 (모든 소스 실패).")
         return
 
     _krx_cache = stocks
@@ -136,10 +180,10 @@ def _build_krx_cache():
     print(f"[KRX] 전종목 캐시 완료: {len(stocks)}개")
 
 def _init_krx_cache():
-    """서버 시작 시 캐시 로드 (없거나 7일 초과면 백그라운드 갱신)"""
+    """서버 시작 시 캐시 로드 (없거나 7일 초과 또는 비어있으면 백그라운드 갱신)"""
     loaded = _load_krx_cache()
     needs_refresh = True
-    if loaded and _krx_cache:
+    if loaded and _krx_cache:  # 캐시에 실제 종목이 있을 때만 TTL 체크
         try:
             with open(KRX_CACHE_FILE, encoding="utf-8") as f:
                 meta = json.load(f)
@@ -148,6 +192,9 @@ def _init_krx_cache():
             needs_refresh = age_days >= 7
         except Exception:
             needs_refresh = True
+    # 빈 캐시(0개)면 무조건 갱신 시도
+    if not _krx_cache:
+        needs_refresh = True
     if needs_refresh:
         threading.Thread(target=_build_krx_cache, daemon=True).start()
 os.makedirs(STATIC_DIR,   exist_ok=True)

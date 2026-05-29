@@ -10,6 +10,11 @@
 """
 
 import os, json, math, asyncio, datetime, threading, urllib.request, hmac, hashlib, subprocess
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+except ImportError:
+    pass
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 
@@ -1207,7 +1212,7 @@ def index():
 # ════════════════════════════════════════════
 # GitHub 자동 배포 Webhook
 # ════════════════════════════════════════════
-DEPLOY_SECRET = "stockbot-deploy-2024"
+DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "stockbot-deploy-2024")
 
 @app.route('/deploy', methods=['POST'])
 def deploy():

@@ -23,6 +23,11 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pandas as pd
 import yfinance as yf
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+except ImportError:
+    pass
 
 warnings.filterwarnings("ignore")
 

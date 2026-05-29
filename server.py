@@ -1242,8 +1242,12 @@ if __name__ == '__main__':
     print(f"\n  🚀 멀티마켓 봇 API 서버 시작")
     print(f"  http://localhost:{port}")
     print(f"  텔레그램: {'설정됨' if TELEGRAM_TOKEN else '미설정 (TELEGRAM_TOKEN 환경변수 필요)'}\n")
-    # 일일 스케줄러 (KST 08:00, 16:00) — 시작 시 자동 분석은 하지 않음
+    # 일일 스케줄러 (KST 08:00, 16:00)
     threading.Thread(target=_daily_scheduler, daemon=True).start()
+    # signals_v4.json 없으면 시작 즉시 분석 실행
+    if not os.path.exists(SIGNALS_FILE):
+        print("  ⚡ signals_v4.json 없음 → 즉시 분석 실행")
+        _run_bot_background()
     # KRX 전종목 캐시 초기화 (없거나 7일 초과면 백그라운드 갱신)
     _init_krx_cache()
     app.run(host='0.0.0.0', port=port, debug=False)

@@ -3647,11 +3647,20 @@ async def main():
         "🌏 일본/홍콩": [t for t,m in MARKETS.items() if t in ('^N225','^HSI')],
         "🇨🇳 중국":    [t for t,m in MARKETS.items() if '.SS' in t or '.SZ' in t],
         "🇮🇳 인도":    [t for t,m in MARKETS.items() if t in ('^NSEI','^BSESN')],
-        "🌏 아시아기타": [t for t,m in MARKETS.items() if t in ('^TWII','^STI')],
-        "🇪🇺 유럽":    [t for t,m in MARKETS.items() if t in ('^GDAXI','^FTSE','^FCHI')],
-        "🌎 기타":     [t for t,m in MARKETS.items() if t in ('^AXJO','^BVSP')],
+        "🌏 아시아기타": [t for t,m in MARKETS.items() if t in (
+            '^TWII','^STI','^JKSE','^KLSE','^SET.BK','^NZ50','PSEi.PS')],
+        "🇪🇺 유럽":    [t for t,m in MARKETS.items() if t in (
+            '^GDAXI','^FTSE','^FCHI','^STOXX50E','^AEX','^ATX','^IBEX',
+            '^SSMI','FTSEMIB.MI','^OMXSPI','^OSEBX','^WIG20')],
+        "🌎 기타":     [t for t,m in MARKETS.items() if t in (
+            '^AXJO','^BVSP','^J203.JO','^MERV','^MXX','XU100.IS','^TA125.TA','^TASI.SR')],
         "📊 변동성":   [t for t,m in MARKETS.items() if t in ('^VIX',)],
     }
+    # MARKETS에 새 티커가 추가돼도 누락 없이 분석되도록 catch-all
+    _categorized = {t for tickers in categories.values() for t in tickers}
+    _uncategorized = [t for t in MARKETS if t not in _categorized]
+    if _uncategorized:
+        categories["🌐 기타 글로벌"] = _uncategorized
 
     all_results = []
 

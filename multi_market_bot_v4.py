@@ -2305,6 +2305,27 @@ def backtest_strategy(ticker, market_info, period="10y"):
         print(f"  ⚠️ backtest {ticker}: {e}")
         return None
 
+    # ── 히스토리컬 VIX 가드 (실시간 시그널과 일관성 확보) ──
+    # leverage: VIX≥30→현금, VIX≥25→2x다운그레이드
+    # dual_filter: VIX≥30→관망(포지션0)
+    if ticker != "^VIX" and strategy in ("leverage", "dual_filter"):
+        try:
+            vix_df = load_data("^VIX", period=period)
+            if vix_df is not None and not vix_df.empty:
+                vix_series = vix_df['Close'].reindex(df.index, method='ffill')
+                vix_arr    = vix_series.values.astype(float)
+                for i in range(len(pos_arr)):
+                    v = vix_arr[i] if i < len(vix_arr) and not np.isnan(vix_arr[i]) else 0.0
+                    if strategy == "leverage":
+                        if v >= 30:
+                            pos_arr[i] = 0.0
+                        elif v >= 25 and pos_arr[i] > 1.0:
+                            pos_arr[i] = 1.0
+                    elif strategy == "dual_filter" and v >= 30:
+                        pos_arr[i] = 0.0
+        except Exception:
+            pass
+
     daily_ret = np.zeros(n)
     daily_ret[1:] = np.diff(close_arr) / close_arr[:-1]
 

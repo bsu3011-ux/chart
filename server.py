@@ -587,9 +587,6 @@ _backtest_mem_cache: dict = {}   # { ticker: {ts, data} }
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-# ── Anthropic API (영어회화) ──
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-
 
 def send_telegram(text: str) -> bool:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -1222,7 +1219,6 @@ def status():
         "signals_file": SIGNALS_FILE,
         "kis_available": _ka.is_available(),
         "dart_available": _da.is_available(),
-        "anthropic_available": bool(ANTHROPIC_API_KEY),
     })
 
 
@@ -2065,164 +2061,6 @@ def portfolio_dart_now():
         return jsonify({"ok": False, "message": "DART_API_KEY 미설정 (.env에 추가 필요)"}), 400
     threading.Thread(target=_build_dart_report, daemon=True).start()
     return jsonify({"ok": True, "message": "DART 보고서 생성 중... (백그라운드, 약 30초)"})
-
-
-@app.route('/api/english_chat', methods=['POST'])
-def english_chat():
-    """영어 회화 AI 파트너 — Claude Haiku 사용
-    POST /api/english_chat
-    Body: {"messages": [{role, content}, ...], "topic": "Travel"}
-    """
-    if not ANTHROPIC_API_KEY:
-        return jsonify({"error": "ANTHROPIC_API_KEY not set in .env"}), 400
-    try:
-        body     = request.get_json(force=True) or {}
-        messages = body.get("messages", [])
-        topic    = body.get("topic") or ""
-
-        topic_hint = f" The conversation topic is: {topic}." if topic else ""
-        system_prompt = (
-            "You are a friendly, encouraging English conversation tutor."
-            f"{topic_hint}"
-            " Keep your responses natural and concise (2-4 sentences)."
-            " If the user makes a grammar mistake, correct it gently at the end of your reply in parentheses like: (Tip: say '...' instead of '...')."
-            " Use simple, everyday English. Be warm and engaging."
-        )
-
-        payload = json.dumps({
-            "model":      "claude-haiku-4-5-20251001",
-            "max_tokens": 512,
-            "system":     system_prompt,
-            "messages":   messages,
-        }).encode("utf-8")
-
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=payload,
-            headers={
-                "x-api-key":          ANTHROPIC_API_KEY,
-                "anthropic-version":  "2023-06-01",
-                "content-type":       "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read())
-
-        reply = data["content"][0]["text"]
-        return jsonify({"reply": reply})
-
-    except urllib.error.HTTPError as e:
-        err = e.read().decode("utf-8", errors="ignore")
-        return jsonify({"error": f"API error: {e.code} {err[:200]}"}), 502
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-import random as _random
-
-_PRON_PHRASES = {
-    "easy": [
-        "Hello, nice to meet you.",
-        "What time is it?",
-        "I like apples and oranges.",
-        "The cat sat on the mat.",
-        "How are you today?",
-        "My name is John.",
-        "I want to go home.",
-        "Please speak slowly.",
-        "Thank you very much.",
-        "Where is the bathroom?",
-    ],
-    "medium": [
-        "The weather is beautiful today.",
-        "Could you please speak more slowly?",
-        "I would like to order a coffee, please.",
-        "Three thin things threw the throne.",
-        "She thought about the theory carefully.",
-        "The thirty-third floor is on the right.",
-        "I need to find the nearest train station.",
-        "Would you like to have lunch together?",
-        "The blue bird flew through the blue sky.",
-        "Please fill in the form at the front desk.",
-    ],
-    "hard": [
-        "She sells seashells by the seashore.",
-        "The thirty-three thieves thought they thrilled the throne throughout Thursday.",
-        "How much wood would a woodchuck chuck if a woodchuck could chuck wood?",
-        "Red lorry, yellow lorry, red lorry, yellow lorry.",
-        "World Wildlife Fund volunteers work wonders worldwide.",
-        "The sixth sick sheikh's sixth sheep's sick.",
-        "Whether the weather is warm, whether the weather is hot.",
-        "I thought I heard a thundering thud through the thick thistle.",
-        "The virtual reality venture verified very vivid visualizations.",
-        "Freshly fried flying fish, freshly fried flesh.",
-    ],
-}
-
-
-@app.route('/api/pronunciation_phrase')
-def pronunciation_phrase():
-    """발음 연습 문장 반환
-    GET /api/pronunciation_phrase?level=easy|medium|hard
-    """
-    level = request.args.get("level", "medium")
-    if level not in _PRON_PHRASES:
-        level = "medium"
-    phrase = _random.choice(_PRON_PHRASES[level])
-    return jsonify({"phrase": phrase, "level": level})
-
-
-@app.route('/api/pronunciation_feedback', methods=['POST'])
-def pronunciation_feedback():
-    """발음 피드백 생성 — Claude Haiku 사용
-    POST /api/pronunciation_feedback
-    Body: {"target": "...", "recognized": "...", "score": 72}
-    """
-    if not ANTHROPIC_API_KEY:
-        return jsonify({"feedback": None}), 200
-    try:
-        body       = request.get_json(force=True) or {}
-        target     = body.get("target", "")
-        recognized = body.get("recognized", "")
-        score      = body.get("score", 0)
-
-        prompt = (
-            f'Target phrase: "{target}"\n'
-            f'What the user said (speech recognition result): "{recognized}"\n'
-            f'Accuracy score: {score}%\n\n'
-            "The learner is a Korean speaker. Based on the difference between target and recognized text, "
-            "identify 1-2 specific sounds that were likely mispronounced — consider common Korean-English "
-            "challenges: /th/ (θ/ð), /r/ vs /l/, /f/ vs /p/, /v/ vs /b/, vowel length (ship/sheep), "
-            "consonant clusters, word-final consonants.\n"
-            "Give short, actionable advice in 2-3 sentences. Be warm and encouraging. "
-            "Write in Korean with English phonetic examples like /θ/ or 'th'."
-        )
-
-        payload = json.dumps({
-            "model":      "claude-haiku-4-5-20251001",
-            "max_tokens": 256,
-            "messages":   [{"role": "user", "content": prompt}],
-        }).encode("utf-8")
-
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=payload,
-            headers={
-                "x-api-key":         ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type":      "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read())
-
-        feedback = data["content"][0]["text"]
-        return jsonify({"feedback": feedback})
-
-    except Exception as e:
-        return jsonify({"feedback": None, "error": str(e)}), 200
 
 
 @app.route('/guide')

@@ -587,6 +587,9 @@ _backtest_mem_cache: dict = {}   # { ticker: {ts, data} }
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
+# ── Anthropic API (영어회화) ──
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
 
 def send_telegram(text: str) -> bool:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -1219,6 +1222,7 @@ def status():
         "signals_file": SIGNALS_FILE,
         "kis_available": _ka.is_available(),
         "dart_available": _da.is_available(),
+        "anthropic_available": bool(ANTHROPIC_API_KEY),
     })
 
 
@@ -2061,6 +2065,58 @@ def portfolio_dart_now():
         return jsonify({"ok": False, "message": "DART_API_KEY 미설정 (.env에 추가 필요)"}), 400
     threading.Thread(target=_build_dart_report, daemon=True).start()
     return jsonify({"ok": True, "message": "DART 보고서 생성 중... (백그라운드, 약 30초)"})
+
+
+@app.route('/api/english_chat', methods=['POST'])
+def english_chat():
+    """영어 회화 AI 파트너 — Claude Haiku 사용
+    POST /api/english_chat
+    Body: {"messages": [{role, content}, ...], "topic": "Travel"}
+    """
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY not set in .env"}), 400
+    try:
+        body     = request.get_json(force=True) or {}
+        messages = body.get("messages", [])
+        topic    = body.get("topic") or ""
+
+        topic_hint = f" The conversation topic is: {topic}." if topic else ""
+        system_prompt = (
+            "You are a friendly, encouraging English conversation tutor."
+            f"{topic_hint}"
+            " Keep your responses natural and concise (2-4 sentences)."
+            " If the user makes a grammar mistake, correct it gently at the end of your reply in parentheses like: (Tip: say '...' instead of '...')."
+            " Use simple, everyday English. Be warm and engaging."
+        )
+
+        payload = json.dumps({
+            "model":      "claude-haiku-4-5-20251001",
+            "max_tokens": 512,
+            "system":     system_prompt,
+            "messages":   messages,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=payload,
+            headers={
+                "x-api-key":          ANTHROPIC_API_KEY,
+                "anthropic-version":  "2023-06-01",
+                "content-type":       "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+
+        reply = data["content"][0]["text"]
+        return jsonify({"reply": reply})
+
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="ignore")
+        return jsonify({"error": f"API error: {e.code} {err[:200]}"}), 502
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/guide')

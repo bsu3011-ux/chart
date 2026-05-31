@@ -3298,6 +3298,243 @@ function TrackingPage(){
 }
 
 // ════════════════════════════════════════════
+// 영어 회화 페이지
+// ════════════════════════════════════════════
+function EnglishChatPage(){
+  const {useState,useEffect,useRef,useCallback}=React;
+  const [msgs,setMsgs]=useState([
+    {role:"assistant",text:"Hi! I'm your English conversation partner. You can speak by pressing the mic button, or type below. What would you like to talk about today? 😊"}
+  ]);
+  const [input,setInput]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [listening,setListening]=useState(false);
+  const [speaking,setSpeaking]=useState(false);
+  const [apiOk,setApiOk]=useState(null);  // null=unknown, true/false
+  const [topic,setTopic]=useState(null);
+  const recogRef=useRef(null);
+  const synthRef=useRef(window.speechSynthesis);
+  const listRef=useRef(null);
+
+  const TOPICS=[
+    {icon:"💹",label:"Stock Market"},
+    {icon:"✈️",label:"Travel"},
+    {icon:"🍔",label:"Food & Culture"},
+    {icon:"💼",label:"Business"},
+    {icon:"🎬",label:"Movies & Music"},
+    {icon:"🌍",label:"Current Events"},
+  ];
+
+  // 서버 연결 확인
+  useEffect(()=>{
+    fetch("/api/status").then(r=>r.json()).then(d=>setApiOk(!!d.anthropic_available)).catch(()=>setApiOk(false));
+  },[]);
+
+  // 자동 스크롤
+  useEffect(()=>{
+    if(listRef.current) listRef.current.scrollTop=listRef.current.scrollHeight;
+  },[msgs]);
+
+  const speak=useCallback((text)=>{
+    const synth=synthRef.current;
+    if(!synth) return;
+    synth.cancel();
+    const utt=new SpeechSynthesisUtterance(text);
+    utt.lang="en-US"; utt.rate=0.92; utt.pitch=1.05;
+    // 영어 목소리 우선 선택
+    const voices=synth.getVoices();
+    const en=voices.find(v=>v.lang.startsWith("en-")&&v.name.includes("Google"))||
+             voices.find(v=>v.lang.startsWith("en-"))||voices[0];
+    if(en) utt.voice=en;
+    utt.onstart=()=>setSpeaking(true);
+    utt.onend=()=>setSpeaking(false);
+    utt.onerror=()=>setSpeaking(false);
+    synth.speak(utt);
+  },[]);
+
+  const sendToAI=useCallback(async(userText,history)=>{
+    setBusy(true);
+    try{
+      const apiMsgs=history.filter(m=>m.role!=="system").map(m=>({role:m.role,content:m.text}));
+      apiMsgs.push({role:"user",content:userText});
+      const r=await fetch("/api/english_chat",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({messages:apiMsgs,topic:topic?.label||null})
+      });
+      if(!r.ok) throw new Error(await r.text());
+      const d=await r.json();
+      const reply=d.reply||"Sorry, I couldn't understand that.";
+      setMsgs(prev=>[...prev,{role:"assistant",text:reply}]);
+      speak(reply);
+    }catch(e){
+      const errMsg="Sorry, I'm having trouble connecting. Please check your API key. 🔌";
+      setMsgs(prev=>[...prev,{role:"assistant",text:errMsg}]);
+    }finally{setBusy(false);}
+  },[topic,speak]);
+
+  const handleSend=useCallback((text)=>{
+    if(!text.trim()||busy) return;
+    const userMsg={role:"user",text:text.trim()};
+    setMsgs(prev=>{
+      const next=[...prev,userMsg];
+      sendToAI(text.trim(),prev);
+      return next;
+    });
+    setInput("");
+  },[busy,sendToAI]);
+
+  const startListening=useCallback(()=>{
+    if(busy||listening) return;
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){alert("이 브라우저는 음성 인식을 지원하지 않습니다. Chrome을 사용해주세요.");return;}
+    const r=new SR();
+    r.lang="en-US"; r.interimResults=false; r.maxAlternatives=1;
+    r.onstart=()=>setListening(true);
+    r.onend=()=>setListening(false);
+    r.onerror=()=>setListening(false);
+    r.onresult=(e)=>{
+      const t=e.results[0][0].transcript;
+      handleSend(t);
+    };
+    recogRef.current=r;
+    r.start();
+  },[busy,listening,handleSend]);
+
+  const stopListening=()=>{
+    recogRef.current?.stop();
+    setListening(false);
+  };
+
+  const stopSpeaking=()=>{
+    synthRef.current?.cancel();
+    setSpeaking(false);
+  };
+
+  const selectTopic=(t)=>{
+    setTopic(t);
+    const msg=`Let's talk about ${t.label}! I'll start — tell me something interesting about it, or ask me anything.`;
+    setMsgs([{role:"assistant",text:msg}]);
+    speak(msg);
+  };
+
+  const micColor=listening?C.red:speaking?C.cyan:C.green;
+  const micLabel=listening?"● 듣는 중...":speaking?"🔊 말하는 중...":"🎤 말하기";
+
+  return(
+    <div style={{padding:"12px 0 80px",maxWidth:600,margin:"0 auto"}}>
+      {/* 헤더 */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,padding:"0 4px"}}>
+        <div>
+          <div style={{color:C.text,fontSize:16,fontWeight:800}}>💬 English Conversation</div>
+          <div style={{color:C.muted,fontSize:11,marginTop:1}}>AI 영어 회화 파트너 · 음성 or 텍스트</div>
+        </div>
+        {apiOk===false&&(
+          <div style={{background:C.red+"22",border:`1px solid ${C.red}44`,borderRadius:8,padding:"4px 8px",fontSize:10,color:C.red}}>
+            ANTHROPIC_API_KEY 미설정
+          </div>
+        )}
+      </div>
+
+      {/* 토픽 선택 */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+        {TOPICS.map(t=>(
+          <button key={t.label} onClick={()=>selectTopic(t)} style={{
+            padding:"5px 10px",borderRadius:20,fontSize:11,cursor:"pointer",
+            border:`1px solid ${topic?.label===t.label?C.cyan:C.border}55`,
+            background:topic?.label===t.label?C.cyan+"22":C.card,
+            color:topic?.label===t.label?C.cyan:C.dim,fontWeight:600,
+            transition:"all .2s"}}>
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 채팅 영역 */}
+      <div ref={listRef} style={{
+        height:380,overflowY:"auto",background:C.surface,
+        borderRadius:14,border:`1px solid ${C.border}44`,
+        padding:"12px 10px",display:"flex",flexDirection:"column",gap:10,
+        marginBottom:10}}>
+        {msgs.map((m,i)=>(
+          <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
+            <div style={{
+              maxWidth:"80%",padding:"9px 13px",borderRadius:m.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px",
+              background:m.role==="user"?C.cyan+"33":C.card,
+              border:`1px solid ${m.role==="user"?C.cyan+"44":C.border+"44"}`,
+              fontSize:13,color:C.text,lineHeight:1.5}}>
+              {m.role==="assistant"&&<div style={{fontSize:10,color:C.cyan,fontWeight:700,marginBottom:3}}>AI TUTOR</div>}
+              {m.text}
+            </div>
+          </div>
+        ))}
+        {busy&&(
+          <div style={{display:"flex",justifyContent:"flex-start"}}>
+            <div style={{padding:"9px 16px",borderRadius:"14px 14px 14px 4px",background:C.card,
+              border:`1px solid ${C.border}44`,color:C.muted,fontSize:12}}>
+              <span style={{animation:"pulse 1s infinite"}}>thinking...</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 마이크 버튼 */}
+      <div style={{display:"flex",justifyContent:"center",marginBottom:10}}>
+        <button
+          onClick={listening?stopListening:speaking?stopSpeaking:startListening}
+          disabled={busy}
+          style={{
+            width:72,height:72,borderRadius:"50%",border:`3px solid ${micColor}`,
+            background:`${micColor}22`,color:micColor,fontSize:28,
+            cursor:busy?"not-allowed":"pointer",transition:"all .2s",
+            display:"flex",alignItems:"center",justifyContent:"center",
+            boxShadow:listening||speaking?`0 0 20px ${micColor}66`:"none",
+            opacity:busy?0.5:1}}>
+          {listening?"⏹":speaking?"🔇":"🎤"}
+        </button>
+      </div>
+      <div style={{textAlign:"center",color:micColor,fontSize:11,fontWeight:700,marginBottom:12,minHeight:14}}>
+        {micLabel}
+      </div>
+
+      {/* 텍스트 입력 */}
+      <div style={{display:"flex",gap:8}}>
+        <input
+          value={input}
+          onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&(e.preventDefault(),handleSend(input))}
+          placeholder="Type in English (or press mic)..."
+          style={{flex:1,padding:"10px 14px",borderRadius:10,
+            background:C.card,border:`1px solid ${C.border}66`,
+            color:C.text,fontSize:13,outline:"none"}}
+        />
+        <button
+          onClick={()=>handleSend(input)}
+          disabled={!input.trim()||busy}
+          style={{padding:"10px 16px",borderRadius:10,
+            background:input.trim()&&!busy?C.cyan+"33":"transparent",
+            border:`1px solid ${C.cyan}44`,color:C.cyan,
+            cursor:input.trim()&&!busy?"pointer":"not-allowed",fontSize:13,fontWeight:700}}>
+          Send
+        </button>
+      </div>
+
+      {/* 힌트 */}
+      <div style={{marginTop:12,padding:"10px 12px",background:C.card,borderRadius:10,
+        border:`1px solid ${C.border}33`}}>
+        <div style={{color:C.dim,fontSize:11,fontWeight:700,marginBottom:4}}>💡 Tips</div>
+        <div style={{color:C.muted,fontSize:10,lineHeight:1.7}}>
+          • Chrome에서 마이크 버튼을 눌러 영어로 말하세요<br/>
+          • AI가 문법 오류를 부드럽게 교정해줍니다<br/>
+          • 답변은 자동으로 음성으로 읽어줍니다 (볼륨 확인)<br/>
+          • 토픽을 선택하면 해당 주제로 대화를 시작합니다
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ════════════════════════════════════════════
 // 사이드 네비게이션 (데스크탑)
 // ════════════════════════════════════════════
 function SideNav({tab,setTab}){
@@ -3306,6 +3543,7 @@ function SideNav({tab,setTab}){
     {id:"screener",icon:"🔍",label:"스크리너"},
     {id:"ranking",icon:"🏆",label:"랭킹"},
     {id:"portfolio",icon:"💼",label:"포트폴리오"},
+    {id:"english",icon:"💬",label:"영어"},
     {id:"calendar",icon:"📅",label:"캘린더"},
     {id:"tracking",icon:"📊",label:"트래킹"},
     {id:"settings",icon:"⚙️",label:"설정"},
@@ -3339,6 +3577,7 @@ function BottomTabBar({tab,setTab}){
     {id:"market",icon:"🏠",label:"마켓"},
     {id:"screener",icon:"🔍",label:"스크리너"},
     {id:"ranking",icon:"🏆",label:"랭킹"},
+    {id:"english",icon:"💬",label:"영어"},
     {id:"tracking",icon:"📊",label:"트래킹"},
     {id:"calendar",icon:"📅",label:"캘린더"},
     {id:"settings",icon:"⚙️",label:"설정"},
@@ -3631,6 +3870,7 @@ function App(){
         {tab==="screener"&&<ScreenerPage markets={markets} onChart={setChartMarket}/>}
         {tab==="ranking"&&<RankingPage/>}
         {tab==="portfolio"&&<PortfolioPage/>}
+        {tab==="english"&&<EnglishChatPage/>}
         {tab==="calendar"&&<CalendarPage/>}
         {tab==="tracking"&&<TrackingPage/>}
         {tab==="settings"&&<SettingsPage/>}

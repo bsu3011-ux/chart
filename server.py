@@ -10,25 +10,32 @@
 """
 
 import os, json, math, asyncio, datetime, threading, urllib.request, hmac, hashlib, subprocess
+
+def _load_dotenv_fallback(path):
+    """python-dotenv 없어도 .env 파일을 직접 파싱해 환경변수에 주입"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+    except Exception:
+        pass
+
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_env_path)
+except ImportError:
+    _load_dotenv_fallback(_env_path)
+
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
-
-# ── .env 파일 로드 (python-dotenv 없이) ──
-def _load_dotenv():
-    _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    if not os.path.exists(_env_path):
-        return
-    with open(_env_path, encoding="utf-8") as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if not _line or _line.startswith("#") or "=" not in _line:
-                continue
-            _k, _, _v = _line.partition("=")
-            _k = _k.strip()
-            _v = _v.strip().strip('"').strip("'")
-            if _k and _k not in os.environ:  # 환경변수 우선, .env는 폴백
-                os.environ[_k] = _v
-_load_dotenv()
 
 def _clean(obj):
     """NaN/Infinity → None (JSON 직렬화 안전)"""
@@ -1202,6 +1209,7 @@ def status():
         commit = "unknown"
 
     import kis_api as _ka
+    import dart_api as _da
     return jsonify({
         "status": "running",
         "version": "4.1",
@@ -1210,6 +1218,7 @@ def status():
         "last_updated": last_updated,
         "signals_file": SIGNALS_FILE,
         "kis_available": _ka.is_available(),
+        "dart_available": _da.is_available(),
     })
 
 
@@ -1869,9 +1878,12 @@ def _analyze_for_ranking(ticker: str):
         info = POPULAR_STOCKS.get(ticker, {})
         krx  = _krx_cache.get(ticker, {})
         is_kr = ticker.endswith(".KS") or ticker.endswith(".KQ")
+        _r_name = r.get("name") or ""
+        if _r_name.replace(",", "").replace(".", "").isdigit():
+            _r_name = ""
         return {
             "ticker":     ticker,
-            "name":       info.get("name") or krx.get("name") or r.get("name", ticker),
+            "name":       info.get("name") or krx.get("name") or _r_name or ticker,
             "name_en":    info.get("name_en", ""),
             "sector":     info.get("sector") or krx.get("market", ""),
             "flag":       info.get("flag") or ("🇰🇷" if is_kr else "🌐"),
@@ -2120,6 +2132,10 @@ if __name__ == '__main__':
     _load_portfolio_sig_prev()
     _load_dart_corp_cache()
     threading.Thread(target=_portfolio_watcher, daemon=True).start()
+    # signals_v4.json 없으면 시작 즉시 분석 실행
+    if not os.path.exists(SIGNALS_FILE):
+        print("  ⚡ signals_v4.json 없음 → 즉시 분석 실행")
+        _run_bot_background()
     # KRX 전종목 캐시 초기화 (없거나 7일 초과면 백그라운드 갱신)
     _init_krx_cache()
     app.run(host='0.0.0.0', port=port, debug=False)

@@ -23,6 +23,27 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pandas as pd
 import yfinance as yf
+def _load_dotenv_fallback(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+    except Exception:
+        pass
+
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_env_path)
+except ImportError:
+    _load_dotenv_fallback(_env_path)
 
 warnings.filterwarnings("ignore")
 
@@ -710,7 +731,7 @@ POPULAR_STOCKS = {
     "META":  {"name": "메타",           "name_en": "Meta Platforms",     "sector": "Social Media",   "flag": "🇺🇸"},
     "NFLX":  {"name": "넷플릭스",       "name_en": "Netflix",            "sector": "Streaming",      "flag": "🇺🇸"},
     # ════════════ 미국 반도체 ════════════
-    "AMD":   {"name": "AMD",            "name_en": "AMD",                "sector": "Semiconductors", "flag": "🇺🇸"},
+    "AMD":   {"name": "AMD",            "name_en": "Advanced Micro Devices","sector": "Semiconductors","flag": "🇺🇸"},
     "INTC":  {"name": "인텔",           "name_en": "Intel",              "sector": "Semiconductors", "flag": "🇺🇸"},
     "AVGO":  {"name": "브로드컴",       "name_en": "Broadcom",           "sector": "Semiconductors", "flag": "🇺🇸"},
     "QCOM":  {"name": "퀄컴",           "name_en": "Qualcomm",           "sector": "Semiconductors", "flag": "🇺🇸"},
@@ -718,7 +739,7 @@ POPULAR_STOCKS = {
     "AMAT":  {"name": "어플라이드머티리얼","name_en":"Applied Materials", "sector": "Semiconductor Eq","flag": "🇺🇸"},
     "LRCX":  {"name": "램리서치",       "name_en": "Lam Research",       "sector": "Semiconductor Eq","flag": "🇺🇸"},
     "KLAC":  {"name": "KLA",            "name_en": "KLA Corp",           "sector": "Semiconductor Eq","flag": "🇺🇸"},
-    "ASML":  {"name": "ASML",           "name_en": "ASML Holding",       "sector": "Semiconductor Eq","flag": "🇳🇱"},
+    "ASML":  {"name": "ASML홀딩스",    "name_en": "ASML Holding",       "sector": "Semiconductor Eq","flag": "🇳🇱"},
     "ARM":   {"name": "ARM홀딩스",      "name_en": "ARM Holdings",       "sector": "Semiconductors", "flag": "🇬🇧"},
     "SMCI":  {"name": "슈퍼마이크로",   "name_en": "Super Micro Computer","sector": "Servers",       "flag": "🇺🇸"},
     # ════════════ 미국 소프트웨어/클라우드 ════════════
@@ -727,7 +748,7 @@ POPULAR_STOCKS = {
     "ADBE":  {"name": "어도비",         "name_en": "Adobe",              "sector": "Software",       "flag": "🇺🇸"},
     "NOW":   {"name": "서비스나우",     "name_en": "ServiceNow",         "sector": "Cloud/SaaS",     "flag": "🇺🇸"},
     "INTU":  {"name": "인튜이트",       "name_en": "Intuit",             "sector": "Fintech/SW",     "flag": "🇺🇸"},
-    "IBM":   {"name": "IBM",            "name_en": "IBM",                "sector": "Technology",     "flag": "🇺🇸"},
+    "IBM":   {"name": "IBM",            "name_en": "IBM Corp",           "sector": "Technology",     "flag": "🇺🇸"},
     "CSCO":  {"name": "시스코",         "name_en": "Cisco",              "sector": "Networking",     "flag": "🇺🇸"},
     "ACN":   {"name": "액센추어",       "name_en": "Accenture",          "sector": "IT Services",    "flag": "🇮🇪"},
     "PLTR":  {"name": "팔란티어",       "name_en": "Palantir",           "sector": "AI/Data",        "flag": "🇺🇸"},
@@ -1500,16 +1521,49 @@ def get_country_profile(ticker):
 # ════════════════════════════════════════════════════════════════
 # 데이터 로드
 # ════════════════════════════════════════════════════════════════
+_load_data_cache: dict = {}   # {(ticker, period): (timestamp, df)}
+_ticker_info_cache: dict = {} # {ticker: (timestamp, info_dict)} — 펀더멘털 1시간 캐시
+
+
+def get_ticker_info(ticker: str) -> dict:
+    """yf.Ticker(t).info 결과 1시간 캐시 (펀더멘털은 분기단위로만 변경됨).
+    실패시 stale 반환. 빈 dict 반환 시에도 빈 결과 캐시 (반복 fetch 시도 방지)."""
+    import time as _t
+    now = _t.time()
+    cached = _ticker_info_cache.get(ticker)
+    if cached and now - cached[0] < 3600:
+        return cached[1]
+    try:
+        info = yf.Ticker(ticker).info or {}
+        _ticker_info_cache[ticker] = (now, info)
+        return info
+    except Exception:
+        if cached:
+            return cached[1]
+        _ticker_info_cache[ticker] = (now, {})   # 실패도 캐시 (빈 dict)
+        return {}
+
 def load_data(ticker, period="2y"):
+    """yfinance 다운로드 + (ticker, period)별 15분 TTL 캐시.
+    실패시 stale 캐시 반환 (네트워크 장애 안정성)."""
+    import time as _t
+    key = (ticker, period)
+    now = _t.time()
+    cached = _load_data_cache.get(key)
+    if cached and now - cached[0] < 900:   # 15분
+        return cached[1]
     try:
         df = yf.download(ticker, period=period, auto_adjust=True,
                          progress=False, threads=False)
         if df is None or df.empty:
-            return pd.DataFrame()
+            return cached[1] if cached else pd.DataFrame()
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
+        _load_data_cache[key] = (now, df)
         return df
     except Exception as e:
+        if cached:
+            return cached[1]  # stale 반환
         print(f"  ⚠️ {ticker}: {e}")
         return pd.DataFrame()
 
@@ -1572,8 +1626,30 @@ def analyze_minervini(df, params):
         signal = "⚪ 관망"
         signal_type = "NEUTRAL"
 
+    # ── confidence 동적 산출 (레버리지 전략과 동일 스케일 0~100) ──
+    conf = 50
+    if current > _mf:                         conf += 8   # MA빠른선 위
+    if current > _ms:                         conf += 7   # MA느린선 위
+    if _mf > _ms:                             conf += 5   # 정배열
+    if slope > 0:                             conf += 5   # 느린 MA 상향
+    if p.get('entry_rsi', 50) <= _rsi < 70:  conf += 5   # RSI 적정
+    elif _rsi >= 70:                          conf -= 5   # 과매수
+    if rr >= 2.0:                             conf += 5   # R:R 양호
+    if is_stage2:                             conf += 10  # Stage2 확정
+    else:                                     conf -= 5   # 조건 미충족
+    confidence = max(0, min(100, conf))
+
+    # ── 매크로 가드 (크립토는 VIX와 약한 상관, 패닉장만 경고) ──
+    macro = get_macro_context()
+    _vix = macro.get('vix')
+    macro_note = None
+    if _vix is not None and _vix >= 30 and signal_type == "BUY":
+        macro_note = f"⚠️ VIX {_vix:.1f} 패닉 - 진입 신중"
+        confidence = max(0, confidence - 15)
+
     return {
         "signal": signal, "signal_type": signal_type,
+        "confidence": confidence,
         "is_stage2": is_stage2,
         "price": current, "change_pct": (current-prev)/prev*100,
         "ma_fast": _mf, "ma_slow": _ms, "ma_slope": slope,
@@ -1581,6 +1657,7 @@ def analyze_minervini(df, params):
         "target": round(target, 2), "target_pct": round((target-current)/current*100, 2),
         "stoploss": round(stoploss, 2), "stop_pct": round((current-stoploss)/current*100, 2),
         "rr_ratio": round(rr, 2),
+        "macro": macro, "macro_note": macro_note,
         "strategy_name": "미너비니 추세추종",
         "strategy_label": f"MA{p['ma_fast']}/{p['ma_slow']} Trail×{p['trailing_atr']}",
     }
@@ -1693,6 +1770,30 @@ def analyze_leverage(df, params, profile=None):
         signal = "🔵 1x 다운그레이드 (횡보 변동성 과다)"
         signal_type = "HOLD_1X"
 
+    # ── 매크로 가드: VIX·금리커브 ──
+    macro = get_macro_context()
+    _vix = macro.get('vix')
+    macro_note = None
+    if _vix is not None and _vix >= 30:
+        # VIX 30+ 패닉: 강제 현금
+        lev = 0.0
+        signal = f"🔴 현금 (VIX {_vix:.1f} 패닉)"
+        signal_type = "CASH"
+        confidence = max(0, confidence - 25)
+        macro_note = f"VIX {_vix:.1f} 패닉장 회피"
+    elif _vix is not None and _vix >= 25:
+        # VIX 25+ 경계: 2x → 1x 강제 다운그레이드
+        if lev == 2.0:
+            lev = 1.0
+            signal = f"🔵 1x 다운그레이드 (VIX {_vix:.1f} 경계)"
+            signal_type = "HOLD_1X"
+        confidence = max(0, confidence - 12)
+        macro_note = f"VIX {_vix:.1f} 경계 - 레버리지 축소"
+    if macro.get('yield_inverted'):
+        confidence = max(0, confidence - 8)
+        if not macro_note:
+            macro_note = f"금리역전 ({macro.get('yield_spread')}%p)"
+
     return {
         "signal": signal, "signal_type": signal_type,
         "leverage": lev,
@@ -1706,6 +1807,7 @@ def analyze_leverage(df, params, profile=None):
         "cross_signal": cross_signal,
         "confidence": confidence,
         "score_2x": score_2x,
+        "macro": macro, "macro_note": macro_note,
         "strategy_name": "레버리지 스위칭 v2",
         "strategy_label": f"2x/1x/0x · MA{ma_m}/{ma_l} · ADX{_adx:.0f}",
     }
@@ -1732,7 +1834,8 @@ def analyze_dual_filter(df, params, profile=None):
     mom_m = (current / float(close.iloc[-w_mid])   - 1) * 100 if n >= w_mid   else 0
     mom_l = (current / float(close.iloc[-w_long])  - 1) * 100 if n >= w_long  else 0
 
-    rsi_val = float(calc_rsi(close).iloc[-1]) if not pd.isna(calc_rsi(close).iloc[-1]) else 50
+    _rsi_series = calc_rsi(close)
+    rsi_val = float(_rsi_series.iloc[-1]) if not pd.isna(_rsi_series.iloc[-1]) else 50
     adx, plus_di, minus_di = calc_adx(df, period=14)
     _adx = float(adx.iloc[-1]) if not pd.isna(adx.iloc[-1]) else 15
     _pdi = float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0
@@ -1745,6 +1848,11 @@ def analyze_dual_filter(df, params, profile=None):
     trend_strong = _adx >= adx_min
     trend_up = _pdi > _mdi
 
+    # 모멘텀 가속도 (단기 - 중기): 양수면 추세 가속, 음수면 둔화
+    mom_accel = round(mom_s - mom_m, 2)
+    accelerating = mom_accel > 2.0
+    decelerating = mom_accel < -2.0
+
     # 극단 RSI = 평균회귀 신호 (중국형 시장에서 유용)
     rsi_extreme_low  = rsi_val <= rsi_x_lo
     rsi_extreme_high = rsi_val >= rsi_x_hi
@@ -1753,51 +1861,76 @@ def analyze_dual_filter(df, params, profile=None):
         signal = "🟢 강력 매수 (3모멘텀+추세확정)"
         signal_type = "STRONG_BUY"
         action = "강력 매수"
-        confidence = 85
     elif pos_count == 3 and (trend_strong or trend_up):
-        # 3모멘텀 but ADX or 방향 하나만 확정 → 일반 매수
         signal = "🟢 매수 (3모멘텀·추세 부분확정)"
         signal_type = "BUY"
         action = "매수"
-        confidence = 72
     elif pos_count == 2 and trend_strong and trend_up:
-        # 2모멘텀 + 추세 확정 → 투자 유지
         signal = "🟢 투자 유지 (2모멘텀+추세확정)"
         signal_type = "INVESTED"
         action = "투자 유지"
-        confidence = 65
     elif pos_count == 2:
-        # 2모멘텀 but 추세 미확정 → 소극적 관망
         signal = "⚪ 관망 (2모멘텀·추세 미확정)"
         signal_type = "NEUTRAL"
         action = "관망"
-        confidence = 48
     elif rsi_extreme_low and pos_count == 0:
         signal = "🟡 반등 대기 (과매도 극단)"
         signal_type = "CAUTION"
         action = "분할 매수 검토"
-        confidence = 55
     elif neg_count == 3 and trend_strong and not trend_up:
-        # 전구간 음모멘텀 + 하락추세 확인 → 강한 현금
         signal = "🔴 현금 (전 구간 음모멘텀+하락추세)"
         signal_type = "CASH"
         action = "현금 전환"
-        confidence = 80
     elif neg_count == 3:
         signal = "🔴 현금 (전 구간 음모멘텀)"
         signal_type = "CASH"
         action = "현금 전환"
-        confidence = 70
     elif rsi_extreme_high and trend_strong and not trend_up:
         signal = "🔴 매도 (과열+하락추세)"
         signal_type = "SELL"
         action = "분할 매도"
-        confidence = 70
     else:
         signal = "⚪ 관망"
         signal_type = "NEUTRAL"
         action = "관망"
-        confidence = 40
+
+    # ── confidence 동적 산출 (레버리지·미너비니와 동일 스케일 0~100) ──
+    # 기본 50 → 모멘텀·ADX·RSI 상태에 따라 가감
+    conf = 50
+    conf += pos_count * 8          # 양전 모멘텀 1개당 +8 (최대 +24)
+    conf -= neg_count * 8          # 음전 모멘텀 1개당 -8 (최대 -24)
+    if trend_strong:  conf += 6    # ADX 추세강도 확인
+    if trend_up:      conf += 4    # +DI > -DI
+    if rsi_extreme_low:  conf -= 8 # 과매도 극단 = 하락 모멘텀 강함
+    if rsi_extreme_high: conf -= 6 # 과열 = 단기 조정 위험
+    elif rsi_lo < rsi_val < rsi_hi: conf += 3  # RSI 정상 범위
+
+    # ── 모멘텀 가속도 보정 ──
+    if accelerating and pos_count >= 2:
+        conf += 5
+    elif decelerating and pos_count >= 2:
+        conf -= 5
+
+    confidence = max(0, min(100, conf))
+
+    # ── 매크로 가드 ──
+    macro = get_macro_context()
+    _vix = macro.get('vix')
+    macro_note = None
+    if _vix is not None and _vix >= 30:
+        confidence = max(0, confidence - 15)
+        if signal_type in ("STRONG_BUY", "BUY", "INVESTED"):
+            signal_type = "NEUTRAL"
+            signal = f"⚪ 매크로 경고 (VIX {_vix:.1f})"
+            action = "관망"
+        macro_note = f"VIX {_vix:.1f} 패닉"
+    elif _vix is not None and _vix >= 25:
+        confidence = max(0, confidence - 8)
+        macro_note = f"VIX {_vix:.1f} 경계"
+    if macro.get('yield_inverted'):
+        confidence = max(0, confidence - 5)
+        if not macro_note:
+            macro_note = f"금리역전 ({macro.get('yield_spread')}%p)"
 
     return {
         "signal": signal, "signal_type": signal_type,
@@ -1805,11 +1938,13 @@ def analyze_dual_filter(df, params, profile=None):
         "mom_short": round(mom_s, 2), "mom_mid": round(mom_m, 2), "mom_long": round(mom_l, 2),
         "mom_3m": round(mom_m, 2), "mom_10m": round(mom_l, 2),  # 호환성
         "mom_windows": [w_short, w_mid, w_long],
+        "mom_accel": mom_accel, "accelerating": accelerating,
         "rsi": rsi_val, "adx": round(_adx, 1),
         "trend_strong": trend_strong, "trend_up": trend_up,
         "stoch_k": round(_stk, 1),
         "action": action,
         "confidence": confidence,
+        "macro": macro, "macro_note": macro_note,
         "strategy_name": "이중필터 모멘텀 v2",
         "strategy_label": f"{w_short}/{w_mid}/{w_long}일 · ADX{_adx:.0f}",
     }
@@ -1873,6 +2008,22 @@ def analyze_risk_defense(df, params, profile=None):
     if _mfi < 30:                 risk_score += 5;  risk_details.append(f"MFI{_mfi:.0f}(자금이탈)")
     if bb_pct_b < 0.1:            risk_score += 4;  risk_details.append("BB하단이탈")
 
+    # ── 매크로 위험요인 추가 ──
+    macro = get_macro_context()
+    _vix = macro.get('vix')
+    if _vix is not None and _vix >= 30:
+        risk_score += 12; risk_details.append(f"VIX{_vix:.0f}(패닉)")
+    elif _vix is not None and _vix >= 25:
+        risk_score += 7;  risk_details.append(f"VIX{_vix:.0f}(경계)")
+    elif _vix is not None and _vix >= 20:
+        risk_score += 3;  risk_details.append(f"VIX{_vix:.0f}")
+    if macro.get('yield_inverted'):
+        risk_score += 10; risk_details.append(f"금리역전({macro.get('yield_spread')}%p)")
+    if macro.get('dxy') and macro['dxy'] > 105 and macro.get('dxy_trend') == 'up':
+        # 강달러 → 신흥국·원자재 압력
+        if params.get('is_crypto') or 'EM' in str(params.get('country','')):
+            risk_score += 5; risk_details.append(f"강달러({macro['dxy']:.0f})")
+
     risk_score = min(100, risk_score)
 
     if risk_score >= 70:
@@ -1888,7 +2039,10 @@ def analyze_risk_defense(df, params, profile=None):
         signal = f"⚪ 관망 (위험 {risk_score}점)"
         signal_type = "NEUTRAL"
 
-    confidence = 100 - risk_score if signal_type == "INVESTED" else risk_score
+    # confidence = 방어 신뢰도: 위험 낮을수록 높음 (레버리지·미너비니와 동일 방향)
+    # INVESTED(안전) → 100-risk, CASH/CAUTION(위험 포착) → 위험점수만큼
+    # 두 방향 모두 "해당 신호가 얼마나 확실한가" = 위험점수 극단일수록 신호 선명
+    confidence = 100 - risk_score
 
     return {
         "signal": signal, "signal_type": signal_type,
@@ -1900,6 +2054,7 @@ def analyze_risk_defense(df, params, profile=None):
         "vol20": round(_v20, 1), "vol60": round(_v60, 1),
         "r20": round(r20, 2),
         "confidence": confidence,
+        "macro": macro,
         "strategy_name": "위기방어형 v2",
         "strategy_label": f"위험 {risk_score}/100 · MA{ma_m}/{ma_l}",
     }
@@ -1971,19 +2126,30 @@ def _bt_positions_leverage(df, params, profile):
     v60_s = close.pct_change().rolling(60).std()
     slope_s = (ma_mid - ma_mid.shift(5)) / ma_mid.shift(5).replace(0, np.nan) * 100
 
+    c_arr  = close.values.astype(float)
+    mm_arr = ma_mid.values.astype(float)
+    ml_arr = ma_long.values.astype(float)
+    rs_arr = rsi_s.values.astype(float)
+    ax_arr = adx_s.values.astype(float)
+    pd_arr = pdi_s.values.astype(float)
+    md_arr = mdi_s.values.astype(float)
+    v2_arr = v20_s.values.astype(float)
+    v6_arr = v60_s.values.astype(float)
+    sl_arr = slope_s.values.astype(float)
+
     positions = np.zeros(n)
     start = max(ma_l + 10, 60)
     for i in range(start, n):
-        c   = float(close.iloc[i])
-        mm  = float(ma_mid.iloc[i])  if not pd.isna(ma_mid.iloc[i])  else c
-        ml  = float(ma_long.iloc[i]) if not pd.isna(ma_long.iloc[i]) else c
-        rsi = float(rsi_s.iloc[i])   if not pd.isna(rsi_s.iloc[i])   else 50
-        adx = float(adx_s.iloc[i])   if not pd.isna(adx_s.iloc[i])   else 15
-        pdi = float(pdi_s.iloc[i])   if not pd.isna(pdi_s.iloc[i])   else 0
-        mdi = float(mdi_s.iloc[i])   if not pd.isna(mdi_s.iloc[i])   else 0
-        v20 = float(v20_s.iloc[i])   if not pd.isna(v20_s.iloc[i])   else 0.01
-        v60 = float(v60_s.iloc[i])   if not pd.isna(v60_s.iloc[i])   else 0.01
-        sl  = float(slope_s.iloc[i]) if not pd.isna(slope_s.iloc[i]) else 0
+        c   = c_arr[i]
+        mm  = mm_arr[i] if not np.isnan(mm_arr[i]) else c
+        ml  = ml_arr[i] if not np.isnan(ml_arr[i]) else c
+        rsi = rs_arr[i] if not np.isnan(rs_arr[i]) else 50
+        adx = ax_arr[i] if not np.isnan(ax_arr[i]) else 15
+        pdi = pd_arr[i] if not np.isnan(pd_arr[i]) else 0
+        mdi = md_arr[i] if not np.isnan(md_arr[i]) else 0
+        v20 = v2_arr[i] if not np.isnan(v2_arr[i]) else 0.01
+        v60 = v6_arr[i] if not np.isnan(v6_arr[i]) else 0.01
+        sl  = sl_arr[i] if not np.isnan(sl_arr[i]) else 0
 
         vs = v20 > v60 * vol_mult if v60 > 0 else False
         ts = adx >= adx_min
@@ -2020,16 +2186,21 @@ def _bt_positions_dual(df, params, profile):
     n = len(close)
     adx_s, pdi_s, mdi_s = calc_adx(df, period=14)
 
+    c_arr  = close.values.astype(float)
+    ax_arr = adx_s.values.astype(float)
+    pd_arr = pdi_s.values.astype(float)
+    md_arr = mdi_s.values.astype(float)
+
     positions = np.zeros(n)
     start = max(w_long + 5, 30)
     for i in range(start, n):
-        c = float(close.iloc[i])
-        mom_s = (c / float(close.iloc[i - w_short]) - 1) if i >= w_short else 0
-        mom_m = (c / float(close.iloc[i - w_mid])   - 1) if i >= w_mid   else 0
-        mom_l = (c / float(close.iloc[i - w_long])  - 1) if i >= w_long  else 0
-        adx = float(adx_s.iloc[i]) if not pd.isna(adx_s.iloc[i]) else 15
-        pdi = float(pdi_s.iloc[i]) if not pd.isna(pdi_s.iloc[i]) else 0
-        mdi = float(mdi_s.iloc[i]) if not pd.isna(mdi_s.iloc[i]) else 0
+        c     = c_arr[i]
+        mom_s = (c / c_arr[i - w_short] - 1) if i >= w_short else 0
+        mom_m = (c / c_arr[i - w_mid]   - 1) if i >= w_mid   else 0
+        mom_l = (c / c_arr[i - w_long]  - 1) if i >= w_long  else 0
+        adx = ax_arr[i] if not np.isnan(ax_arr[i]) else 15
+        pdi = pd_arr[i] if not np.isnan(pd_arr[i]) else 0
+        mdi = md_arr[i] if not np.isnan(md_arr[i]) else 0
         pos_count = sum(1 for m in (mom_s, mom_m, mom_l) if m > 0)
         ts = adx >= adx_min
         tu = pdi > mdi
@@ -2049,14 +2220,20 @@ def _bt_positions_minervini(df, params):
     rsi_s = calc_rsi(close)
     slope_s = (ma_s - ma_s.shift(5)) / ma_s.shift(5).replace(0, np.nan) * 100
 
+    c_arr  = close.values.astype(float)
+    mf_arr = ma_f.values.astype(float)
+    ms_arr = ma_s.values.astype(float)
+    rs_arr = rsi_s.values.astype(float)
+    sl_arr = slope_s.values.astype(float)
+
     positions = np.zeros(n)
     start = max(params['ma_slow'] + 10, 30)
     for i in range(start, n):
-        c   = float(close.iloc[i])
-        mf  = float(ma_f.iloc[i])  if not pd.isna(ma_f.iloc[i])  else c
-        ms  = float(ma_s.iloc[i])  if not pd.isna(ma_s.iloc[i])  else c
-        rsi = float(rsi_s.iloc[i]) if not pd.isna(rsi_s.iloc[i]) else 50
-        sl  = float(slope_s.iloc[i]) if not pd.isna(slope_s.iloc[i]) else 0
+        c   = c_arr[i]
+        mf  = mf_arr[i] if not np.isnan(mf_arr[i]) else c
+        ms  = ms_arr[i] if not np.isnan(ms_arr[i]) else c
+        rsi = rs_arr[i] if not np.isnan(rs_arr[i]) else 50
+        sl  = sl_arr[i] if not np.isnan(sl_arr[i]) else 0
         if c > mf > ms and sl > 0 and rsi >= params['entry_rsi']:
             positions[i] = 1.0
     return positions
@@ -2077,19 +2254,29 @@ def _bt_positions_risk(df, params, profile):
     v20_s = close.pct_change().rolling(20).std() * np.sqrt(252) * 100
     v60_s = close.pct_change().rolling(60).std() * np.sqrt(252) * 100
 
+    c_arr  = close.values.astype(float)
+    mm_arr = ma_mid.values.astype(float)
+    ml_arr = ma_long.values.astype(float)
+    rs_arr = rsi_s.values.astype(float)
+    ax_arr = adx_s.values.astype(float)
+    pd_arr = pdi_s.values.astype(float)
+    md_arr = mdi_s.values.astype(float)
+    v2_arr = v20_s.values.astype(float)
+    v6_arr = v60_s.values.astype(float)
+
     positions = np.zeros(n)
     start = max(ma_l + 10, 60)
     for i in range(start, n):
-        c   = float(close.iloc[i])
-        mm  = float(ma_mid.iloc[i])  if not pd.isna(ma_mid.iloc[i])  else c
-        ml  = float(ma_long.iloc[i]) if not pd.isna(ma_long.iloc[i]) else c
-        rsi = float(rsi_s.iloc[i])   if not pd.isna(rsi_s.iloc[i])   else 50
-        adx = float(adx_s.iloc[i])   if not pd.isna(adx_s.iloc[i])   else 15
-        pdi = float(pdi_s.iloc[i])   if not pd.isna(pdi_s.iloc[i])   else 0
-        mdi = float(mdi_s.iloc[i])   if not pd.isna(mdi_s.iloc[i])   else 0
-        v20 = float(v20_s.iloc[i])   if not pd.isna(v20_s.iloc[i])   else 20
-        v60 = float(v60_s.iloc[i])   if not pd.isna(v60_s.iloc[i])   else 20
-        r20 = (c / float(close.iloc[i - 20]) - 1) * 100 if i >= 20 else 0
+        c   = c_arr[i]
+        mm  = mm_arr[i] if not np.isnan(mm_arr[i]) else c
+        ml  = ml_arr[i] if not np.isnan(ml_arr[i]) else c
+        rsi = rs_arr[i] if not np.isnan(rs_arr[i]) else 50
+        adx = ax_arr[i] if not np.isnan(ax_arr[i]) else 15
+        pdi = pd_arr[i] if not np.isnan(pd_arr[i]) else 0
+        mdi = md_arr[i] if not np.isnan(md_arr[i]) else 0
+        v20 = v2_arr[i] if not np.isnan(v2_arr[i]) else 20
+        v60 = v6_arr[i] if not np.isnan(v6_arr[i]) else 20
+        r20 = (c / c_arr[i - 20] - 1) * 100 if i >= 20 else 0
 
         risk = 0
         if c < ml: risk += 25
@@ -2133,6 +2320,27 @@ def backtest_strategy(ticker, market_info, period="10y"):
     except Exception as e:
         print(f"  ⚠️ backtest {ticker}: {e}")
         return None
+
+    # ── 히스토리컬 VIX 가드 (실시간 시그널과 일관성 확보) ──
+    # leverage: VIX≥30→현금, VIX≥25→2x다운그레이드
+    # dual_filter: VIX≥30→관망(포지션0)
+    if ticker != "^VIX" and strategy in ("leverage", "dual_filter"):
+        try:
+            vix_df = load_data("^VIX", period=period)
+            if vix_df is not None and not vix_df.empty:
+                vix_series = vix_df['Close'].reindex(df.index, method='ffill')
+                vix_arr    = vix_series.values.astype(float)
+                for i in range(len(pos_arr)):
+                    v = vix_arr[i] if i < len(vix_arr) and not np.isnan(vix_arr[i]) else 0.0
+                    if strategy == "leverage":
+                        if v >= 30:
+                            pos_arr[i] = 0.0
+                        elif v >= 25 and pos_arr[i] > 1.0:
+                            pos_arr[i] = 1.0
+                    elif strategy == "dual_filter" and v >= 30:
+                        pos_arr[i] = 0.0
+        except Exception:
+            pass
 
     daily_ret = np.zeros(n)
     daily_ret[1:] = np.diff(close_arr) / close_arr[:-1]
@@ -2317,98 +2525,101 @@ def _slope(series, n=5):
     v_prev = float(s.iloc[-(n + 1)])
     return (v_now - v_prev) / v_prev * 100 if v_prev != 0 else 0.0
 
-def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
+def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio=1.0,
                        divergence=None, candle_pattern=None, ma50_slope=0,
                        rs_score=50, momentum_composite=50, vcp_detected=False,
                        regime_adj=0, liquidity_adj=0, fundamental_adj=0,
-                       macro_adj=0, vol_z_adj=0):
-    """가중치 기반 신호 생성 (0~100점, 기본점수 25)
-    - MA200/MA50 추세: 30점 (장기 가장 중요)
-    - 모멘텀 (RSI/MACD): 25점 (MACD 최대 ±8점)
-    - 단기 추세 (MA20·기울기): 15점
-    - 변동성/거래량 (BB/Vol): 10점
-    - 다이버전스·캔들 보정: ±10점
-    - 상대강도(RS): ±5점 (선행)
-    - 모멘텀 복합 스코어: ±3점 (선행, 이중카운팅 축소)
-    - VCP 패턴: +5점 (선행)
-    - 시장 환경(벤치마크 추세): ±10점
-    - 유동성(거래대금): ±5점
-    - 펀더멘털(PER/ROE/EPS): ±8점
-    신호 기준: STRONG_BUY≥80, BUY≥63, SELL≤40, STRONG_SELL≤20
+                       macro_adj=0, vol_z_adj=0, atr=None):
+    """가중치 기반 신호 생성 (0~100점, 기본 50 중립)
+
+    카테고리별 캡으로 단일 카테고리 과대평가 방지:
+    - 장기추세 (MA200/50/기울기 통합)  : ±15
+    - 단기모멘텀 (RSI/MACD/MA20 통합)   : ±10
+    - 변동성 (BB %B)                    : ±3
+    - 거래량 (Z-score 단일 사용)        : ±5
+    - 보정 (다이버전스/캔들)            : ±9
+    - 선행 (RS/모멘텀복합/VCP)          : ±8
+    - 매크로 (regime + macro 통합)      : ±15
+    - 유동성                            : ±3
+    - 펀더멘털                          : ±5
+    임계값(대칭): STRONG_BUY≥75, BUY≥60, SELL≤40, STRONG_SELL≤25
     """
-    score = 25  # 낮은 기본점수 — 조건 충족 시만 상승
+    score = 50  # 중립 기준점
 
-    # 장기 추세 (30점)
-    if ma200 and price > ma200: score += 15
-    elif ma200:                  score -= 15
-    if price > ma50:             score += 10
-    else:                        score -= 10
-    if ma50_slope > 0.5:         score += 5
-    elif ma50_slope < -0.5:      score -= 5
+    # 가격과 MA 비교: ±0.2% 이내는 동률(0)로 처리해 노이즈 흡수
+    def _cmp(v, ref, buffer=0.002):
+        if not ref: return 0
+        d = (v - ref) / ref
+        return 1 if d > buffer else (-1 if d < -buffer else 0)
 
-    # 모멘텀 (25점)
-    if   50 < rsi < 70:          score += 10
-    elif rsi >= 80:              score -= 12  # 극단 과매수
-    elif rsi >= 70:              score -= 8   # 과매수 경계
-    elif rsi <= 20:              score += 7   # 극단 과매도 반등
-    elif rsi <= 30:              score += 5   # 과매도 반등 가능
-    else:                        score -= 5
-    # MACD 히스토그램: 크기 비례 점수 (최대 ±8점, 이중카운팅 방지)
-    if macd_hist != 0:
-        # 가격 대비 히스토그램 비율로 정규화 (0.5% 기준 ±6점, 최대 ±8점)
-        _macd_norm = (macd_hist / price) * 100 if price else 0
-        _macd_pts = max(-8, min(8, _macd_norm / 0.5 * 6))
-        score += int(_macd_pts)
+    # === 1. 장기 추세 (±15 캡) — MA200/MA50/기울기 통합 ===
+    trend = 0
+    trend += _cmp(price, ma200) * 8
+    trend += _cmp(price, ma50)  * 5
+    if ma50_slope > 0.5:         trend += 2
+    elif ma50_slope < -0.5:      trend -= 2
+    score += max(-15, min(15, trend))
 
-    # 단기 추세 (15점)
-    if price > ma20:             score += 8
-    else:                        score -= 8
+    # === 2. 단기 모멘텀 (±10 캡) — RSI/MACD/MA20 통합 (3중 중복 해소) ===
+    mom = 0
+    if   rsi >= 80:              mom -= 6   # 극단 과매수
+    elif rsi >= 70:              mom -= 3
+    elif rsi >  55:              mom += 5   # 강세 모멘텀
+    elif rsi >= 45:              mom += 0   # 중립 (45~55)
+    elif rsi >  30:              mom -= 2
+    elif rsi >  20:              mom += 2
+    else:                        mom += 3   # 극단 과매도 반등
+    if macd_hist and price:
+        # ATR 기반 정규화: 변동성 크기 독립적 (BTC $100k vs 삼성 $60)
+        # ATR 미제공시 가격의 1.5% 추정 (평균 일변동)
+        _atr_est = atr if atr else price * 0.015
+        _macd_norm = macd_hist / _atr_est  # MACD를 ATR 단위로 환산
+        mom += int(max(-4, min(4, _macd_norm / 0.3 * 3)))
+    mom += _cmp(price, ma20) * 3
+    score += max(-10, min(10, mom))
 
-    # 변동성/거래량 (15점)
-    if 0.3 < bb_pct_b < 0.7:     score += 5   # 중심부 = 안정
-    elif bb_pct_b > 0.9:         score -= 3   # 상단 이탈 = 단기 조정 위험
-    elif bb_pct_b < 0.1:         score += 3   # 하단 = 단기 반등 가능
-    if vol_ratio > 1.5:          score += 5   # 거래량 동반 추세
-    elif vol_ratio < 0.7:        score -= 3   # 거래량 위축 = 모멘텀 약화
+    # === 3. 변동성 (±3) — BB %B ===
+    if 0.3 < bb_pct_b < 0.7:     score += 3
+    elif bb_pct_b > 0.9:         score -= 2
+    elif bb_pct_b < 0.1:         score += 2
 
-    # 다이버전스 보정 (±10점)
-    if divergence == "bullish":  score += 10
-    elif divergence == "bearish": score -= 10
+    # === 4. 거래량 (±5) — Z-score만 사용 (vol_ratio 제거: 같은 정보 중복) ===
+    score += max(-5, min(5, vol_z_adj))
 
-    # 캔들 패턴 보정 (±5점)
-    if candle_pattern in ("강세 장악형", "해머 (저점 반전)"):     score += 5
-    elif candle_pattern in ("약세 장악형", "슈팅스타 (고점 반전)"): score -= 5
+    # === 5. 보정 (±9) — 다이버전스 + 캔들 ===
+    if divergence == "bullish":  score += 6
+    elif divergence == "bearish": score -= 6
+    if candle_pattern in ("강세 장악형", "해머 (저점 반전)"):     score += 3
+    elif candle_pattern in ("약세 장악형", "슈팅스타 (고점 반전)"): score -= 3
 
-    # ── 선행 지표 보정 ──────────────────────────────────────────
-    # 상대강도 (±5점): 시장 대비 초과 강세/약세
-    if   rs_score >= 80: score += 5
-    elif rs_score >= 65: score += 2
-    elif rs_score <= 20: score -= 5
-    elif rs_score <= 35: score -= 2
+    # === 6. 선행 지표 (±8 캡) — RS 위주, momentum_composite는 극단값에서만 ===
+    lead = 0
+    if   rs_score >= 80: lead += 4
+    elif rs_score >= 65: lead += 2
+    elif rs_score <= 20: lead -= 4
+    elif rs_score <= 35: lead -= 2
+    # momentum_composite: 이미 RSI/MACD/MA50slope에 반영됨 → 극단값(±15)에서만 ±1
+    if   momentum_composite >= 85: lead += 1
+    elif momentum_composite <= 15: lead -= 1
+    # VCP: 변동성 수축 패턴 (다른 지표가 못 잡는 고유 정보)
+    if vcp_detected:               lead += 3
+    score += max(-8, min(8, lead))
 
-    # 모멘텀 복합 (±3점, 이중카운팅 축소): RSI/MACD/MA기울기와 정보 중복 → 극단값에서만 보정
-    if   momentum_composite >= 80: score += 3
-    elif momentum_composite <= 20: score -= 3
+    # === 7. 매크로 (±15 캡) — regime + macro 통합 (같은 거시환경 중복 카운팅 방지) ===
+    score += max(-15, min(10, regime_adj + macro_adj))
 
-    # VCP 패턴 (+5점): 변동성 수축 후 돌파 임박
-    if vcp_detected:               score += 5
+    # === 8. 유동성 (±3) ===
+    score += max(-3, min(2, liquidity_adj))
 
-    # ── 매크로/품질 필터 ────────────────────────────────────────
-    # 시장 환경 (±10점): 벤치마크가 약세장이면 매수 신호 약화
-    score += regime_adj
-    # 유동성 (±5점): 거래대금 부족 종목은 신호 신뢰도 하락
-    score += liquidity_adj
-    # 펀더멘털 (±8점): 저PER·고ROE·EPS성장 보너스, 적자·고PER 패널티
-    score += fundamental_adj
-    # 글로벌 매크로 (±15점): VKOSPI·금리·달러·구리
-    score += macro_adj
-    # 거래량 Z-score (±5점): 이상 거래 감지
-    score += vol_z_adj
+    # === 9. 펀더멘털 (±5, 기존 ±8에서 축소) ===
+    score += max(-5, min(5, fundamental_adj))
 
     score = max(0, min(100, score))
-    if score >= 80: return "STRONG_BUY",  "🟢 강력 매수", score
-    if score >= 63: return "BUY",         "🟢 매수",     score
-    if score <= 20: return "STRONG_SELL", "🔴 강력 매도", score
+
+    # 대칭 임계값 (기본 50 기준 ±15/±25)
+    if score >= 75: return "STRONG_BUY",  "🟢 강력 매수", score
+    if score >= 60: return "BUY",         "🟢 매수",     score
+    if score <= 25: return "STRONG_SELL", "🔴 강력 매도", score
     if score <= 40: return "SELL",        "🔴 매도",     score
     return "NEUTRAL", "⚪ 중립", score
 
@@ -2655,24 +2866,106 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
 # ════════════════════════════════════════════════════════════════
 import time as _time_mod
 
-_bm_close_cache: dict = {}  # {ticker: (timestamp, Series)}
+_bm_close_cache: dict = {}      # {ticker: (timestamp, Series)}
+_macro_overlay_cache: dict = {}  # {"kr"|"gl": (timestamp, result)}
 
 def _get_benchmark_close(bm_ticker: str, period: str = "1y"):
-    """벤치마크 종가 캐시 (1시간 TTL)"""
+    """벤치마크 종가 캐시 (1시간 TTL, 실패시 stale 반환)"""
     now = _time_mod.time()
-    if bm_ticker in _bm_close_cache:
-        ts, series = _bm_close_cache[bm_ticker]
-        if now - ts < 3600:
-            return series
+    cached = _bm_close_cache.get(bm_ticker)
+    if cached and now - cached[0] < 3600:
+        return cached[1]
     try:
         df_bm = load_data(bm_ticker, period=period)
-        if df_bm.empty:
-            return None
+        if df_bm is None or df_bm.empty:
+            return cached[1] if cached else None  # stale 반환
         series = df_bm['Close'].dropna()
+        if len(series) == 0:
+            return cached[1] if cached else None
         _bm_close_cache[bm_ticker] = (now, series)
         return series
     except Exception:
-        return None
+        return cached[1] if cached else None  # 실패시 stale 반환
+
+
+_macro_cache: dict = {}
+
+def get_macro_context() -> dict:
+    """매크로 환경 컨텍스트 (1시간 TTL 캐시)
+    - VIX: S&P500 옵션 변동성 (>20 경계, >25 위험, >30 패닉)
+    - 금리커브: 10년-3개월 스프레드 (역전시 6-18개월 후 침체 선행)
+    - DXY: 달러지수 (>105 강달러 → 신흥국·원자재 압력)
+    """
+    now = _time_mod.time()
+    if 'ts' in _macro_cache and now - _macro_cache['ts'] < 600:   # 10분 TTL
+        return _macro_cache['data']
+
+    ctx = {
+        'vix': None, 'vix_change_5d': None,
+        'us_10y': None, 'us_3m': None,
+        'yield_spread': None, 'yield_inverted': False,
+        'dxy': None, 'dxy_trend': None,
+        'risk_level': 'normal', 'risk_score': 0,
+        'warnings': [],
+    }
+
+    # 4종목 일괄 다운로드 (4 RTT → 1 RTT) + 개별 캐시도 갱신
+    try:
+        raw = yf.download(["^VIX","^TNX","^IRX","DX-Y.NYB"], period="3mo",
+                          auto_adjust=True, progress=False, threads=True)
+        cl = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+        def _ser(sym):
+            try:
+                s = cl[sym].dropna()
+                if len(s) > 0:
+                    _bm_close_cache[sym] = (now, s)   # 개별 캐시 동기 갱신
+                    return s
+            except Exception:
+                pass
+            return _bm_close_cache.get(sym, (0, None))[1]   # stale fallback
+
+        vix_close = _ser("^VIX")
+        if vix_close is not None and len(vix_close) >= 5:
+            ctx['vix'] = round(float(vix_close.iloc[-1]), 2)
+            ctx['vix_change_5d'] = round(float(vix_close.iloc[-1] - vix_close.iloc[-5]), 2)
+
+        t10 = _ser("^TNX"); t3m = _ser("^IRX")
+        if t10 is not None and t3m is not None and len(t10) > 0 and len(t3m) > 0:
+            ctx['us_10y'] = round(float(t10.iloc[-1]), 2)
+            ctx['us_3m']  = round(float(t3m.iloc[-1]), 2)
+            ctx['yield_spread']  = round(ctx['us_10y'] - ctx['us_3m'], 2)
+            ctx['yield_inverted'] = ctx['yield_spread'] < 0
+
+        dxy = _ser("DX-Y.NYB")
+        if dxy is not None and len(dxy) >= 20:
+            ctx['dxy'] = round(float(dxy.iloc[-1]), 2)
+            ma20 = float(dxy.rolling(20).mean().iloc[-1])
+            ctx['dxy_trend'] = 'up' if ctx['dxy'] > ma20 else 'down'
+    except Exception:
+        pass
+
+    score = 0; warnings_ = []
+    if ctx['vix']:
+        if ctx['vix'] >= 30:
+            score += 35; warnings_.append(f"VIX {ctx['vix']:.1f} 패닉")
+        elif ctx['vix'] >= 25:
+            score += 20; warnings_.append(f"VIX {ctx['vix']:.1f} 경계")
+        elif ctx['vix'] >= 20:
+            score += 10; warnings_.append(f"VIX {ctx['vix']:.1f} 상승")
+    if ctx['yield_inverted']:
+        score += 25; warnings_.append(f"금리역전 {ctx['yield_spread']:+.2f}%p")
+    if ctx['dxy'] and ctx['dxy_trend'] == 'up' and ctx['dxy'] > 105:
+        score += 10; warnings_.append(f"강달러 {ctx['dxy']:.1f}")
+
+    ctx['risk_score'] = min(100, score)
+    if   ctx['risk_score'] >= 50: ctx['risk_level'] = 'risk_off'
+    elif ctx['risk_score'] >= 25: ctx['risk_level'] = 'caution'
+    else:                         ctx['risk_level'] = 'normal'
+    ctx['warnings'] = warnings_
+
+    _macro_cache['ts']   = now
+    _macro_cache['data'] = ctx
+    return ctx
 
 
 def calc_relative_strength(close: pd.Series, bm_ticker: str) -> float:
@@ -2860,48 +3153,47 @@ def calc_liquidity_score(current_vol: int, price: float, is_korean: bool) -> dic
 
 
 def calc_fundamental_score(pe_ratio, roe, eps_growth) -> dict:
-    """펀더멘털 점수 (±8점 캡)
-    PER:      <10 +3, 10~25 +1, 25~50 0, ≥50 -2, None/음수 0
-    ROE:      >20% +3, 15~20% +2, 10~15% +1, 0~10% 0, <0% -3
-    EPS성장:  >30% +3, 15~30% +2, 0~15% +1, <0% -3
+    """펀더멘털 점수 (±5점 캡 — _generate_signal 내 카테고리 캡과 일치)
+    PER:      <10 +2, 10~25 +1, 25~50 0, ≥50 -1, None/음수 0
+    ROE:      >20% +2, 15~20% +1, 10~15% +0, 0~10% 0, <0% -2
+    EPS성장:  >30% +2, 15~30% +1, 0~15% 0, <0% -2
     """
     parts = []
     details = {}
 
     # PER
     if pe_ratio is not None:
-        if   pe_ratio <= 0:   pe_pts = 0     # 적자기업 (PER 의미 없음)
-        elif pe_ratio < 10:   pe_pts = 3
+        if   pe_ratio <= 0:   pe_pts = 0
+        elif pe_ratio < 10:   pe_pts = 2
         elif pe_ratio < 25:   pe_pts = 1
         elif pe_ratio < 50:   pe_pts = 0
-        else:                 pe_pts = -2
+        else:                 pe_pts = -1
         parts.append(pe_pts); details["per"] = pe_pts
     else:
         details["per"] = None
 
     # ROE
     if roe is not None:
-        if   roe >= 20:  roe_pts = 3
-        elif roe >= 15:  roe_pts = 2
-        elif roe >= 10:  roe_pts = 1
+        if   roe >= 20:  roe_pts = 2
+        elif roe >= 15:  roe_pts = 1
         elif roe >= 0:   roe_pts = 0
-        else:            roe_pts = -3
+        else:            roe_pts = -2
         parts.append(roe_pts); details["roe"] = roe_pts
     else:
         details["roe"] = None
 
     # EPS 성장
     if eps_growth is not None:
-        if   eps_growth >= 30: eps_pts = 3
-        elif eps_growth >= 15: eps_pts = 2
-        elif eps_growth >= 0:  eps_pts = 1
-        else:                  eps_pts = -3
+        if   eps_growth >= 30: eps_pts = 2
+        elif eps_growth >= 15: eps_pts = 1
+        elif eps_growth >= 0:  eps_pts = 0
+        else:                  eps_pts = -2
         parts.append(eps_pts); details["eps_growth"] = eps_pts
     else:
         details["eps_growth"] = None
 
     total = sum(parts) if parts else 0
-    total = max(-8, min(8, total))   # 캡 ±8
+    total = max(-5, min(5, total))   # 캡 ±5
 
     if   total >= 5:  label = "🟢 우량"
     elif total >= 2:  label = "🟢 양호"
@@ -2915,20 +3207,42 @@ def calc_fundamental_score(pe_ratio, roe, eps_growth) -> dict:
 
 def calc_macro_overlay(is_korean: bool = True) -> dict:
     """글로벌 매크로 — VKOSPI, 미국 금리(TNX), 달러(DXY), 구리(HG=F)
-    반환: score_adj (±15 캡), details
+    반환: score_adj (max +11/-15), details. 10분 TTL 캐시.
+    TNX/DXY는 get_macro_context()가 이미 _bm_close_cache에 동기화했으면 재사용.
     """
-    import yfinance as yf, pandas as pd
+    _now = _time_mod.time()
+    cache_key = "kr" if is_korean else "gl"
+    _cached = _macro_overlay_cache.get(cache_key)
+    if _cached and _now - _cached[0] < 600:
+        return _cached[1]
+
     score = 0
     details: dict = {}
     try:
-        raw = yf.download(["^VKOSPI","^TNX","DX-Y.NYB","HG=F"],
-                          period="1mo", interval="1d",
-                          auto_adjust=True, progress=False, threads=True)
-        if raw.empty:
-            return {"score_adj": 0, "details": {}}
-        cl = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+        # _bm_close_cache에서 TNX/DXY 재사용 (get_macro_context() 배치 캐시)
+        def _from_bm(sym):
+            entry = _bm_close_cache.get(sym)
+            if entry and _now - entry[0] < 3600 and entry[1] is not None:
+                s = entry[1]
+                return s if len(s) >= 2 else None
+            return None
 
-        def _s(sym):
+        tnx_s = _from_bm("^TNX")
+        dxy_s = _from_bm("DX-Y.NYB")
+
+        # VKOSPI/HG=F는 get_macro_context에 없으므로 항상 다운로드
+        # TNX/DXY 캐시 미스 시 함께 포함
+        to_dl = ["^VKOSPI", "HG=F"]
+        if tnx_s is None: to_dl.append("^TNX")
+        if dxy_s is None: to_dl.append("DX-Y.NYB")
+
+        raw = yf.download(to_dl, period="1mo", interval="1d",
+                          auto_adjust=True, progress=False, threads=True)
+        cl = (raw["Close"] if not raw.empty and isinstance(raw.columns, pd.MultiIndex)
+              else raw) if not raw.empty else None
+
+        def _s_dl(sym):
+            if cl is None: return None
             try:
                 s = cl[sym].dropna()
                 return s if len(s) >= 2 else None
@@ -2936,33 +3250,33 @@ def calc_macro_overlay(is_korean: bool = True) -> dict:
                 return None
 
         # VKOSPI (한국 공포지수)
-        s = _s("^VKOSPI")
+        s = _s_dl("^VKOSPI")
         if s is not None:
-            v = float(s.iloc[-1]); details["vkospi"] = round(v,1)
+            v = float(s.iloc[-1]); details["vkospi"] = round(v, 1)
             if   v < 15: score += 3;  details["vkospi_label"] = "안정"
             elif v < 25: score += 0;  details["vkospi_label"] = "보통"
             elif v < 35: score -= 4;  details["vkospi_label"] = "불안"
             else:        score -= 10; details["vkospi_label"] = "공포"
 
-        # 미국 10년물 금리
-        s = _s("^TNX")
+        # 미국 10년물 금리 — 캐시 우선, 없으면 배치에서
+        s = tnx_s if tnx_s is not None else _s_dl("^TNX")
         if s is not None and len(s) >= 10:
-            now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
-            chg = round(now - d10, 2)
-            details["tnx"] = round(now, 2); details["tnx_chg"] = chg
+            cur, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+            chg = round(cur - d10, 2)
+            details["tnx"] = round(cur, 2); details["tnx_chg"] = chg
             if   chg >  0.20: score -= 5; details["tnx_label"] = "급등↑"
             elif chg >  0.10: score -= 2; details["tnx_label"] = "상승"
             elif chg < -0.20: score += 3; details["tnx_label"] = "급락↓"
             elif chg < -0.10: score += 1; details["tnx_label"] = "하락"
             else:                          details["tnx_label"] = "보합"
 
-        # 달러 인덱스 — 한국 종목 외국인 영향
+        # 달러 인덱스 — 한국 종목 외국인 영향, 캐시 우선
         if is_korean:
-            s = _s("DX-Y.NYB")
+            s = dxy_s if dxy_s is not None else _s_dl("DX-Y.NYB")
             if s is not None and len(s) >= 10:
-                now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
-                pct = round((now-d10)/d10*100, 1)
-                details["dxy"] = round(now, 1); details["dxy_pct"] = pct
+                cur, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+                pct = round((cur - d10) / d10 * 100, 1)
+                details["dxy"] = round(cur, 1); details["dxy_pct"] = pct
                 if   pct >  1.0: score -= 4; details["dxy_label"] = "강세(외인매도↑)"
                 elif pct >  0.4: score -= 2; details["dxy_label"] = "소폭강세"
                 elif pct < -1.0: score += 3; details["dxy_label"] = "약세(외인유입↑)"
@@ -2970,11 +3284,11 @@ def calc_macro_overlay(is_korean: bool = True) -> dict:
                 else:                         details["dxy_label"] = "보합"
 
         # 구리 선물 (경기선행)
-        s = _s("HG=F")
+        s = _s_dl("HG=F")
         if s is not None and len(s) >= 10:
-            now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
-            pct = round((now-d10)/d10*100, 1)
-            details["copper"] = round(now, 2); details["copper_pct"] = pct
+            cur, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+            pct = round((cur - d10) / d10 * 100, 1)
+            details["copper"] = round(cur, 2); details["copper_pct"] = pct
             if   pct >  2.5: score += 2; details["copper_label"] = "급등(경기확장)"
             elif pct >  0.8: score += 1; details["copper_label"] = "상승"
             elif pct < -2.5: score -= 3; details["copper_label"] = "급락(경기우려)"
@@ -2982,13 +3296,15 @@ def calc_macro_overlay(is_korean: bool = True) -> dict:
             else:                         details["copper_label"] = "보합"
     except Exception:
         pass
-    return {"score_adj": max(-15, min(8, score)), "details": details}
+
+    result = {"score_adj": max(-15, min(11, score)), "details": details}
+    _macro_overlay_cache[cache_key] = (_now, result)
+    return result
 
 
 def calc_volume_zscore(volume_series) -> dict:
     """20일 거래량 Z-score — 이상 거래 감지 (score_adj: +5 ~ -2)"""
     try:
-        import pandas as pd
         vs = pd.Series(volume_series).dropna()
         if len(vs) < 22:
             return {"z": 0.0, "label": "데이터부족", "score_adj": 0}
@@ -3022,11 +3338,12 @@ def analyze_stock(ticker: str) -> dict:
     # 펀더멘털 (PER, 시총, 배당, 베타, ROE, EPS성장)
     pe_ratio = None;  market_cap = None;  dividend_yield = None
     beta = None;      roe = None;         eps_growth = None
+    full_info: dict = {}
     try:
         t_obj = yf.Ticker(ticker)
         fi = t_obj.fast_info
         market_cap = getattr(fi, 'market_cap', None)
-        full_info  = t_obj.info or {}
+        full_info  = get_ticker_info(ticker)   # 1시간 캐시
         pe_ratio   = full_info.get('trailingPE') or full_info.get('forwardPE')
         if pe_ratio and (pe_ratio < 0 or pe_ratio > 1000): pe_ratio = None
         dy = full_info.get('dividendYield')
@@ -3059,8 +3376,9 @@ def analyze_stock(ticker: str) -> dict:
     ma20_slope = _slope(close.rolling(20).mean())
     ma50_slope = _slope(close.rolling(50).mean())
 
-    # RSI
-    rsi = float(calc_rsi(close).iloc[-1])
+    # RSI (series는 아래 다이버전스용으로 재사용)
+    rsi_series = calc_rsi(close)
+    rsi = float(rsi_series.iloc[-1])
     if pd.isna(rsi): rsi = 50.0
 
     # MACD
@@ -3089,8 +3407,7 @@ def analyze_stock(ticker: str) -> dict:
     atr_series = calc_atr(df, p=14)
     atr_val    = float(atr_series.iloc[-1]) if not pd.isna(atr_series.iloc[-1]) else None
 
-    # RSI 다이버전스
-    rsi_series = calc_rsi(close)
+    # RSI 다이버전스 (rsi_series 위에서 재사용)
     divergence = detect_rsi_divergence(close, rsi_series, lookback=20)
 
     # 캔들 패턴
@@ -3113,7 +3430,7 @@ def analyze_stock(ticker: str) -> dict:
 
     # 신호 생성 (가중치 + 다이버전스 + 캔들 + 선행지표 + 매크로 + 품질)
     signal_type, signal_text, confidence = _generate_signal(
-        current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
+        current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b,
         divergence=divergence, candle_pattern=candle_pattern, ma50_slope=ma50_slope,
         rs_score=rs_score, momentum_composite=momentum["composite"],
         vcp_detected=vcp["detected"],
@@ -3122,6 +3439,7 @@ def analyze_stock(ticker: str) -> dict:
         fundamental_adj=fundamental["score_adj"],
         macro_adj=macro["score_adj"],
         vol_z_adj=vol_z["score_adj"],
+        atr=atr_val,   # ATR 기반 MACD 정규화
     )
 
     # ── KIS Open API: 외국인·기관 순매수 + 체결강도 (한국 종목만) ──
@@ -3270,11 +3588,17 @@ def analyze_stock(ticker: str) -> dict:
 
     # 메타 정보
     info = POPULAR_STOCKS.get(ticker, {})
+    _yf_name = full_info.get("longName") or full_info.get("shortName") or ""
+    _fallback = ticker.split(".")[0]
+    # 6자리 숫자 코드(예: "000150")는 의미 없는 이름이므로 ticker 전체를 씀
+    if _fallback.isdigit():
+        _fallback = ticker
+    _display_name = info.get("name") or _yf_name or _fallback
 
     return {
         "ticker": ticker,
-        "name": info.get("name", ticker),
-        "name_en": info.get("name_en", ""),
+        "name": _display_name,
+        "name_en": info.get("name_en") or _yf_name,
         "sector": info.get("sector", ""),
         "flag": info.get("flag", "🌐"),
         "is_korean": is_korean,
@@ -3367,11 +3691,20 @@ async def main():
         "🌏 일본/홍콩": [t for t,m in MARKETS.items() if t in ('^N225','^HSI')],
         "🇨🇳 중국":    [t for t,m in MARKETS.items() if '.SS' in t or '.SZ' in t],
         "🇮🇳 인도":    [t for t,m in MARKETS.items() if t in ('^NSEI','^BSESN')],
-        "🌏 아시아기타": [t for t,m in MARKETS.items() if t in ('^TWII','^STI')],
-        "🇪🇺 유럽":    [t for t,m in MARKETS.items() if t in ('^GDAXI','^FTSE','^FCHI')],
-        "🌎 기타":     [t for t,m in MARKETS.items() if t in ('^AXJO','^BVSP')],
+        "🌏 아시아기타": [t for t,m in MARKETS.items() if t in (
+            '^TWII','^STI','^JKSE','^KLSE','^SET.BK','^NZ50','PSEi.PS')],
+        "🇪🇺 유럽":    [t for t,m in MARKETS.items() if t in (
+            '^GDAXI','^FTSE','^FCHI','^STOXX50E','^AEX','^ATX','^IBEX',
+            '^SSMI','FTSEMIB.MI','^OMXSPI','^OSEBX','^WIG20')],
+        "🌎 기타":     [t for t,m in MARKETS.items() if t in (
+            '^AXJO','^BVSP','^J203.JO','^MERV','^MXX','XU100.IS','^TA125.TA','^TASI.SR')],
         "📊 변동성":   [t for t,m in MARKETS.items() if t in ('^VIX',)],
     }
+    # MARKETS에 새 티커가 추가돼도 누락 없이 분석되도록 catch-all
+    _categorized = {t for tickers in categories.values() for t in tickers}
+    _uncategorized = [t for t in MARKETS if t not in _categorized]
+    if _uncategorized:
+        categories["🌐 기타 글로벌"] = _uncategorized
 
     all_results = []
 

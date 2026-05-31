@@ -2125,6 +2125,35 @@ function RankingPage(){
   const [selectedTicker,setSelectedTicker]=React.useState(null);
   const [analysisData,setAnalysisData]=React.useState(null);
   const [analysisLoading,setAnalysisLoading]=React.useState(false);
+  const [addTarget,setAddTarget]=React.useState(null);    // {ticker,name,price}
+  const [addForm,setAddForm]=React.useState({qty:"",price:""});
+  const [addBusy,setAddBusy]=React.useState(false);
+  const [addDone,setAddDone]=React.useState(null);        // 성공한 ticker
+
+  const openAdd=(e,r)=>{
+    e.stopPropagation();
+    setAddTarget({ticker:r.ticker,name:r.name,price:r.price});
+    setAddForm({qty:"",price:r.price!=null?String(Math.round(r.price*100)/100):""});
+  };
+  const submitAdd=async()=>{
+    if(!addForm.qty||!addForm.price||!addTarget) return;
+    setAddBusy(true);
+    try{
+      const resp=await fetch(`${API_BASE}/api/portfolio`);
+      const cur=await resp.json();
+      const list=(cur.holdings||[]).filter(h=>h.ticker!==addTarget.ticker);
+      list.push({ticker:addTarget.ticker,name:addTarget.name,
+        quantity:parseFloat(addForm.qty),buyPrice:parseFloat(addForm.price),
+        addedAt:new Date().toISOString()});
+      await fetch(`${API_BASE}/api/portfolio`,{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({holdings:list})});
+      setAddDone(addTarget.ticker);
+      setAddTarget(null);
+      setTimeout(()=>setAddDone(null),3000);
+    }catch(e){}
+    setAddBusy(false);
+  };
 
   const openAnalysis=async(ticker)=>{
     setSelectedTicker(ticker);
@@ -2364,7 +2393,44 @@ function RankingPage(){
                   {r.fundamental_label}
                 </span>
               )}
+              {/* 담기 버튼 */}
+              <button onClick={(e)=>openAdd(e,r)}
+                style={{padding:"2px 9px",borderRadius:4,fontSize:9,fontWeight:700,cursor:"pointer",
+                  background:addDone===r.ticker?C.green+"22":C.green+"14",
+                  border:`1px solid ${C.green}33`,color:C.green,marginLeft:"auto"}}>
+                {addDone===r.ticker?"✅ 추가됨":"💼 담기"}
+              </button>
             </div>
+
+            {/* 담기 미니폼 */}
+            {addTarget?.ticker===r.ticker&&(
+              <div onClick={e=>e.stopPropagation()}
+                style={{marginTop:8,padding:"8px 10px",borderRadius:8,
+                  background:C.surface,border:`1px solid ${C.green}33`}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:6,alignItems:"center"}}>
+                  <input value={addForm.qty} onChange={e=>setAddForm(p=>({...p,qty:e.target.value}))}
+                    placeholder="수량" type="number" min="0" step="1"
+                    style={{padding:"7px 9px",borderRadius:7,background:C.elevated,
+                      border:`1px solid ${C.border}`,color:C.text,fontSize:12,width:"100%",boxSizing:"border-box"}}/>
+                  <input value={addForm.price} onChange={e=>setAddForm(p=>({...p,price:e.target.value}))}
+                    placeholder="매수가" type="number" min="0" step="any"
+                    style={{padding:"7px 9px",borderRadius:7,background:C.elevated,
+                      border:`1px solid ${C.border}`,color:C.text,fontSize:12,width:"100%",boxSizing:"border-box"}}/>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={submitAdd} disabled={addBusy||!addForm.qty||!addForm.price}
+                      style={{padding:"7px 10px",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",
+                        background:C.green+"22",border:`1px solid ${C.green}44`,color:C.green}}>
+                      {addBusy?"⟳":"✅"}
+                    </button>
+                    <button onClick={e=>{e.stopPropagation();setAddTarget(null);}}
+                      style={{padding:"7px 8px",borderRadius:7,fontSize:11,cursor:"pointer",
+                        background:C.surface,border:`1px solid ${C.border}`,color:C.muted}}>
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
       })}

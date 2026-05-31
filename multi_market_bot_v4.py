@@ -3589,9 +3589,11 @@ def analyze_stock(ticker: str) -> dict:
     # 메타 정보
     info = POPULAR_STOCKS.get(ticker, {})
     _yf_name = full_info.get("longName") or full_info.get("shortName") or ""
-    _display_name = (info.get("name")
-                     or _yf_name
-                     or ticker.split(".")[0])  # 최후 폴백: .KS/.KQ 제거
+    _fallback = ticker.split(".")[0]
+    # 6자리 숫자 코드(예: "000150")는 의미 없는 이름이므로 ticker 전체를 씀
+    if _fallback.isdigit():
+        _fallback = ticker
+    _display_name = info.get("name") or _yf_name or _fallback
 
     return {
         "ticker": ticker,

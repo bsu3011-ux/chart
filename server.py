@@ -1089,9 +1089,13 @@ def _analyze_for_ranking(ticker: str):
         info = POPULAR_STOCKS.get(ticker, {})
         krx  = _krx_cache.get(ticker, {})
         is_kr = ticker.endswith(".KS") or ticker.endswith(".KQ")
+        # r.get("name")이 6자리 숫자 코드인 경우(ex: "000150") 무시하고 KRX명 사용
+        _r_name = r.get("name") or ""
+        if _r_name.replace(",", "").replace(".", "").isdigit():
+            _r_name = ""
         return {
             "ticker":     ticker,
-            "name":       info.get("name") or krx.get("name") or r.get("name", ticker),
+            "name":       info.get("name") or krx.get("name") or _r_name or ticker,
             "name_en":    info.get("name_en", ""),
             "sector":     info.get("sector") or krx.get("market", ""),
             "flag":       info.get("flag") or ("🇰🇷" if is_kr else "🌐"),

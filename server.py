@@ -10,11 +10,30 @@
 """
 
 import os, json, math, asyncio, datetime, threading, urllib.request, hmac, hashlib, subprocess
+
+def _load_dotenv_fallback(path):
+    """python-dotenv 없어도 .env 파일을 직접 파싱해 환경변수에 주입"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+    except Exception:
+        pass
+
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 try:
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+    load_dotenv(_env_path)
 except ImportError:
-    pass
+    _load_dotenv_fallback(_env_path)
+
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 
@@ -427,6 +446,33 @@ def status():
         "kis_available": _ka.is_available(),
         "dart_available": _da.is_available(),
     })
+
+
+PORTFOLIO_FILE = os.path.join(OUTPUT_DIR, "portfolio.json")
+
+@app.route('/api/portfolio', methods=['GET'])
+def get_portfolio():
+    """보유종목 서버 저장소에서 불러오기"""
+    try:
+        if os.path.exists(PORTFOLIO_FILE):
+            with open(PORTFOLIO_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            return jsonify({"holdings": data.get("holdings", [])})
+    except Exception:
+        pass
+    return jsonify({"holdings": []})
+
+@app.route('/api/portfolio', methods=['POST'])
+def save_portfolio():
+    """보유종목 서버 저장소에 저장"""
+    try:
+        body = request.get_json(force=True) or {}
+        holdings = body.get("holdings", [])
+        with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
+            json.dump({"holdings": holdings, "updated": datetime.datetime.now().isoformat()}, f, ensure_ascii=False)
+        return jsonify({"ok": True, "count": len(holdings)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route('/api/stock_analysis')

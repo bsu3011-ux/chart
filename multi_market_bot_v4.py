@@ -23,11 +23,27 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pandas as pd
 import yfinance as yf
+def _load_dotenv_fallback(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+    except Exception:
+        pass
+
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 try:
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+    load_dotenv(_env_path)
 except ImportError:
-    pass
+    _load_dotenv_fallback(_env_path)
 
 warnings.filterwarnings("ignore")
 

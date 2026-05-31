@@ -2415,9 +2415,8 @@ function ScreenerPage({markets,onChart}){
 // ════════════════════════════════════════════
 function PortfolioPage(){
   const LS_KEY="trading_bot_portfolio";
-  const [holdings,setHoldings]=useState(()=>{
-    try{return JSON.parse(localStorage.getItem(LS_KEY)||"[]");}catch(e){return [];}
-  });
+  const [holdings,setHoldings]=useState([]);
+  const [loaded,setLoaded]=useState(false);   // 서버 로드 완료 여부
   const [prices,setPrices]=useState({});
   const [analyses,setAnalyses]=useState({});
   const [srvStatus,setSrvStatus]=useState({});
@@ -2428,15 +2427,47 @@ function PortfolioPage(){
   const [sugg,setSugg]=useState([]);
   const [fetching,setFetching]=useState(false);
   const [analyzing,setAnalyzing]=useState(false);
+  const saveTimerRef=useRef(null);
   const debRef=useRef(null);
 
-  useEffect(()=>{localStorage.setItem(LS_KEY,JSON.stringify(holdings));},[holdings]);
-
-  // 서버 상태 + 시장 컨텍스트
+  // ── 서버에서 보유종목 로드 (최초 1회) ──
   useEffect(()=>{
+    fetch(`${API_BASE}/api/portfolio`)
+      .then(r=>r.json())
+      .then(d=>{
+        const srv=d.holdings||[];
+        if(srv.length>0){
+          setHoldings(srv);
+        } else {
+          // 서버에 없으면 localStorage 폴백
+          try{
+            const ls=JSON.parse(localStorage.getItem(LS_KEY)||"[]");
+            setHoldings(ls);
+          }catch(e){}
+        }
+        setLoaded(true);
+      })
+      .catch(()=>{
+        // 서버 실패 시 localStorage 폴백
+        try{setHoldings(JSON.parse(localStorage.getItem(LS_KEY)||"[]"));}catch(e){}
+        setLoaded(true);
+      });
     fetch(`${API_BASE}/api/status`).then(r=>r.json()).then(setSrvStatus).catch(()=>{});
     fetch(`${API_BASE}/api/signals`).then(r=>r.json()).then(d=>setMktSignals(d.signals||[])).catch(()=>{});
   },[]);
+
+  // ── holdings 변경 시 서버 + localStorage 모두 저장 (디바운스 1s) ──
+  useEffect(()=>{
+    if(!loaded) return;
+    localStorage.setItem(LS_KEY,JSON.stringify(holdings));
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current=setTimeout(()=>{
+      fetch(`${API_BASE}/api/portfolio`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({holdings}),
+      }).catch(()=>{});
+    },1000);
+  },[holdings,loaded]);
 
   // 현재가 조회
   const fetchPrices=useCallback(async()=>{
@@ -2469,7 +2500,7 @@ function PortfolioPage(){
     setAnalyses(result);setAnalyzing(false);
   },[holdings]);
 
-  useEffect(()=>{fetchPrices();analyzeAll();},[]);
+  useEffect(()=>{if(loaded&&holdings.length){fetchPrices();analyzeAll();}},[loaded]);
 
   // 검색 자동완성
   const fetchSugg=useCallback((q)=>{

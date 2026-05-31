@@ -416,6 +416,7 @@ def status():
         commit = "unknown"
 
     import kis_api as _ka
+    import dart_api as _da
     return jsonify({
         "status": "running",
         "version": "4.1",
@@ -424,6 +425,7 @@ def status():
         "last_updated": last_updated,
         "signals_file": SIGNALS_FILE,
         "kis_available": _ka.is_available(),
+        "dart_available": _da.is_available(),
     })
 
 

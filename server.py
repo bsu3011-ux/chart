@@ -1937,7 +1937,9 @@ def _load_kr_name_cache():
     try:
         if os.path.exists(KR_NAME_CACHE_FILE):
             with open(KR_NAME_CACHE_FILE, encoding="utf-8") as f:
-                _kr_name_cache = json.load(f)
+                raw = json.load(f)
+            # 빈 문자열이나 숫자 코드로 저장된 잘못된 항목 제거
+            _kr_name_cache = {k: v for k, v in raw.items() if v and not v.isdigit()}
     except Exception:
         _kr_name_cache = {}
 
@@ -1977,9 +1979,10 @@ def _lookup_kr_name(code6: str) -> str:
             name = data.get("stockName") or ""
         except Exception:
             name = ""
-    # 결과(빈 문자열 포함) 캐시 → 반복 조회 방지
-    _kr_name_cache[code6] = name
-    _save_kr_name_cache()
+    # 성공한 결과만 캐시 (빈 문자열은 캐시 안 함 → 다음 번에 재시도)
+    if name:
+        _kr_name_cache[code6] = name
+        _save_kr_name_cache()
     return name
 
 
@@ -2002,12 +2005,17 @@ def _analyze_for_ranking(ticker: str):
         _r_name = r.get("name") or ""
         if _r_name.replace(",", "").replace(".", "").isdigit():
             _r_name = ""
-        # 한국 종목인데 이름이 없으면 네이버에서 한글명 조회
-        if is_kr and not (info.get("name") or krx.get("name") or _r_name):
-            _r_name = _resolve_kr_name(ticker, _r_name)
+        _info_name = info.get("name") or ""
+        _krx_name  = krx.get("name") or ""
+        # KRX 캐시 이름이 숫자 코드면 무효 처리
+        if _krx_name.replace(",", "").replace(".", "").isdigit():
+            _krx_name = ""
+        # 한국 종목인데 유효한 이름이 없으면 네이버에서 한글명 조회
+        if is_kr and not (_info_name or _krx_name or _r_name):
+            _r_name = _resolve_kr_name(ticker, "")
         return {
             "ticker":     ticker,
-            "name":       info.get("name") or krx.get("name") or _r_name or ticker,
+            "name":       _info_name or _krx_name or _r_name or ticker,
             "name_en":    info.get("name_en", ""),
             "sector":     info.get("sector") or krx.get("market", ""),
             "flag":       info.get("flag") or ("🇰🇷" if is_kr else "🌐"),

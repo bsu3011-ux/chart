@@ -1285,6 +1285,15 @@ def get_stock_analysis():
     try:
         result = analyze_stock(ticker)
 
+        # 한국 종목 이름이 숫자/티커뿐이면 네이버에서 한글명 보완
+        is_kr = ticker.endswith(".KS") or ticker.endswith(".KQ")
+        if is_kr and ticker not in POPULAR_STOCKS:
+            _nm = result.get("name") or ""
+            if (not _nm) or _nm.replace(".", "").replace("-", "").isdigit() or _nm == ticker:
+                kr_nm = _resolve_kr_name(ticker)
+                if kr_nm:
+                    result["name"] = kr_nm
+
         # Background: record non-neutral signals for accuracy tracking
         sig_type = result.get("signal_type", "")
         if sig_type in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL"):
@@ -1919,6 +1928,67 @@ RANKING_CACHE_FILE = os.path.join(OUTPUT_DIR, "ranking_cache.json")
 _ranking_in_progress = False
 _ranking_lock = threading.Lock()
 
+# ── 한국 종목 한글명 해석기 (네이버 증권 + 영구 캐시) ──
+KR_NAME_CACHE_FILE = os.path.join(OUTPUT_DIR, "kr_names.json")
+_kr_name_cache: dict = {}   # code6 → 한글명
+
+def _load_kr_name_cache():
+    global _kr_name_cache
+    try:
+        if os.path.exists(KR_NAME_CACHE_FILE):
+            with open(KR_NAME_CACHE_FILE, encoding="utf-8") as f:
+                _kr_name_cache = json.load(f)
+    except Exception:
+        _kr_name_cache = {}
+
+def _save_kr_name_cache():
+    try:
+        with open(KR_NAME_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_kr_name_cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+def _lookup_kr_name(code6: str) -> str:
+    """6자리 코드 → 한글 종목명 (네이버 증권 모바일 API, 영구 캐시).
+    실패 시 빈 문자열."""
+    if not code6 or not code6.isdigit():
+        return ""
+    if code6 in _kr_name_cache:
+        return _kr_name_cache[code6]
+    name = ""
+    # ① 네이버 실시간 폴링 API (가장 단순/안정)
+    try:
+        url = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code6}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read())
+        datas = data.get("datas") or []
+        if datas:
+            name = datas[0].get("stockName") or datas[0].get("stockNameEng") or ""
+    except Exception:
+        name = ""
+    # ② 모바일 통합 API 폴백
+    if not name:
+        try:
+            url = f"https://m.stock.naver.com/api/stock/{code6}/integration"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read())
+            name = data.get("stockName") or ""
+        except Exception:
+            name = ""
+    # 결과(빈 문자열 포함) 캐시 → 반복 조회 방지
+    _kr_name_cache[code6] = name
+    _save_kr_name_cache()
+    return name
+
+
+def _resolve_kr_name(ticker: str, fallback: str = "") -> str:
+    """KR 티커의 한글명 우선 반환 (캐시/네이버), 없으면 fallback."""
+    code6 = ticker.split(".")[0]
+    nm = _lookup_kr_name(code6)
+    return nm or fallback
+
 
 def _analyze_for_ranking(ticker: str):
     """랭킹용 단일 종목 분석 — 실패 시 None"""
@@ -1932,6 +2002,9 @@ def _analyze_for_ranking(ticker: str):
         _r_name = r.get("name") or ""
         if _r_name.replace(",", "").replace(".", "").isdigit():
             _r_name = ""
+        # 한국 종목인데 이름이 없으면 네이버에서 한글명 조회
+        if is_kr and not (info.get("name") or krx.get("name") or _r_name):
+            _r_name = _resolve_kr_name(ticker, _r_name)
         return {
             "ticker":     ticker,
             "name":       info.get("name") or krx.get("name") or _r_name or ticker,
@@ -2182,6 +2255,7 @@ if __name__ == '__main__':
     # 보유종목 이전 신호 로드 + 감시 스레드 시작
     _load_portfolio_sig_prev()
     _load_dart_corp_cache()
+    _load_kr_name_cache()
     threading.Thread(target=_portfolio_watcher, daemon=True).start()
     # signals_v4.json 없으면 시작 즉시 분석 실행
     if not os.path.exists(SIGNALS_FILE):

@@ -28,11 +28,15 @@ def _load_dotenv_fallback(path):
         pass
 
 _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+_env_loaded = os.path.exists(_env_path)
 try:
     from dotenv import load_dotenv
     load_dotenv(_env_path)
 except ImportError:
-    _load_dotenv_fallback(_env_path)
+    pass
+# python-dotenv 가 경로/포맷 문제로 못 읽는 경우 대비해 항상 수동 파서도 실행
+# (이미 존재하는 환경변수는 건드리지 않음 → 중복/충돌 없음)
+_load_dotenv_fallback(_env_path)
 
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
@@ -709,7 +713,10 @@ _DART_IMPORTANT = {"A", "B", "D", "I"}
 
 
 def _dart_api_key() -> str:
-    return os.environ.get("DART_API_KEY", "")
+    # 다양한 키 이름 허용 (DART_API_KEY / DART_KEY / OPENDART_API_KEY)
+    return (os.environ.get("DART_API_KEY")
+            or os.environ.get("DART_KEY")
+            or os.environ.get("OPENDART_API_KEY", ""))
 
 
 def _dart_get(path: str, params: dict, timeout: int = 10) -> dict:
@@ -1219,6 +1226,45 @@ def status():
         "signals_file": SIGNALS_FILE,
         "kis_available": _ka.is_available(),
         "dart_available": _da.is_available(),
+    })
+
+
+@app.route('/api/env_diag')
+def env_diag():
+    """환경변수/.env 로딩 진단 (값은 노출하지 않고 존재 여부·길이만)
+    GET /api/env_diag
+    """
+    def _mask(name):
+        v = os.environ.get(name, "")
+        if not v:
+            return {"set": False}
+        return {"set": True, "len": len(v), "head": v[:3] + "…"}
+
+    # .env 파일에 적힌 키 목록 (값 제외)
+    env_file_keys = []
+    try:
+        if os.path.exists(_env_path):
+            with open(_env_path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        env_file_keys.append(line.partition("=")[0].strip())
+    except Exception:
+        pass
+
+    return jsonify({
+        "env_file_path":   _env_path,
+        "env_file_exists": os.path.exists(_env_path),
+        "env_file_keys":   env_file_keys,   # .env 안에 실제로 적힌 키 이름들
+        "checked": {
+            "DART_API_KEY":     _mask("DART_API_KEY"),
+            "DART_KEY":         _mask("DART_KEY"),
+            "OPENDART_API_KEY": _mask("OPENDART_API_KEY"),
+            "KIS_APP_KEY":      _mask("KIS_APP_KEY"),
+            "KIS_APP_SECRET":   _mask("KIS_APP_SECRET"),
+            "TELEGRAM_TOKEN":   _mask("TELEGRAM_TOKEN"),
+        },
+        "dart_available": __import__("dart_api").is_available(),
     })
 
 

@@ -11,12 +11,14 @@ _CORP_CACHE_FILE = "/tmp/dart_corp_cache.json"
 _corp_cache: dict = {}
 
 
-def is_available() -> bool:
-    return bool(os.environ.get("DART_API_KEY") or os.environ.get("DART_KEY"))
-
-
 def _key() -> str:
-    return os.environ.get("DART_API_KEY") or os.environ.get("DART_KEY", "")
+    return (os.environ.get("DART_API_KEY")
+            or os.environ.get("DART_KEY")
+            or os.environ.get("OPENDART_API_KEY", ""))
+
+
+def is_available() -> bool:
+    return bool(_key())
 
 
 def _get(endpoint: str, params: dict, timeout: int = 10) -> dict:

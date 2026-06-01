@@ -2565,6 +2565,7 @@ function PortfolioPage(){
   const [sellTarget,setSellTarget]=useState(null);   // 매도 기록 중인 holding index
   const [sellForm,setSellForm]=useState({qty:"",price:"",date:new Date().toISOString().slice(0,10)});
   const [showSells,setShowSells]=useState({});       // {idx: bool} 매도이력 펼침
+  const [showDartModal,setShowDartModal]=useState(false);
   const saveTimerRef=useRef(null);
   const debRef=useRef(null);
 
@@ -2723,7 +2724,7 @@ function PortfolioPage(){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
         <div style={{color:C.text,fontSize:15,fontWeight:800}}>📋 보유종목 모니터</div>
         <div style={{display:"flex",gap:5}}>
-          <button onClick={analyzeAll} disabled={analyzing||!holdings.length}
+          <button onClick={()=>{setShowDartModal(true);if(!analyzing)analyzeAll();}} disabled={!holdings.length}
             style={{padding:"5px 9px",borderRadius:7,fontSize:10,fontWeight:700,cursor:"pointer",
               border:`1px solid ${C.cyan}44`,background:C.cyan+"14",color:C.cyan}}>
             {analyzing?"⟳":"📢"} 공시
@@ -3093,6 +3094,67 @@ function PortfolioPage(){
           </div>
         );
       })}
+
+      {/* DART 공시 모달 */}
+      {showDartModal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:999,
+          display:"flex",alignItems:"flex-end",justifyContent:"center"}}
+          onClick={()=>setShowDartModal(false)}>
+          <div style={{width:"100%",maxWidth:480,background:C.card,
+            borderRadius:"16px 16px 0 0",padding:"16px 16px 30px",
+            maxHeight:"75vh",overflowY:"auto"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <span style={{color:C.text,fontSize:14,fontWeight:800}}>📢 DART 공시 조회</span>
+              <button onClick={()=>setShowDartModal(false)}
+                style={{background:"none",border:"none",color:C.muted,fontSize:22,cursor:"pointer",lineHeight:1,padding:0}}>✕</button>
+            </div>
+            {!srvStatus.dart_available?(
+              <div style={{textAlign:"center",padding:"24px 0"}}>
+                <div style={{color:"#ef5350",fontSize:13,fontWeight:700,marginBottom:8}}>DART API 미설정</div>
+                <div style={{color:C.muted,fontSize:11,lineHeight:1.6}}>
+                  서버 .env 파일에 아래 줄을 추가하세요:<br/>
+                  <code style={{color:C.cyan,fontSize:10}}>DART_API_KEY=발급받은키</code>
+                </div>
+              </div>
+            ):analyzing?(
+              <div style={{textAlign:"center",padding:"24px 0",color:C.muted,fontSize:13}}>⟳ 공시 조회 중...</div>
+            ):holdings.length===0?(
+              <div style={{textAlign:"center",padding:"24px 0",color:C.muted,fontSize:12}}>보유 종목 없음</div>
+            ):(
+              holdings.map((h,i)=>{
+                const a=analyses[h.ticker];
+                const discs=a?.dart_disclosures||[];
+                const ins=a?.dart_insider;
+                return(
+                  <div key={i} style={{marginBottom:10,padding:"11px 13px",borderRadius:11,
+                    background:C.surface,border:`1px solid ${C.border}`}}>
+                    <div style={{color:C.text,fontSize:12,fontWeight:700,marginBottom:7,
+                      display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span>{h.name}</span>
+                      <span style={{color:C.muted,fontWeight:400,fontSize:10}}>{h.ticker}</span>
+                    </div>
+                    {discs.length>0?discs.map((dc,di)=>(
+                      <div key={di} style={{color:C.dim,fontSize:10,lineHeight:1.7}}>
+                        · {dc.title} <span style={{color:C.muted,fontSize:9}}>{dc.date}</span>
+                      </div>
+                    )):(
+                      <div style={{color:C.muted,fontSize:10}}>최근 2주 주요 공시 없음</div>
+                    )}
+                    {ins&&(ins.buy_count>0||ins.sell_count>0)&&(
+                      <div style={{marginTop:7,paddingTop:6,borderTop:`1px solid ${C.border}`,fontSize:10,color:C.muted}}>
+                        👥 임원거래(60일)&nbsp;
+                        {ins.buy_count>0&&<span style={{color:C.green,fontWeight:700}}>매수 {ins.buy_count}건 </span>}
+                        {ins.sell_count>0&&<span style={{color:"#ef5350",fontWeight:700}}>매도 {ins.sell_count}건</span>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

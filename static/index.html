@@ -2650,14 +2650,31 @@ function PortfolioPage(){
     await Promise.all(holdings.map(async h=>{
       try{
         const r=await fetch(`${API_BASE}/api/dart_detail?ticker=${encodeURIComponent(h.ticker)}`);
-        const d=await r.json();
-        setDartDetails(prev=>({...prev,[h.ticker]:d}));
+        if(!r.ok){
+          // 엔드포인트 없거나 오류 → 기존 analyzeAll 데이터로 폴백
+          const a=analyses[h.ticker]||{};
+          setDartDetails(prev=>({...prev,[h.ticker]:{
+            _fallback:true,
+            disclosures:(a.dart_disclosures||[]).map(dc=>({title:dc.title,date:dc.date,type:"공시",important:false})),
+            insider:a.dart_insider||{},
+            financial:{},
+          }}));
+        } else {
+          const d=await r.json();
+          setDartDetails(prev=>({...prev,[h.ticker]:d.error?{error:d.error}:d}));
+        }
       }catch(e){
-        setDartDetails(prev=>({...prev,[h.ticker]:{error:"조회 실패"}}));
+        const a=analyses[h.ticker]||{};
+        setDartDetails(prev=>({...prev,[h.ticker]:{
+          _fallback:true,
+          disclosures:(a.dart_disclosures||[]).map(dc=>({title:dc.title,date:dc.date,type:"공시",important:false})),
+          insider:a.dart_insider||{},
+          financial:{},
+        }}));
       }
       setDartLoading(prev=>({...prev,[h.ticker]:false}));
     }));
-  },[holdings,srvStatus.dart_available]);
+  },[holdings,srvStatus.dart_available,analyses]);
 
   useEffect(()=>{if(loaded&&holdings.length){fetchPrices();analyzeAll();}},[loaded]);
 
@@ -3167,9 +3184,23 @@ function PortfolioPage(){
                     {loading?(
                       <div style={{color:C.muted,fontSize:11,textAlign:"center",padding:"12px 0"}}>⟳ 조회 중...</div>
                     ):dd?.error?(
-                      <div style={{color:"#ef5350",fontSize:10,padding:"8px 0"}}>{dd.error}</div>
+                      <div style={{color:"#ef5350",fontSize:10,padding:"8px 0"}}>
+                        {dd.error}
+                        <button onClick={fetchDartDetails}
+                          style={{marginLeft:8,padding:"2px 7px",borderRadius:5,fontSize:9,
+                            border:`1px solid ${C.border}`,background:C.surface,color:C.dim,cursor:"pointer"}}>
+                          재시도
+                        </button>
+                      </div>
                     ):(
                       <>
+                        {dd?._fallback&&(
+                          <div style={{marginBottom:7,padding:"4px 8px",borderRadius:6,
+                            background:"#ffa00018",border:"1px solid #ffa00033",
+                            color:"#ffa000",fontSize:9}}>
+                            ⚠️ 상세 조회 불가 — 캐시 데이터 표시 중
+                          </div>
+                        )}
                         {/* 임원 시그널 배너 */}
                         {sigLabel&&(
                           <div style={{marginBottom:8,padding:"6px 10px",borderRadius:8,

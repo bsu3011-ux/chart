@@ -2560,6 +2560,9 @@ function PortfolioPage(){
   const [sugg,setSugg]=useState([]);
   const [fetching,setFetching]=useState(false);
   const [analyzing,setAnalyzing]=useState(false);
+  const [sellTarget,setSellTarget]=useState(null);   // 매도 기록 중인 holding index
+  const [sellForm,setSellForm]=useState({qty:"",price:"",date:new Date().toISOString().slice(0,10)});
+  const [showSells,setShowSells]=useState({});       // {idx: bool} 매도이력 펼침
   const saveTimerRef=useRef(null);
   const debRef=useRef(null);
 
@@ -2657,10 +2660,37 @@ function PortfolioPage(){
   };
   const removeHolding=(idx)=>setHoldings(p=>p.filter((_,i)=>i!==idx));
 
+  // 매도 기록 저장
+  const submitSell=(idx)=>{
+    const qty=parseFloat(sellForm.qty);
+    const price=parseFloat(sellForm.price);
+    if(!qty||!price||qty<=0||price<=0) return;
+    setHoldings(prev=>prev.map((h,i)=>{
+      if(i!==idx) return h;
+      const sells=[...(h.sells||[]),{qty,price,date:sellForm.date||new Date().toISOString().slice(0,10)}];
+      // 잔여 수량 차감 (0 이하이면 보유수량 유지)
+      const remaining=Math.max(0, h.quantity-qty);
+      return {...h, sells, quantity:remaining>0?remaining:h.quantity};
+    }));
+    setSellTarget(null);
+    setSellForm({qty:"",price:"",date:new Date().toISOString().slice(0,10)});
+  };
+
+  const removeSell=(hIdx,sIdx)=>{
+    setHoldings(prev=>prev.map((h,i)=>{
+      if(i!==hIdx) return h;
+      const sells=(h.sells||[]).filter((_,si)=>si!==sIdx);
+      return {...h,sells};
+    }));
+  };
+
   // 집계
   const totalBuy=holdings.reduce((a,h)=>a+h.buyPrice*h.quantity,0);
   const totalNow=holdings.reduce((a,h)=>a+(prices[h.ticker]||h.buyPrice)*h.quantity,0);
   const totalPnlPct=totalBuy>0?((totalNow-totalBuy)/totalBuy*100):0;
+  // 실현 손익 (매도 기록 합산)
+  const realizedPnl=holdings.reduce((a,h)=>
+    a+(h.sells||[]).reduce((s,sv)=>s+(sv.price-h.buyPrice)*sv.qty,0),0);
   const sellSignals=holdings.filter(h=>["SELL","STRONG_SELL","CASH","CASH_VOL"].includes(analyses[h.ticker]?.signal_type));
 
   // 시장 컨텍스트
@@ -2741,12 +2771,13 @@ function PortfolioPage(){
         </div>
       )}
 
-      {/* 요약 3칸 */}
+      {/* 요약 4칸 */}
       {holdings.length>0&&(
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:10}}>
           {[
             {label:"보유 종목",val:`${holdings.length}개`,color:C.text},
-            {label:"총 수익률",val:`${totalPnlPct>=0?"+":""}${totalPnlPct.toFixed(2)}%`,color:totalPnlPct>=0?C.green:C.red},
+            {label:"평가 수익률",val:`${totalPnlPct>=0?"+":""}${totalPnlPct.toFixed(2)}%`,color:totalPnlPct>=0?C.green:C.red},
+            {label:"실현 손익",val:realizedPnl===0?"없음":(realizedPnl>=0?"+":"")+Math.round(realizedPnl).toLocaleString(),color:realizedPnl>=0?C.green:C.red},
             {label:"매도신호",val:`${sellSignals.length}개`,color:sellSignals.length>0?C.red:C.muted},
           ].map(({label,val,color})=>(
             <div key={label} style={{padding:"10px",borderRadius:10,textAlign:"center",
@@ -2872,8 +2903,17 @@ function PortfolioPage(){
                   {h.ticker} · {h.quantity.toLocaleString()}주 · 매수가 {fmtPrc(h.buyPrice,h.ticker)}
                 </div>
               </div>
-              <button onClick={()=>removeHolding(i)}
-                style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:14,padding:"0 0 0 8px"}}>🗑</button>
+              <div style={{display:"flex",gap:4,alignItems:"center",flexShrink:0}}>
+                <button onClick={()=>{setSellTarget(sellTarget===i?null:i);setSellForm({qty:"",price:"",date:new Date().toISOString().slice(0,10)});}}
+                  style={{padding:"3px 7px",borderRadius:5,fontSize:9,fontWeight:700,cursor:"pointer",
+                    border:`1px solid ${sellTarget===i?"#ef535055":"#ef535033"}`,
+                    background:sellTarget===i?"#ef535022":"transparent",
+                    color:"#ef5350"}}>
+                  {sellTarget===i?"✕":"💰 매도"}
+                </button>
+                <button onClick={()=>removeHolding(i)}
+                  style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:14,padding:"0"}}>🗑</button>
+              </div>
             </div>
 
             {/* 가격 그리드 */}
@@ -2942,6 +2982,110 @@ function PortfolioPage(){
                   {a.kis_data.frgn_3d>0?"+":""}{(a.kis_data.frgn_3d||0).toLocaleString()}주</b>
                 {" / 기관 "}<b style={{color:a.kis_data.inst_3d>0?C.green:"#ef5350"}}>
                   {a.kis_data.inst_3d>0?"+":""}{(a.kis_data.inst_3d||0).toLocaleString()}주</b>
+              </div>
+            )}
+
+            {/* 매도 기록 폼 */}
+            {sellTarget===i&&(
+              <div style={{marginTop:8,padding:"10px 10px",borderRadius:9,
+                background:"#ef535010",border:"1px solid #ef535033"}}>
+                <div style={{color:"#ef5350",fontSize:10,fontWeight:800,marginBottom:7}}>💰 매도 기록</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:7}}>
+                  <div>
+                    <div style={{color:C.muted,fontSize:9,marginBottom:2}}>매도 수량</div>
+                    <input value={sellForm.qty} onChange={e=>setSellForm(p=>({...p,qty:e.target.value}))}
+                      placeholder={`최대 ${h.quantity}`} type="number" min="0" max={h.quantity}
+                      style={{width:"100%",padding:"6px 8px",borderRadius:6,boxSizing:"border-box",
+                        background:C.elevated,border:"1px solid #ef535044",color:C.text,fontSize:12}}/>
+                  </div>
+                  <div>
+                    <div style={{color:C.muted,fontSize:9,marginBottom:2}}>매도가</div>
+                    <input value={sellForm.price} onChange={e=>setSellForm(p=>({...p,price:e.target.value}))}
+                      placeholder="매도 단가" type="number" min="0"
+                      style={{width:"100%",padding:"6px 8px",borderRadius:6,boxSizing:"border-box",
+                        background:C.elevated,border:"1px solid #ef535044",color:C.text,fontSize:12}}/>
+                  </div>
+                  <div>
+                    <div style={{color:C.muted,fontSize:9,marginBottom:2}}>매도일</div>
+                    <input value={sellForm.date} onChange={e=>setSellForm(p=>({...p,date:e.target.value}))}
+                      type="date"
+                      style={{width:"100%",padding:"6px 4px",borderRadius:6,boxSizing:"border-box",
+                        background:C.elevated,border:"1px solid #ef535044",color:C.text,fontSize:11}}/>
+                  </div>
+                </div>
+                {sellForm.qty&&sellForm.price&&(
+                  <div style={{fontSize:10,color:C.dim,marginBottom:7}}>
+                    실현 손익:
+                    <b style={{color:(parseFloat(sellForm.price)-h.buyPrice)*parseFloat(sellForm.qty)>=0?C.green:"#ef5350",marginLeft:4}}>
+                      {((parseFloat(sellForm.price)-h.buyPrice)*parseFloat(sellForm.qty)>=0?"+":"")}
+                      {Math.round((parseFloat(sellForm.price)-h.buyPrice)*parseFloat(sellForm.qty)).toLocaleString()}
+                    </b>
+                    <span style={{color:C.muted,marginLeft:6}}>
+                      ({((parseFloat(sellForm.price)/h.buyPrice-1)*100).toFixed(2)}%)
+                    </span>
+                  </div>
+                )}
+                <button onClick={()=>submitSell(i)} disabled={!sellForm.qty||!sellForm.price}
+                  style={{width:"100%",padding:"7px",borderRadius:7,fontSize:11,fontWeight:700,
+                    cursor:sellForm.qty&&sellForm.price?"pointer":"not-allowed",
+                    background:"#ef535022",border:"1px solid #ef535055",color:"#ef5350"}}>
+                  ✅ 매도 기록 저장
+                </button>
+              </div>
+            )}
+
+            {/* 매도 이력 */}
+            {(h.sells||[]).length>0&&(
+              <div style={{marginTop:6}}>
+                <button onClick={()=>setShowSells(p=>({...p,[i]:!p[i]}))}
+                  style={{background:"none",border:"none",cursor:"pointer",
+                    color:C.dim,fontSize:9,fontWeight:700,padding:0,display:"flex",alignItems:"center",gap:3}}>
+                  📋 매도 이력 {h.sells.length}건
+                  <span style={{color:C.muted}}>{showSells[i]?"▲":"▼"}</span>
+                  <span style={{color:(h.sells||[]).reduce((a,s)=>a+(s.price-h.buyPrice)*s.qty,0)>=0?C.green:"#ef5350",
+                    fontWeight:800,marginLeft:4}}>
+                    {(h.sells||[]).reduce((a,s)=>a+(s.price-h.buyPrice)*s.qty,0)>=0?"+":""}
+                    {Math.round((h.sells||[]).reduce((a,s)=>a+(s.price-h.buyPrice)*s.qty,0)).toLocaleString()}원
+                  </span>
+                </button>
+                {showSells[i]&&(
+                  <div style={{marginTop:4,padding:"6px 8px",borderRadius:8,
+                    background:"rgba(255,255,255,0.02)",border:`1px solid ${C.border}33`}}>
+                    <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr 1fr auto",
+                      gap:"4px 8px",fontSize:9,color:C.muted,marginBottom:4,fontWeight:700}}>
+                      <span>날짜</span><span>수량</span><span>매도가</span><span>손익</span><span/>
+                    </div>
+                    {(h.sells||[]).map((s,si)=>{
+                      const pnl=(s.price-h.buyPrice)*s.qty;
+                      return(
+                        <div key={si} style={{display:"grid",
+                          gridTemplateColumns:"auto 1fr 1fr 1fr auto",
+                          gap:"4px 8px",fontSize:10,color:C.text,padding:"4px 0",
+                          borderTop:si>0?`1px solid ${C.border}22`:undefined,alignItems:"center"}}>
+                          <span style={{color:C.muted,fontSize:9}}>{s.date}</span>
+                          <span>{s.qty.toLocaleString()}주</span>
+                          <span>{fmtPrc(s.price,h.ticker)}</span>
+                          <span style={{color:pnl>=0?C.green:"#ef5350",fontWeight:700}}>
+                            {pnl>=0?"+":""}{Math.round(pnl).toLocaleString()}
+                          </span>
+                          <button onClick={()=>removeSell(i,si)}
+                            style={{background:"none",border:"none",color:C.muted,cursor:"pointer",
+                              fontSize:11,padding:0}}>🗑</button>
+                        </div>
+                      );
+                    })}
+                    <div style={{marginTop:5,paddingTop:5,borderTop:`1px solid ${C.border}33`,
+                      fontSize:9,color:C.muted,display:"flex",justifyContent:"space-between"}}>
+                      <span>총 매도수량: {(h.sells||[]).reduce((a,s)=>a+s.qty,0).toLocaleString()}주</span>
+                      <span>실현 손익 합계:
+                        <b style={{color:(h.sells||[]).reduce((a,s)=>a+(s.price-h.buyPrice)*s.qty,0)>=0?C.green:"#ef5350",marginLeft:3}}>
+                          {(h.sells||[]).reduce((a,s)=>a+(s.price-h.buyPrice)*s.qty,0)>=0?"+":""}
+                          {Math.round((h.sells||[]).reduce((a,s)=>a+(s.price-h.buyPrice)*s.qty,0)).toLocaleString()}
+                        </b>
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

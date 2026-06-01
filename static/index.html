@@ -2125,6 +2125,7 @@ function RankingPage(){
   const [selectedTicker,setSelectedTicker]=React.useState(null);
   const [analysisData,setAnalysisData]=React.useState(null);
   const [analysisLoading,setAnalysisLoading]=React.useState(false);
+  const [chartMarket,setChartMarket]=React.useState(null);  // 차트 모달
   const [addTarget,setAddTarget]=React.useState(null);    // {ticker,name,price}
   const [addForm,setAddForm]=React.useState({qty:"",price:""});
   const [addBusy,setAddBusy]=React.useState(false);
@@ -2239,7 +2240,7 @@ function RankingPage(){
               </div>
             )}
             {!analysisLoading&&analysisData&&!analysisData.error&&(
-              <StockResultCard data={analysisData} onChart={()=>{}} onClose={()=>setSelectedTicker(null)}/>
+              <StockResultCard data={analysisData} onChart={(m)=>{setSelectedTicker(null);setChartMarket(m);}} onClose={()=>setSelectedTicker(null)}/>
             )}
             {!analysisLoading&&analysisData?.error&&(
               <div style={{color:C.red,textAlign:"center",padding:20,fontSize:13}}>{analysisData.error}</div>
@@ -2440,6 +2441,7 @@ function RankingPage(){
           해당 조건의 종목이 없습니다
         </div>
       )}
+      {chartMarket&&<ChartModal market={chartMarket} onClose={()=>setChartMarket(null)}/>}
     </div>
   );
 }

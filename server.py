@@ -1387,6 +1387,11 @@ def search_stocks():
             if ticker in seen:
                 continue
             name = info.get("name", "")
+            # 이름이 숫자(종목코드)인 경우 제외
+            if name.replace("-","").replace(".","").isdigit():
+                name = ""
+            if not name:
+                continue
             krx_code = info.get("krx_code", "")
             if q in ticker.lower() or q in name.lower() or q in krx_code:
                 results.append({

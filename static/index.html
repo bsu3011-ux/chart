@@ -2566,6 +2566,8 @@ function PortfolioPage(){
   const [sellForm,setSellForm]=useState({qty:"",price:"",date:new Date().toISOString().slice(0,10)});
   const [showSells,setShowSells]=useState({});       // {idx: bool} 매도이력 펼침
   const [showDartModal,setShowDartModal]=useState(false);
+  const [dartDetails,setDartDetails]=useState({});   // ticker → 상세 DART 데이터
+  const [dartLoading,setDartLoading]=useState({});   // ticker → bool
   const saveTimerRef=useRef(null);
   const debRef=useRef(null);
 
@@ -2638,6 +2640,24 @@ function PortfolioPage(){
     }));
     setAnalyses(result);setAnalyzing(false);
   },[holdings]);
+
+  // DART 공시 상세 병렬 조회
+  const fetchDartDetails=useCallback(async()=>{
+    if(!srvStatus.dart_available||!holdings.length) return;
+    const initLoad={};
+    holdings.forEach(h=>{initLoad[h.ticker]=true;});
+    setDartLoading(initLoad);
+    await Promise.all(holdings.map(async h=>{
+      try{
+        const r=await fetch(`${API_BASE}/api/dart_detail?ticker=${encodeURIComponent(h.ticker)}`);
+        const d=await r.json();
+        setDartDetails(prev=>({...prev,[h.ticker]:d}));
+      }catch(e){
+        setDartDetails(prev=>({...prev,[h.ticker]:{error:"조회 실패"}}));
+      }
+      setDartLoading(prev=>({...prev,[h.ticker]:false}));
+    }));
+  },[holdings,srvStatus.dart_available]);
 
   useEffect(()=>{if(loaded&&holdings.length){fetchPrices();analyzeAll();}},[loaded]);
 
@@ -2724,7 +2744,7 @@ function PortfolioPage(){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
         <div style={{color:C.text,fontSize:15,fontWeight:800}}>📋 보유종목 모니터</div>
         <div style={{display:"flex",gap:5}}>
-          <button onClick={()=>{setShowDartModal(true);if(!analyzing)analyzeAll();}} disabled={!holdings.length}
+          <button onClick={()=>{setShowDartModal(true);fetchDartDetails();}} disabled={!holdings.length}
             style={{padding:"5px 9px",borderRadius:7,fontSize:10,fontWeight:700,cursor:"pointer",
               border:`1px solid ${C.cyan}44`,background:C.cyan+"14",color:C.cyan}}>
             {analyzing?"⟳":"📢"} 공시
@@ -3095,63 +3115,161 @@ function PortfolioPage(){
         );
       })}
 
-      {/* DART 공시 모달 */}
+      {/* DART 공시 모달 — 개선판 */}
       {showDartModal&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:999,
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.82)",zIndex:999,
           display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={()=>setShowDartModal(false)}>
           <div style={{width:"100%",maxWidth:480,background:C.card,
-            borderRadius:"16px 16px 0 0",padding:"16px 16px 30px",
-            maxHeight:"75vh",overflowY:"auto"}}
+            borderRadius:"16px 16px 0 0",padding:"16px 16px 34px",
+            maxHeight:"82vh",overflowY:"auto"}}
             onClick={e=>e.stopPropagation()}>
+
+            {/* 헤더 */}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-              <span style={{color:C.text,fontSize:14,fontWeight:800}}>📢 DART 공시 조회</span>
+              <span style={{color:C.text,fontSize:15,fontWeight:800}}>📢 DART 공시 분석</span>
               <button onClick={()=>setShowDartModal(false)}
                 style={{background:"none",border:"none",color:C.muted,fontSize:22,cursor:"pointer",lineHeight:1,padding:0}}>✕</button>
             </div>
+
             {!srvStatus.dart_available?(
-              <div style={{textAlign:"center",padding:"24px 0"}}>
+              <div style={{textAlign:"center",padding:"28px 0"}}>
                 <div style={{color:"#ef5350",fontSize:13,fontWeight:700,marginBottom:8}}>DART API 미설정</div>
-                <div style={{color:C.muted,fontSize:11,lineHeight:1.6}}>
-                  서버 .env 파일에 아래 줄을 추가하세요:<br/>
+                <div style={{color:C.muted,fontSize:11,lineHeight:1.8}}>
+                  서버 .env 파일에 추가:<br/>
                   <code style={{color:C.cyan,fontSize:10}}>DART_API_KEY=발급받은키</code>
                 </div>
               </div>
-            ):analyzing?(
-              <div style={{textAlign:"center",padding:"24px 0",color:C.muted,fontSize:13}}>⟳ 공시 조회 중...</div>
             ):holdings.length===0?(
-              <div style={{textAlign:"center",padding:"24px 0",color:C.muted,fontSize:12}}>보유 종목 없음</div>
-            ):(
-              holdings.map((h,i)=>{
-                const a=analyses[h.ticker];
-                const discs=a?.dart_disclosures||[];
-                const ins=a?.dart_insider;
-                return(
-                  <div key={i} style={{marginBottom:10,padding:"11px 13px",borderRadius:11,
-                    background:C.surface,border:`1px solid ${C.border}`}}>
-                    <div style={{color:C.text,fontSize:12,fontWeight:700,marginBottom:7,
-                      display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <span>{h.name}</span>
-                      <span style={{color:C.muted,fontWeight:400,fontSize:10}}>{h.ticker}</span>
-                    </div>
-                    {discs.length>0?discs.map((dc,di)=>(
-                      <div key={di} style={{color:C.dim,fontSize:10,lineHeight:1.7}}>
-                        · {dc.title} <span style={{color:C.muted,fontSize:9}}>{dc.date}</span>
-                      </div>
-                    )):(
-                      <div style={{color:C.muted,fontSize:10}}>최근 2주 주요 공시 없음</div>
-                    )}
-                    {ins&&(ins.buy_count>0||ins.sell_count>0)&&(
-                      <div style={{marginTop:7,paddingTop:6,borderTop:`1px solid ${C.border}`,fontSize:10,color:C.muted}}>
-                        👥 임원거래(60일)&nbsp;
-                        {ins.buy_count>0&&<span style={{color:C.green,fontWeight:700}}>매수 {ins.buy_count}건 </span>}
-                        {ins.sell_count>0&&<span style={{color:"#ef5350",fontWeight:700}}>매도 {ins.sell_count}건</span>}
-                      </div>
+              <div style={{textAlign:"center",padding:"28px 0",color:C.muted,fontSize:12}}>보유 종목 없음</div>
+            ):holdings.map((h,i)=>{
+              const dd=dartDetails[h.ticker];
+              const loading=dartLoading[h.ticker];
+              const ins=dd?.insider||analyses[h.ticker]?.dart_insider||{};
+              const sig=ins.net_signal;
+              const sigColor=sig==="insider_buy"?C.green:sig==="insider_sell"?"#ef5350":C.muted;
+              const sigLabel=sig==="insider_buy"?"🟢 임원 매수 우위":sig==="insider_sell"?"🔴 임원 매도 우위":null;
+              const fin=dd?.financial||{};
+              const discs=dd?.disclosures||[];
+              const typeIcon={"정기공시":"📊","주요사항":"⚠️","발행공시":"💸","지분공시":"👥","거래소공시":"🏢","기타공시":"📋"};
+              return(
+                <div key={i} style={{marginBottom:12,borderRadius:13,
+                  background:C.surface,border:`1px solid ${C.border}`,overflow:"hidden"}}>
+
+                  {/* 종목 헤더 */}
+                  <div style={{padding:"10px 13px 8px",borderBottom:`1px solid ${C.border}44`,
+                    display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{color:C.text,fontSize:13,fontWeight:800}}>{h.name}</span>
+                    <span style={{color:C.muted,fontSize:10}}>{h.ticker}</span>
+                  </div>
+
+                  <div style={{padding:"10px 13px"}}>
+                    {loading?(
+                      <div style={{color:C.muted,fontSize:11,textAlign:"center",padding:"12px 0"}}>⟳ 조회 중...</div>
+                    ):dd?.error?(
+                      <div style={{color:"#ef5350",fontSize:10,padding:"8px 0"}}>{dd.error}</div>
+                    ):(
+                      <>
+                        {/* 임원 시그널 배너 */}
+                        {sigLabel&&(
+                          <div style={{marginBottom:8,padding:"6px 10px",borderRadius:8,
+                            background:sigColor+"18",border:`1px solid ${sigColor}44`,
+                            display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <span style={{color:sigColor,fontSize:11,fontWeight:700}}>{sigLabel}</span>
+                            <span style={{color:C.muted,fontSize:9}}>
+                              매수 {ins.buy_count||0}건 · 매도 {ins.sell_count||0}건
+                            </span>
+                          </div>
+                        )}
+
+                        {/* 재무 스냅샷 */}
+                        {Object.keys(fin).length>0&&(
+                          <div style={{marginBottom:8,padding:"6px 10px",borderRadius:8,
+                            background:C.cyan+"0a",border:`1px solid ${C.cyan}22`}}>
+                            <span style={{color:C.cyan,fontSize:9,fontWeight:700}}>💰 최근 분기 재무&nbsp;&nbsp;</span>
+                            {["매출액","영업이익","당기순이익"].filter(k=>fin[k]).map(k=>(
+                              <span key={k} style={{color:C.dim,fontSize:10,marginRight:8}}>
+                                {k} <b style={{color:C.text}}>{fin[k]}</b>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* 공시 목록 */}
+                        <div style={{marginBottom:8}}>
+                          <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:5,
+                            textTransform:"uppercase",letterSpacing:1}}>
+                            📋 공시 (최근 30일 · {discs.length}건)
+                          </div>
+                          {discs.length>0?discs.map((dc,di)=>(
+                            <div key={di} style={{display:"flex",alignItems:"flex-start",
+                              gap:5,marginBottom:4,paddingBottom:4,
+                              borderBottom:di<discs.length-1?`1px solid ${C.border}33`:"none"}}>
+                              <span style={{fontSize:11,minWidth:18,flexShrink:0}}>
+                                {typeIcon[dc.type]||"📋"}
+                              </span>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{color:dc.important?C.text:C.dim,fontSize:10,
+                                  lineHeight:1.5,wordBreak:"break-word"}}>
+                                  {dc.title}
+                                </div>
+                                <div style={{display:"flex",gap:6,marginTop:1}}>
+                                  <span style={{color:C.muted,fontSize:8}}>{dc.date}</span>
+                                  <span style={{color:dc.important?"#ffa000":C.muted,fontSize:8,fontWeight:700}}>
+                                    [{dc.type}]{dc.important?" ★":""}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          )):(
+                            <div style={{color:C.muted,fontSize:10,padding:"6px 0"}}>최근 30일 주요 공시 없음</div>
+                          )}
+                        </div>
+
+                        {/* 임원 거래 상세 */}
+                        {(ins.details||[]).length>0&&(
+                          <div>
+                            <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:5,
+                              textTransform:"uppercase",letterSpacing:1}}>
+                              👥 임원 거래 상세 (60일)
+                            </div>
+                            {ins.details.map((d,di)=>(
+                              <div key={di} style={{display:"flex",justifyContent:"space-between",
+                                alignItems:"center",padding:"4px 0",
+                                borderBottom:di<ins.details.length-1?`1px solid ${C.border}33`:"none"}}>
+                                <div>
+                                  <span style={{color:C.text,fontSize:10,fontWeight:600}}>{d.name}</span>
+                                  {d.role&&<span style={{color:C.muted,fontSize:9}}> · {d.role}</span>}
+                                </div>
+                                <div style={{textAlign:"right"}}>
+                                  <span style={{color:d.trade_type==="매수"?C.green:"#ef5350",
+                                    fontSize:10,fontWeight:700}}>
+                                    {d.trade_type==="매수"?"▲":"▼"} {d.trade_type}
+                                  </span>
+                                  <span style={{color:C.dim,fontSize:10}}> {(d.change||0).toLocaleString()}주</span>
+                                  <span style={{color:C.muted,fontSize:9,marginLeft:4}}>{d.date}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* 네이버 링크 */}
+                        {dd?.code6&&(
+                          <div style={{marginTop:8,paddingTop:6,borderTop:`1px solid ${C.border}44`}}>
+                            <a href={`https://finance.naver.com/item/news.naver?code=${dd.code6}`}
+                              target="_blank" rel="noopener noreferrer"
+                              style={{color:C.cyan,fontSize:10,textDecoration:"none"}}>
+                              🔗 네이버 공시 페이지 →
+                            </a>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
-                );
-              })
-            )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

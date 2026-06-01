@@ -1268,6 +1268,63 @@ def env_diag():
     })
 
 
+@app.route('/api/dart_detail')
+def dart_detail():
+    """DART 공시 상세: 재무요약 + 분류 공시 + 임원 거래 내역
+    GET /api/dart_detail?ticker=403870.KQ
+    """
+    ticker = request.args.get('ticker', '').strip().upper()
+    if not ticker:
+        return jsonify({"error": "ticker 필요"}), 400
+    if not _dart_api_key():
+        return jsonify({"error": "DART API 미설정"}), 503
+
+    code6 = ticker.split(".")[0]
+    if not code6.isdigit():
+        return jsonify({"error": "한국 종목만 지원"}), 400
+
+    corp = _get_dart_corp(code6)
+    if not corp:
+        return jsonify({"error": f"{code6} 기업 정보 없음"}), 404
+
+    corp_code = corp["corp_code"]
+    corp_name = corp.get("corp_name") or corp.get("stock_name") or code6
+
+    # 1) 공시 목록 (최근 30일, 최대 7건)
+    raw_discs = _get_dart_disclosures(corp_code, days=30)
+    disclosures = []
+    for d in raw_discs[:7]:
+        ptype    = d.get("pblntf_ty", "")
+        title    = d.get("report_nm", "")
+        raw_dt   = (d.get("rcept_dt") or "")[:8]
+        date_fmt = f"{raw_dt[4:6]}/{raw_dt[6:]}" if len(raw_dt) == 8 else raw_dt
+        disclosures.append({
+            "title":     title[:40],
+            "date":      date_fmt,
+            "type":      _DART_PBLNTF_LABEL.get(ptype, "기타"),
+            "important": ptype in _DART_IMPORTANT,
+        })
+
+    # 2) 재무 요약 (최근 분기)
+    fin_raw = _get_dart_financial_summary(corp_code)
+    fin_fmt = {k: _fmt_dart_amount(v) for k, v in fin_raw.items()}
+
+    # 3) 임원 매매 (60일, 상세 포함)
+    try:
+        from dart_api import get_insider_trades
+        insider = get_insider_trades(code6, days=60)
+    except Exception:
+        insider = {}
+
+    return jsonify({
+        "corp_name":   corp_name,
+        "code6":       code6,
+        "disclosures": disclosures,
+        "financial":   fin_fmt,
+        "insider":     insider,
+    })
+
+
 @app.route('/api/stock_analysis')
 def get_stock_analysis():
     """개별 주식 기술적 분석

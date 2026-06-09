@@ -2108,21 +2108,22 @@ def _build_ranking_cache():
 
     try:
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        # POPULAR_STOCKS(미국 포함) + KRX 전종목 합집합 (중복 제거)
-        tickers = set(POPULAR_STOCKS.keys())
-        if _krx_cache:
-            tickers.update(_krx_cache.keys())
-        tickers = list(tickers)
+        import random
+        # POPULAR_STOCKS 우선, KRX는 최대 400개로 제한 (속도)
+        pop_tickers = set(POPULAR_STOCKS.keys())
+        krx_tickers = [t for t in _krx_cache.keys() if t not in pop_tickers]
+        if len(krx_tickers) > 400:
+            krx_tickers = random.sample(krx_tickers, 400)
+        tickers = list(pop_tickers) + krx_tickers
         results = []
         print(f"[ranking] 분석 시작: {len(tickers)}개 종목 "
-              f"(POPULAR {len(POPULAR_STOCKS)} + KRX {len(_krx_cache)} 합집합)")
+              f"(POPULAR {len(pop_tickers)} + KRX {len(krx_tickers)}개)")
 
-        # KRX 전종목 분석은 시간이 오래 걸리므로 워커 수↑, 타임아웃↑
-        with ThreadPoolExecutor(max_workers=20) as ex:
+        with ThreadPoolExecutor(max_workers=30) as ex:
             futures = {ex.submit(_analyze_for_ranking, t): t for t in tickers}
-            for fut in as_completed(futures, timeout=1800):
+            for fut in as_completed(futures, timeout=600):
                 try:
-                    r = fut.result(timeout=45)
+                    r = fut.result(timeout=20)
                     if r and r.get("confidence") is not None:
                         results.append(r)
                 except Exception:
@@ -2132,7 +2133,7 @@ def _build_ranking_cache():
         cache = {
             "updated": datetime.datetime.now().isoformat(),
             "total_analyzed": len(results),
-            "ranking": results[:200],   # 상위 200개 저장 (전종목 확장)
+            "ranking": results[:200],
         }
         with open(RANKING_CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(_clean(cache), f, ensure_ascii=False)
@@ -2169,15 +2170,19 @@ def get_top_stocks():
             cache_data = None
 
     if cache_data is None or refresh:
-        threading.Thread(target=_build_ranking_cache, daemon=True).start()
+        if not _ranking_in_progress:
+            threading.Thread(target=_build_ranking_cache, daemon=True).start()
         if cache_data is None:
-            total_count = len(POPULAR_STOCKS) + len(_krx_cache)
+            # 캐시 파일 자체가 없을 때만 빈 결과 (첫 실행)
             return jsonify({
                 "status":  "analyzing",
-                "message": f"코스피·코스닥 전종목 포함 {total_count}개 분석 중... (약 5~10분 소요)",
+                "message": f"첫 분석 중... 잠시 후 새로고침해주세요",
                 "ranking": [],
                 "total_analyzed": 0,
+                "analyzing": True,
             })
+        # 캐시가 있으면 만료돼도 일단 반환 (백그라운드 갱신 중 표시)
+        cache_data["analyzing"] = True
 
     ranking = cache_data.get("ranking", [])
     if signal_filter:

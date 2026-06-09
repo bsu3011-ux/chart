@@ -550,8 +550,12 @@ def _build_krx_cache():
             if code_col is None or name_col is None:
                 continue
             for _, row in df.iterrows():
-                code = str(row[code_col]).zfill(6)
-                name = str(row[name_col])
+                code = str(row[code_col]).strip().lstrip("$").zfill(6)
+                if not code.isdigit() or len(code) != 6:
+                    continue
+                name = str(row[name_col]).strip()
+                if not name or name.isdigit():
+                    continue
                 stocks[code + suffix] = {"name": name, "market": market, "krx_code": code}
         print(f"[KRX] FDR 성공: {len(stocks)}개")
     except Exception as e1:
@@ -1266,6 +1270,20 @@ def env_diag():
         },
         "dart_available": __import__("dart_api").is_available(),
     })
+
+
+@app.route('/api/clear_krx_cache')
+def clear_krx_cache():
+    """KRX 캐시 초기화 → 재빌드 트리거"""
+    global _krx_cache
+    _krx_cache = {}
+    try:
+        if os.path.exists(KRX_CACHE_FILE):
+            os.remove(KRX_CACHE_FILE)
+    except Exception:
+        pass
+    threading.Thread(target=_build_krx_cache, daemon=True).start()
+    return jsonify({"status": "ok", "message": "KRX 캐시 초기화 및 재빌드 시작"})
 
 
 @app.route('/api/dart_detail')

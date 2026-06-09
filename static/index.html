@@ -2163,8 +2163,10 @@ function RankingPage(){
     try{
       const r=await fetch(`${API_BASE}/api/stock_analysis?ticker=${encodeURIComponent(ticker)}`);
       const j=await r.json();
-      setAnalysisData(j);
-    }catch(e){}
+      setAnalysisData(j.error?{error:j.error,ticker}:j);
+    }catch(e){
+      setAnalysisData({error:"서버 응답 없음 — 잠시 후 재시도해주세요",ticker});
+    }
     setAnalysisLoading(false);
   };
 
@@ -2242,8 +2244,25 @@ function RankingPage(){
             {!analysisLoading&&analysisData&&!analysisData.error&&(
               <StockResultCard data={analysisData} onChart={(m)=>{setSelectedTicker(null);setChartMarket(m);}} onClose={()=>setSelectedTicker(null)}/>
             )}
+            {!analysisLoading&&!analysisData&&(
+              <div style={{textAlign:"center",padding:"32px 0"}}>
+                <div style={{color:C.muted,fontSize:12,marginBottom:12}}>불러오기 실패</div>
+                <button onClick={()=>openAnalysis(selectedTicker)}
+                  style={{padding:"8px 20px",borderRadius:8,background:C.cyan+"18",
+                    border:`1px solid ${C.cyan}44`,color:C.cyan,fontSize:12,cursor:"pointer"}}>
+                  🔄 다시 시도
+                </button>
+              </div>
+            )}
             {!analysisLoading&&analysisData?.error&&(
-              <div style={{color:C.red,textAlign:"center",padding:20,fontSize:13}}>{analysisData.error}</div>
+              <div style={{textAlign:"center",padding:"24px 0"}}>
+                <div style={{color:"#ef5350",fontSize:12,marginBottom:12}}>{analysisData.error}</div>
+                <button onClick={()=>openAnalysis(selectedTicker)}
+                  style={{padding:"8px 20px",borderRadius:8,background:C.cyan+"18",
+                    border:`1px solid ${C.cyan}44`,color:C.cyan,fontSize:12,cursor:"pointer"}}>
+                  🔄 다시 시도
+                </button>
+              </div>
             )}
           </div>
         </div>

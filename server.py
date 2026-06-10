@@ -2315,19 +2315,15 @@ def deploy():
         return jsonify({"error": "invalid signature"}), 403
 
     def do_deploy():
-        import time
+        import time, signal as _sig
         time.sleep(0.5)
         try:
             subprocess.run(['git', 'pull', 'origin', 'main'], cwd=BASE_DIR, timeout=30)
         except Exception as e:
             print(f"[deploy] git pull error: {e}")
-        # run.sh 루프가 서버를 감시하므로 pkill만 하면 자동 재시작됨
-        # (재시작 후 서버가 뜨면서 _run_bot_background가 자동 실행됨)
-        subprocess.Popen(
-            'sleep 2 && pkill -f "python3 server.py"',
-            shell=True,
-            start_new_session=True
-        )
+        # 응답 반환 후 자기 PID에만 SIGTERM (run.sh 루프가 재시작)
+        time.sleep(2)
+        os.kill(os.getpid(), _sig.SIGTERM)
 
     threading.Thread(target=do_deploy, daemon=True).start()
     return jsonify({"status": "배포 시작됨", "message": "git pull 후 서버 재시작 중..."})
@@ -2351,4 +2347,11 @@ if __name__ == '__main__':
         _run_bot_background()
     # KRX 전종목 캐시 초기화 (없거나 7일 초과면 백그라운드 갱신)
     _init_krx_cache()
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # waitress 사용 (미설치 시 Flask 개발서버 폴백)
+    try:
+        from waitress import serve
+        print(f"  ✅ waitress WSGI 서버로 구동 (threads=8)")
+        serve(app, host='0.0.0.0', port=port, threads=8)
+    except ImportError:
+        print(f"  ⚠️  waitress 미설치 → Flask 개발서버 사용 (pip install waitress 권장)")
+        app.run(host='0.0.0.0', port=port, debug=False)

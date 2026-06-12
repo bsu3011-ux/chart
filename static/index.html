@@ -51,6 +51,76 @@ const C = {
   yellowGlow:"0 0 24px rgba(234,179,8,0.15),0 4px 20px rgba(0,0,0,0.5)",
   defaultGlow:"0 4px 20px rgba(0,0,0,0.4)",
 };
+// 신뢰도(확신도) 바 색상: 백엔드 confidence가 '방향 무관 확신도'로 바뀜에 따라
+// 색은 신호 방향 기준으로 결정 (기존: 값 구간으로만 색 결정 → 강한 매도가 초록으로 표시될 위험)
+const sigBarColor = (sig, conf) => {
+  const s = sig || "";
+  if (s.includes("SELL") || s === "CASH" || s === "CASH_VOL") return C.red;
+  if (s.includes("BUY") || s === "LEVERAGE_2X" || s === "INVESTED" || s === "HOLD_1X")
+    return (conf || 0) >= 80 ? C.green : C.cyan;
+  return C.yellow;
+};
+
+// 관리자 토큰 헤더 (설정 탭에서 입력 → localStorage 저장)
+const adminHeaders = () => {
+  try { const t = localStorage.getItem("admin_token") || ""; return t ? {"X-Admin-Token": t} : {}; }
+  catch(e){ return {}; }
+};
+
+// 종목별 과거 매수/매도 신호 타임라인 (보유 카드·분석 카드에서 공용)
+const SIG_HIST_LABEL = {STRONG_BUY:"강력 매수",BUY:"매수",NEUTRAL:"중립",SELL:"매도",STRONG_SELL:"강력 매도"};
+function SigHistory({ticker}){
+  const [open,setOpen]=React.useState(false);
+  const [items,setItems]=React.useState(null);
+  const toggle=()=>{
+    const next=!open; setOpen(next);
+    if(next&&items===null){
+      fetch(`${API_BASE}/api/stock_signal_history?ticker=${encodeURIComponent(ticker)}`)
+        .then(r=>r.json()).then(j=>setItems(j.events||[])).catch(()=>setItems([]));
+    }
+  };
+  const fmtD=ts=>{try{const d=new Date(ts);
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  }catch(e){return ts;}};
+  return(
+    <div style={{marginTop:8}}>
+      <button onClick={e=>{e.stopPropagation();toggle();}} style={{width:"100%",padding:"7px",borderRadius:8,
+        border:`1px solid ${C.border}66`,background:C.surface,color:C.dim,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+        📜 과거 신호 이력 {open?"▲":"▼"}
+      </button>
+      {open&&(
+        <div style={{marginTop:6,padding:"8px 10px",borderRadius:8,background:C.surface,border:`1px solid ${C.border}55`}}>
+          {items===null&&<div style={{color:C.muted,fontSize:11,textAlign:"center",padding:"6px 0"}}>불러오는 중...</div>}
+          {items&&items.length===0&&(
+            <div style={{color:C.muted,fontSize:10,lineHeight:1.6}}>
+              아직 기록이 없습니다. 종목을 분석하거나 보유종목 자동 점검이 돌 때마다
+              신호 변경 이력이 자동으로 쌓입니다.
+            </div>
+          )}
+          {items&&items.map((ev,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",
+              borderBottom:i<items.length-1?`1px solid ${C.border}22`:"none"}}>
+              <span style={{color:C.muted,fontSize:9,minWidth:62}}>{fmtD(ev.ts)}</span>
+              <span style={{color:sigBarColor(ev.signal_type,ev.confidence),fontSize:10,fontWeight:800,minWidth:64}}>
+                {SIG_HIST_LABEL[ev.signal_type]||ev.signal_type}
+              </span>
+              {ev.prev&&ev.prev!==ev.signal_type&&(
+                <span style={{color:C.muted,fontSize:8}}>({SIG_HIST_LABEL[ev.prev]||ev.prev}→)</span>
+              )}
+              <span style={{color:C.dim,fontSize:10,flex:1,textAlign:"right"}}>
+                {ev.price!=null?Number(ev.price).toLocaleString("ko-KR"):"-"}
+              </span>
+              <span style={{color:C.muted,fontSize:9,minWidth:36,textAlign:"right"}}>
+                {ev.score!=null?`${ev.score}점`:(ev.confidence!=null?String(ev.confidence):"")}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const SIG = {
   SELL:       {bg:C.redBg,   c:C.red,   b:C.red+"44",   glow:C.redGlow},
   LEVERAGE_2X:{bg:C.greenBg, c:C.green, b:C.green+"44", glow:C.greenGlow},
@@ -410,10 +480,10 @@ function Card({m,open,onToggle,onChart}){
                 <span style={{color:C.muted,fontSize:10,minWidth:46}}>신뢰도</span>
                 <div style={{flex:1,height:6,background:C.border,borderRadius:3,overflow:"hidden"}}>
                   <div style={{width:`${m.confidence}%`,height:"100%",
-                    background:m.confidence>=80?C.green:m.confidence>=63?C.cyan:m.confidence>=41?C.yellow:C.red,
+                    background:sigBarColor(m.signal_type,m.confidence),
                     transition:"width .3s ease"}}></div>
                 </div>
-                <span style={{color:m.confidence>=80?C.green:m.confidence>=63?C.cyan:m.confidence>=41?C.yellow:C.red,
+                <span style={{color:sigBarColor(m.signal_type,m.confidence),
                   fontSize:11,fontWeight:700,minWidth:28,textAlign:"right"}}>{m.confidence}</span>
               </div>
             )}
@@ -1540,7 +1610,7 @@ function StockResultCard({data:d,onChart,onClose}){
             <span style={{color:C.muted,fontSize:10,minWidth:46}}>신뢰도</span>
             <div style={{flex:1,height:6,background:C.border,borderRadius:3,overflow:"hidden"}}>
               <div style={{width:`${d.confidence}%`,height:"100%",
-                background:d.confidence>=80?C.green:d.confidence>=63?C.cyan:d.confidence>=41?C.yellow:C.red,
+                background:sigBarColor(d.signal_type,d.confidence),
                 transition:"width .3s"}}/>
             </div>
             <span style={{color:C.dim,fontSize:11,fontWeight:700,minWidth:24,textAlign:"right"}}>{d.confidence}</span>
@@ -1998,6 +2068,7 @@ function StockResultCard({data:d,onChart,onClose}){
             })()}
           </div>
         )}
+        <SigHistory ticker={d.ticker}/>
         <button onClick={()=>onChart({ticker:d.ticker,name:d.name,flag:d.flag,strategy_name:d.signal_text})}
           style={{width:"100%",marginTop:8,padding:"8px",borderRadius:10,
             border:`1px solid ${C.cyan}44`,background:C.cyan+"12",
@@ -2041,7 +2112,7 @@ function RankingPage(){
 
   const fetchRanking=(refresh=false)=>{
     setLoading(true);
-    fetch(`/api/top_stocks?n=50${refresh?"&refresh=1":""}`)
+    fetch(`/api/top_stocks?n=50${refresh?"&refresh=1":""}`,refresh?{headers:adminHeaders()}:undefined)
       .then(r=>r.json())
       .then(d=>{
         setData(d);
@@ -2167,7 +2238,7 @@ function RankingPage(){
       {/* 랭킹 카드 */}
       {ranking.map((r,i)=>{
         const conf=r.confidence||0;
-        const confCol=conf>=80?C.green:conf>=63?C.cyan:conf>=41?C.yellow:C.red;
+        const confCol=sigBarColor(r.signal_type,conf);
         const chgCol=(r.change_pct||0)>=0?C.green:C.red;
         const rsCol=(r.rs_score||50)>=70?C.green:(r.rs_score||50)<=30?C.red:C.yellow;
         return(
@@ -2265,6 +2336,12 @@ function RankingPage(){
                   {r.fundamental_label}
                 </span>
               )}
+              {/* 분석 리포트 버튼 */}
+              <button onClick={e=>{e.stopPropagation();openAnalysis(r.ticker);}}
+                style={{marginTop:4,marginRight:4,padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,
+                  background:C.cyan+"15",border:`1px solid ${C.cyan}44`,color:C.cyan,cursor:"pointer"}}>
+                📊 분석
+              </button>
               {/* 담기 버튼 */}
               <button onClick={e=>{e.stopPropagation();setQuickAdd({ticker:r.ticker,name:r.name,flag:r.flag||"",price:r.price});setQaForm({quantity:"",buyPrice:r.price?String(r.price):""});}}
                 style={{marginTop:4,padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,
@@ -2967,19 +3044,45 @@ function HoldingsMonitorPage(){
   const [tgMsg,setTgMsg]=useState("");
   const triggerCheck=async()=>{
     try{
-      const r=await fetch(`${API_BASE}/api/portfolio/check`);
-      const j=await r.json();
-      setTgMsg(j.ok?"✅ 신호 점검 시작":"❌ 실패");
-      setTimeout(()=>setTgMsg(""),3000);
+      const r=await fetch(`${API_BASE}/api/portfolio/check`,{headers:adminHeaders()});
+      const j=await r.json().catch(()=>({}));
+      setTgMsg(j.ok?"✅ 신호 점검 시작":(r.status===403?"❌ 관리자 토큰 필요 — 설정 탭에서 입력":"❌ 실패"));
+      setTimeout(()=>setTgMsg(""),4000);
     }catch(e){setTgMsg("❌ 오류");setTimeout(()=>setTgMsg(""),3000);}
   };
-  const triggerDart=async()=>{
+  // ── DART 공시 보고서: 앱 내 모달 열람 + 새 생성(폴링) ──
+  const [dartOpen,setDartOpen]=useState(false);
+  const [dartRep,setDartRep]=useState(null);
+  const [dartGen,setDartGen]=useState(false);
+  const loadDartReport=()=>{
+    fetch(`${API_BASE}/api/portfolio/dart_report`).then(r=>r.json()).then(setDartRep).catch(()=>{});
+  };
+  const openDart=()=>{setDartOpen(true);loadDartReport();};
+  const regenDart=async()=>{
+    if(dartGen) return;
+    setDartGen(true);
+    const prevUpdated=(dartRep&&dartRep.updated)||"";
     try{
-      const r=await fetch(`${API_BASE}/api/portfolio/dart`);
-      const j=await r.json();
-      setTgMsg(j.ok?"📄 DART 보고서 생성 중...":("❌ "+j.message));
-      setTimeout(()=>setTgMsg(""),5000);
-    }catch(e){setTgMsg("❌ 오류");setTimeout(()=>setTgMsg(""),3000);}
+      const r=await fetch(`${API_BASE}/api/portfolio/dart`,{headers:adminHeaders()});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok||!j.ok){
+        setTgMsg(r.status===403?"❌ 관리자 토큰 필요 — 설정 탭에서 입력":("❌ "+(j.message||"생성 실패")));
+        setTimeout(()=>setTgMsg(""),5000);
+        setDartGen(false);
+        return;
+      }
+      const t0=Date.now();
+      const poll=setInterval(async()=>{
+        try{
+          const rr=await fetch(`${API_BASE}/api/portfolio/dart_report`);
+          const jj=await rr.json();
+          if(jj.updated&&jj.updated!==prevUpdated){
+            setDartRep(jj);setDartGen(false);clearInterval(poll);
+          }
+        }catch(e){}
+        if(Date.now()-t0>90000){setDartGen(false);clearInterval(poll);}
+      },4000);
+    }catch(e){setDartGen(false);setTgMsg("❌ 오류");setTimeout(()=>setTgMsg(""),3000);}
   };
   return(
     <div className="tab-content">
@@ -2987,7 +3090,7 @@ function HoldingsMonitorPage(){
         <div style={{color:C.text,fontSize:15,fontWeight:800}}>📋 보유종목 모니터</div>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
           {tgMsg&&<span style={{fontSize:10,color:C.cyan}}>{tgMsg}</span>}
-          <button onClick={triggerDart} disabled={!holdings.length} title="DART 공시 보고서 텔레그램 발송"
+          <button onClick={openDart} disabled={!holdings.length} title="DART 공시 보고서 보기/생성"
             style={{padding:"5px 10px",borderRadius:8,border:`1px solid #a78bfa44`,
               background:"#a78bfa12",color:holdings.length?"#a78bfa":C.muted,
               fontSize:10,fontWeight:700,cursor:holdings.length?"pointer":"default"}}>
@@ -3007,6 +3110,54 @@ function HoldingsMonitorPage(){
           </button>
         </div>
       </div>
+
+      {/* DART 공시 보고서 모달 */}
+      {dartOpen&&(
+        <div onClick={e=>{if(e.target===e.currentTarget)setDartOpen(false);}}
+          style={{position:"fixed",inset:0,zIndex:600,background:"rgba(0,0,0,0.8)",
+            backdropFilter:"blur(6px)",WebkitBackdropFilter:"blur(6px)",
+            display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+          <div style={{width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",
+            borderRadius:"20px 20px 0 0",background:C.surface,
+            border:`1px solid ${C.border}`,padding:"16px 14px 32px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{color:C.text,fontSize:14,fontWeight:800}}>📄 DART 공시 보고서</div>
+              <button onClick={()=>setDartOpen(false)} style={{background:"none",border:"none",
+                color:C.muted,fontSize:18,cursor:"pointer",padding:"0 4px"}}>✕</button>
+            </div>
+            <button onClick={regenDart} disabled={dartGen} style={{width:"100%",padding:"9px",
+              borderRadius:10,marginBottom:10,border:"1px solid #a78bfa44",background:"#a78bfa12",
+              color:dartGen?C.muted:"#a78bfa",fontSize:12,fontWeight:700,cursor:dartGen?"default":"pointer"}}>
+              {dartGen?"⟳ 생성 중... (약 30초 · 텔레그램에도 발송됩니다)":"🔄 새 보고서 생성"}
+            </button>
+            {dartRep&&dartRep.updated&&(
+              <div style={{color:C.muted,fontSize:9,marginBottom:8}}>
+                생성: {new Date(dartRep.updated).toLocaleString("ko-KR")}
+              </div>
+            )}
+            {(!dartRep||(!(dartRep.sections||[]).length&&!dartRep.header))?(
+              <div style={{color:C.muted,fontSize:12,textAlign:"center",padding:"20px 0",lineHeight:1.6}}>
+                {(dartRep&&dartRep.message)||"아직 생성된 보고서가 없습니다"}
+              </div>
+            ):(
+              <div>
+                {dartRep.header&&(
+                  <div style={{color:C.text,fontSize:12,fontWeight:700,whiteSpace:"pre-wrap",
+                    marginBottom:8,lineHeight:1.6}}>{dartRep.header}</div>
+                )}
+                {(dartRep.sections||[]).map((sec,i)=>(
+                  <div key={i} style={{padding:"8px 10px",borderRadius:8,background:C.card,
+                    border:`1px solid ${C.border}44`,marginBottom:6,color:C.dim,
+                    fontSize:11,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{sec}</div>
+                ))}
+                {dartRep.message&&!(dartRep.sections||[]).length&&(
+                  <div style={{color:C.muted,fontSize:11}}>{dartRep.message}</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 시장 컨텍스트 배너 — 분석 완료 후 표시 */}
       {fetched&&Object.keys(analysis).length>0&&(()=>{
@@ -3288,6 +3439,7 @@ function HoldingsMonitorPage(){
                 </div>
               );
             })()}
+            <SigHistory ticker={h.ticker}/>
           </div>
         );
       })}
@@ -3400,6 +3552,18 @@ function SettingsPage(){
   return(
     <div className="tab-content">
       <div style={{color:C.text,fontSize:15,fontWeight:800,marginBottom:12}}>⚙️ 알림 설정</div>
+      <div style={{padding:"12px 14px",borderRadius:12,background:C.cardGradient,border:`1px solid ${C.border}`,marginBottom:12}}>
+        <div style={{color:C.dim,fontSize:10,fontWeight:700,letterSpacing:"0.06em",marginBottom:8}}>🔑 관리자 토큰</div>
+        <div style={{color:C.muted,fontSize:10,marginBottom:8,lineHeight:1.6}}>
+          서버 .env의 ADMIN_TOKEN과 같은 값을 입력하면 공시 생성·신호 점검·랭킹 강제 재분석을
+          이 기기에서 사용할 수 있습니다. 서버에 ADMIN_TOKEN이 없으면 비워둬도 됩니다.
+        </div>
+        <input type="password" defaultValue={(()=>{try{return localStorage.getItem("admin_token")||"";}catch(e){return "";}})()}
+          onChange={e=>{try{localStorage.setItem("admin_token",e.target.value.trim());}catch(err){}}}
+          placeholder="ADMIN_TOKEN 값"
+          style={{width:"100%",boxSizing:"border-box",padding:"9px 10px",borderRadius:8,
+            border:`1px solid ${C.border}`,background:C.surface,color:C.text,fontSize:12,outline:"none"}}/>
+      </div>
       <div style={{padding:"12px 14px",borderRadius:12,background:C.cardGradient,border:`1px solid ${C.border}`,marginBottom:12}}>
         <div style={{color:C.dim,fontSize:10,fontWeight:700,letterSpacing:"0.06em",marginBottom:8}}>크로스 신호</div>
         <Toggle label="골든크로스 알림" desc="MA50이 MA200 상향 돌파 시 텔레그램 알림" settingKey="alertGolden"/>

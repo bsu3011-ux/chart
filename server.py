@@ -449,12 +449,15 @@ def _valid_ticker(t: str) -> bool:
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 def _is_admin() -> bool:
-    """무거운 작업(전체 분석, 텔레그램 발송 등) 트리거 보호.
-    ADMIN_TOKEN 미설정 시 로컬호스트에서만 허용 — 공개 서버에서 무인증 DoS 방지."""
+    """무거운 작업(전체 분석, 공시 생성, 텔레그램 발송 등) 트리거 보호.
+    ADMIN_TOKEN 설정 시: X-Admin-Token 헤더 또는 ?token= 일치 필요.
+    미설정 시: 모두 허용 (개인용 기본 동작 유지 — 휴대폰 등 원격에서 버튼이 막히지 않도록).
+    ※ 서버가 공인 IP에 노출돼 있다면 반드시 .env에 ADMIN_TOKEN을 설정하고
+      앱 설정 탭에 같은 값을 입력하세요."""
     if ADMIN_TOKEN:
         tok = request.headers.get("X-Admin-Token") or request.args.get("token", "")
         return hmac.compare_digest(tok, ADMIN_TOKEN)
-    return request.remote_addr in ("127.0.0.1", "::1", None)
+    return True
 
 OUTPUT_DIR           = os.environ.get("OUTPUT_DIR", os.path.join(BASE_DIR, "output"))
 SIGNALS_FILE         = os.path.join(OUTPUT_DIR, "signals_v4.json")
@@ -935,8 +938,22 @@ def _build_dart_report(force: bool = False):
         lines.append(f'  🔗 dart.fss.or.kr → {code6}')
         sections.append("\n".join(lines))
 
+    def _save_dart_report(sections_plain, header_plain, total):
+        try:
+            with open(DART_REPORT_FILE, "w", encoding="utf-8") as f:
+                json.dump({
+                    "updated": datetime.datetime.now().isoformat(timespec="seconds"),
+                    "header": header_plain,
+                    "sections": sections_plain,
+                    "total": total,
+                    "message": "" if sections_plain else "최근 7일 보유종목 공시가 없습니다.",
+                }, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"[DART] 보고서 파일 저장 실패: {e}")
+
     if not sections:
-        print("[DART] 공시 내용 없음 — 메시지 생략")
+        print("[DART] 공시 내용 없음 — 보고서 파일만 갱신")
+        _save_dart_report([], "보유종목 공시 보고", 0)
         return
 
     ts  = datetime.datetime.now().strftime("%m/%d %H:%M")
@@ -953,6 +970,10 @@ def _build_dart_report(force: bool = False):
 
     if len(body) > 4000:
         body = body[:4000] + "\n…(이하 생략)"
+
+    # 앱 내 열람용 파일 저장 (HTML 태그 제거한 평문)
+    _strip = lambda s: s.replace("<b>", "").replace("</b>", "")
+    _save_dart_report([_strip(s) for s in sections], _strip(header), total_cnt)
 
     send_telegram(body)
     print(f"[DART] 보고서 전송 완료: {len(sections)}개 종목, {total_cnt}건 공시")
@@ -1006,6 +1027,13 @@ def _check_portfolio_signals():
 
                 prev_sig = _portfolio_sig_prev.get(ticker)
                 _portfolio_sig_prev[ticker] = new_sig  # 갱신
+
+                # 과거 신호 타임라인 적재 (변경 시에만 기록됨)
+                try:
+                    _append_stock_sig_history(ticker, h.get("name", ticker), new_sig,
+                                              res.get("score"), new_conf, new_price)
+                except Exception:
+                    pass
 
                 if prev_sig is None:
                     continue   # 첫 체크 — 기준값만 저장, 알림 없음
@@ -1352,6 +1380,15 @@ def get_stock_analysis():
                 except Exception:
                     pass
             threading.Thread(target=_bg_record, daemon=True).start()
+
+        # 종목별 신호 이력 적재 (변경 시에만 기록 — '과거 매수/매도' 타임라인용)
+        try:
+            _append_stock_sig_history(
+                ticker, result.get("name") or ticker,
+                result.get("signal_type") or "NEUTRAL",
+                result.get("score"), result.get("confidence"), result.get("price"))
+        except Exception:
+            pass
 
         result["market_context"] = _clean({
             "market_label":  mkt.get("market_label"),
@@ -2107,6 +2144,96 @@ def get_signal_accuracy():
 
 _portfolio_lock = threading.Lock()
 
+# ════════════════════════════════════════════
+# 종목별 과거 신호 이력 (매수/매도 신호 변경 기록)
+# ════════════════════════════════════════════
+STOCK_SIG_HISTORY_FILE = os.path.join(OUTPUT_DIR, "stock_signal_history.json")
+DART_REPORT_FILE       = os.path.join(OUTPUT_DIR, "dart_report.json")
+_sig_hist_lock = threading.Lock()
+_sig_hist = None   # {ticker: [event...oldest→newest]}, 지연 로드
+
+def _sig_hist_load_locked():
+    global _sig_hist
+    if _sig_hist is not None:
+        return
+    try:
+        with open(STOCK_SIG_HISTORY_FILE, encoding="utf-8") as f:
+            _sig_hist = json.load(f)
+        if not isinstance(_sig_hist, dict):
+            _sig_hist = {}
+    except Exception:
+        _sig_hist = {}
+
+def _append_stock_sig_history(ticker, name, sig, score, conf, price):
+    """신호 *변경* 시에만 기록 (같은 신호 반복 분석은 24시간당 1회 스냅샷).
+    종목당 최근 60건, 전체 500종목 한도 — 파일 무한 증식 방지.
+    분석 API 호출·보유종목 자동 점검 양쪽에서 호출돼 이력이 자연 적재됨."""
+    if not sig or not ticker:
+        return
+    now = datetime.datetime.now()
+    with _sig_hist_lock:
+        _sig_hist_load_locked()
+        evts = _sig_hist.get(ticker) or []
+        last = evts[-1] if evts else None
+        if last and last.get("signal_type") == sig:
+            try:
+                last_ts = datetime.datetime.fromisoformat(last.get("ts", ""))
+                if (now - last_ts).total_seconds() < 86400:
+                    return   # 동일 신호 24h 내 재분석 — 기록 생략
+            except Exception:
+                return
+        evts.append({
+            "ts": now.isoformat(timespec="seconds"),
+            "name": name,
+            "signal_type": sig,
+            "score": score,
+            "confidence": conf,
+            "price": price,
+            "prev": (last or {}).get("signal_type"),
+        })
+        _sig_hist[ticker] = evts[-60:]
+        if len(_sig_hist) > 500:
+            try:
+                oldest = sorted(_sig_hist.items(),
+                                key=lambda kv: (kv[1][-1].get("ts", "") if kv[1] else ""))
+                for k, _ in oldest[:len(_sig_hist) - 500]:
+                    _sig_hist.pop(k, None)
+            except Exception:
+                pass
+        try:
+            with open(STOCK_SIG_HISTORY_FILE, "w", encoding="utf-8") as f:
+                json.dump(_sig_hist, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"[sig_hist] 저장 실패: {e}")
+
+@app.route('/api/stock_signal_history')
+def stock_signal_history():
+    """종목별 과거 매수/매도 신호 이력 (최신순 40건)"""
+    ticker = request.args.get("ticker", "").strip().upper()
+    if ticker.isdigit() and len(ticker) == 6:
+        ticker += ".KS"
+    if not _valid_ticker(ticker):
+        return jsonify({"error": "유효하지 않은 티커"}), 400
+    with _sig_hist_lock:
+        _sig_hist_load_locked()
+        evts = list(_sig_hist.get(ticker) or [])
+        if not evts and ticker.endswith(".KS"):
+            evts = list(_sig_hist.get(ticker[:-3] + ".KQ") or [])
+    return jsonify({"ticker": ticker, "events": list(reversed(evts))[:40]})
+
+@app.route('/api/portfolio/dart_report')
+def get_dart_report():
+    """마지막 생성된 DART 공시 보고서 열람 (앱 내 표시용)"""
+    try:
+        if os.path.exists(DART_REPORT_FILE):
+            with open(DART_REPORT_FILE, encoding="utf-8") as f:
+                return jsonify(json.load(f))
+    except Exception:
+        pass
+    return jsonify({"status": "none",
+                    "message": "아직 생성된 보고서가 없습니다. '새 보고서 생성'을 눌러주세요."})
+
+
 @app.route('/api/portfolio', methods=['GET'])
 def get_portfolio():
     """보유종목 불러오기"""
@@ -2248,7 +2375,12 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     print(f"\n  🚀 멀티마켓 봇 API 서버 시작")
     print(f"  http://localhost:{port}")
-    print(f"  텔레그램: {'설정됨' if TELEGRAM_TOKEN else '미설정 (TELEGRAM_TOKEN 환경변수 필요)'}\n")
+    print(f"  텔레그램: {'설정됨' if TELEGRAM_TOKEN else '미설정 (TELEGRAM_TOKEN 환경변수 필요)'}")
+    if not ADMIN_TOKEN:
+        print("  ⚠️ ADMIN_TOKEN 미설정 — 관리자 기능이 모두에게 열려 있습니다."
+              " 공개 서버라면 .env에 ADMIN_TOKEN을 설정하고 앱 설정 탭에 입력하세요.\n")
+    else:
+        print("  관리자 토큰: 설정됨\n")
     # 일일 스케줄러 (KST 08:00, 16:00) — 시작 시 자동 분석은 하지 않음
     threading.Thread(target=_daily_scheduler, daemon=True).start()
     # 보유종목 이전 신호 로드 + 감시 스레드 시작

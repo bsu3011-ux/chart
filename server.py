@@ -465,6 +465,7 @@ SIGNAL_HISTORY_FILE  = os.path.join(OUTPUT_DIR, "signal_history.json")
 BACKTEST_CACHE_FILE  = os.path.join(OUTPUT_DIR, "backtest_cache_v2.json")  # v2: stop/target 전략 반영
 PORTFOLIO_FILE         = os.path.join(OUTPUT_DIR, "portfolio.json")
 PORTFOLIO_SIGNALS_FILE = os.path.join(OUTPUT_DIR, "portfolio_signals.json")
+SELL_RECORDS_FILE      = os.path.join(OUTPUT_DIR, "sell_records.json")
 DART_CORP_CACHE_FILE   = os.path.join(OUTPUT_DIR, "dart_corp_cache.json")
 os.makedirs(OUTPUT_DIR,   exist_ok=True)
 
@@ -2285,6 +2286,60 @@ def save_portfolio():
         return jsonify({"ok": True, "count": len(cleaned)})
     except Exception as e:
         print(f"[portfolio] 저장 오류: {e}")
+        return jsonify({"ok": False, "error": "저장 실패"}), 500
+
+
+_sell_records_lock = threading.Lock()
+_SR_MAX_ITEMS = 500
+
+@app.route('/api/sell_records', methods=['GET'])
+def get_sell_records():
+    """매도 기록 불러오기"""
+    with _sell_records_lock:
+        try:
+            if os.path.exists(SELL_RECORDS_FILE):
+                with open(SELL_RECORDS_FILE, encoding='utf-8') as f:
+                    return jsonify(json.load(f))
+        except Exception:
+            pass
+    return jsonify([])
+
+@app.route('/api/sell_records', methods=['POST'])
+def save_sell_records():
+    """매도 기록 저장"""
+    try:
+        data = request.get_json(force=True)
+        if not isinstance(data, list):
+            return jsonify({"ok": False, "error": "array expected"}), 400
+        if len(data) > _SR_MAX_ITEMS:
+            return jsonify({"ok": False, "error": f"기록은 최대 {_SR_MAX_ITEMS}개까지"}), 400
+        cleaned = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            t = str(item.get("ticker", "")).strip().upper()
+            if not t:
+                continue
+            row = {
+                "ticker":    t,
+                "name":      str(item.get("name", t))[:50],
+                "flag":      str(item.get("flag", ""))[:10],
+                "quantity":  float(item.get("quantity", 0)),
+                "buyPrice":  float(item.get("buyPrice", 0)),
+                "sellPrice": float(item.get("sellPrice", 0)),
+                "soldAt":    str(item.get("soldAt", ""))[:30],
+                "pnl":       float(item.get("pnl", 0)),
+                "pnlPct":    float(item.get("pnlPct", 0)),
+            }
+            if "memo" in item:
+                row["memo"] = str(item["memo"])[:200]
+            cleaned.append(row)
+        with _sell_records_lock:
+            with open(SELL_RECORDS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(cleaned, f, ensure_ascii=False)
+        return jsonify({"ok": True, "count": len(cleaned)})
+    except Exception as e:
+        print(f"[sell_records] 저장 오류: {e}")
         return jsonify({"ok": False, "error": "저장 실패"}), 500
 
 

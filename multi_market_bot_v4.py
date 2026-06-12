@@ -3128,6 +3128,8 @@ def calc_volume_zscore(volume_series) -> dict:
 # ════════════════════════════════════════════════════════════════
 _fund_cache: dict = {}
 _FUND_TTL = 21600   # 6시간 — yf.Ticker().info는 호출당 수 초 소요, 랭킹 전종목 분석 병목
+_rt_price_cache: dict = {}
+_RT_PRICE_TTL = 180  # 3분 — 장중 실시간 가격 캐시
 
 def analyze_stock(ticker: str) -> dict:
     """
@@ -3176,6 +3178,22 @@ def analyze_stock(ticker: str) -> dict:
 
     current    = float(close.iloc[-1])
     prev       = float(close.iloc[-2]) if len(close) > 1 else current
+
+    # 장중 실시간 가격 보정 (3분 캐시) — daily close는 장중 급등락을 반영 못 함
+    try:
+        _rt_now = _time_mod.time()
+        _rt_cached = _rt_price_cache.get(ticker)
+        if _rt_cached and _rt_now - _rt_cached["ts"] < _RT_PRICE_TTL:
+            _rt_val = _rt_cached["price"]
+        else:
+            _rt_val = float(yf.Ticker(ticker).fast_info.last_price or 0)
+            if _rt_val > 0:
+                _rt_price_cache[ticker] = {"ts": _rt_now, "price": _rt_val}
+        if _rt_val and _rt_val > 0 and abs(_rt_val - current) / current > 0.001:
+            current = _rt_val
+    except Exception:
+        pass
+
     change_pct = (current - prev) / prev * 100
     change_abs = current - prev
 

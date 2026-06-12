@@ -3144,17 +3144,20 @@ def analyze_stock(ticker: str) -> dict:
     # 펀더멘털 (PER, 시총, 배당, 베타, ROE, EPS성장) — 6시간 캐시
     pe_ratio = None;  market_cap = None;  dividend_yield = None
     beta = None;      roe = None;         eps_growth = None
+    yf_name = ""  # yfinance 에서 가져온 이름 (POPULAR_STOCKS 미등록 종목용)
     _fc = _fund_cache.get(ticker)
     if _fc and _time_mod.time() - _fc["ts"] < _FUND_TTL:
         f = _fc["data"]
         pe_ratio, market_cap, dividend_yield = f["pe"], f["mc"], f["dy"]
         beta, roe, eps_growth = f["beta"], f["roe"], f["eg"]
+        yf_name = f.get("yn", "")
     else:
         try:
             t_obj = yf.Ticker(ticker)
             fi = t_obj.fast_info
             market_cap = getattr(fi, 'market_cap', None)
             full_info  = t_obj.info or {}
+            yf_name    = str(full_info.get("shortName") or full_info.get("longName") or "").strip()[:50]
             pe_ratio   = full_info.get('trailingPE') or full_info.get('forwardPE')
             if pe_ratio and (pe_ratio < 0 or pe_ratio > 1000): pe_ratio = None
             dy = full_info.get('dividendYield')
@@ -3168,7 +3171,7 @@ def analyze_stock(ticker: str) -> dict:
             if eg is not None: eps_growth = round(float(eg) * 100, 1)
             _fund_cache[ticker] = {"ts": _time_mod.time(), "data": {
                 "pe": pe_ratio, "mc": market_cap, "dy": dividend_yield,
-                "beta": beta, "roe": roe, "eg": eps_growth}}
+                "beta": beta, "roe": roe, "eg": eps_growth, "yn": yf_name}}
         except Exception:
             pass
 
@@ -3426,7 +3429,7 @@ def analyze_stock(ticker: str) -> dict:
 
     return {
         "ticker": ticker,
-        "name": info.get("name", ticker),
+        "name": info.get("name") or yf_name or ticker,
         "name_en": info.get("name_en", ""),
         "sector": info.get("sector", ""),
         "flag": info.get("flag", "🌐"),

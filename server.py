@@ -1281,7 +1281,7 @@ def status():
     import kis_api as _ka
     return jsonify({
         "status": "running",
-        "version": "4.1",
+        "version": "4.2",
         "commit": commit,
         "markets": len(MARKETS),
         "last_updated": last_updated,

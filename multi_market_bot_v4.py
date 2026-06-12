@@ -832,8 +832,12 @@ POPULAR_STOCKS = {
 # 공통 지표
 # ════════════════════════════════════════════════════════════════
 def calc_rsi(c, p=14):
-    d=c.diff(); g=d.clip(lower=0).rolling(p).mean(); l=(-d.clip(upper=0)).rolling(p).mean()
-    return 100-(100/(1+g/l.replace(0,float('nan'))))
+    """RSI — Wilder 방식 (지수평활 alpha=1/p).
+    Cutler(SMA·rolling mean) 방식은 HTS/트레이딩뷰(Wilder)와 수치가 달라 혼동 유발."""
+    d = c.diff()
+    g = d.clip(lower=0).ewm(alpha=1/p, min_periods=p, adjust=False).mean()
+    l = (-d.clip(upper=0)).ewm(alpha=1/p, min_periods=p, adjust=False).mean()
+    return 100 - (100 / (1 + g / l.replace(0, float('nan'))))
 
 def calc_atr(df, p=14):
     h,l,c=df['High'],df['Low'],df['Close'].shift(1)

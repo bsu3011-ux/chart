@@ -2530,6 +2530,16 @@ function ScreenerPage({markets,onChart}){
   );
 }
 
+function SellPreview({sp,sq,buyPrice,ticker,fmtP}){
+  const p2=(sp-(buyPrice||0))*sq;
+  const pp2=(buyPrice>0)?(sp-buyPrice)/buyPrice*100:0;
+  return(
+    <div style={{color:p2>=0?C.green:C.red,fontSize:11,fontWeight:700,marginBottom:8,textAlign:"center"}}>
+      예상 실현손익: {p2>=0?"+":""}{pp2.toFixed(2)}% ({p2>=0?"+":""}{fmtP(p2,ticker)})
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════
 // 포트폴리오 페이지
 // ════════════════════════════════════════════
@@ -2684,10 +2694,20 @@ function PortfolioPage(){
     },280);
   },[]);
 
-  const addHolding=()=>{
+  const addHolding=async()=>{
     if(!form.ticker||!form.quantity||!form.buyPrice) return;
+    let nm=form.name, fl=form.flag||"";
+    // 자동완성 미사용 시 API 로 이름 조회
+    if(!nm){
+      try{
+        const r=await fetch(`${API_BASE}/api/search_stocks?q=${encodeURIComponent(form.ticker)}`);
+        const j=await r.json();
+        const hit=(j.results||[]).find(s=>s.ticker.toUpperCase()===form.ticker.toUpperCase());
+        if(hit){nm=hit.name;fl=hit.flag||"";}
+      }catch(e){}
+    }
     setHoldings(p=>[...p,{
-      ticker:form.ticker, name:form.name||form.ticker, flag:form.flag||"",
+      ticker:form.ticker.toUpperCase(), name:nm||form.ticker, flag:fl,
       quantity:parseFloat(form.quantity), buyPrice:parseFloat(form.buyPrice),
       addedAt:new Date().toISOString()
     }]);
@@ -2736,6 +2756,10 @@ function PortfolioPage(){
     background:subTab===t?C.cyan+"18":"transparent",
     color:subTab===t?C.cyan:C.muted,
   });
+
+  const srTotalPnl=sellRecords.reduce((a,r)=>a+(r.pnl||0),0);
+  const srWins=sellRecords.filter(r=>(r.pnl||0)>0).length;
+  const srWinRate=sellRecords.length>0?srWins/sellRecords.length*100:0;
 
   return(
     <div className="tab-content">
@@ -2948,17 +2972,9 @@ function PortfolioPage(){
                             background:C.elevated,border:`1px solid ${C.border}`,color:C.text,fontSize:12}}/>
                       </div>
                     </div>
-                    {sellForm.sellPrice&&(()=>{
-                      const sp2=parseFloat(sellForm.sellPrice);
-                      const sq2=parseFloat(sellForm.sellQty)||h.quantity;
-                      const p2=(sp2-h.buyPrice)*sq2;
-                      const pp2=h.buyPrice>0?(sp2-h.buyPrice)/h.buyPrice*100:0;
-                      return sp2>0?(
-                        <div style={{color:p2>=0?C.green:C.red,fontSize:11,fontWeight:700,marginBottom:8,textAlign:"center"}}>
-                          예상 실현손익: {p2>=0?"+":""}{pp2.toFixed(2)}% ({p2>=0?"+":""}{fmtP(p2,h.ticker)})
-                        </div>
-                      ):null;
-                    })()}
+                    {sellForm.sellPrice&&parseFloat(sellForm.sellPrice)>0&&(
+                      <SellPreview sp={parseFloat(sellForm.sellPrice)} sq={parseFloat(sellForm.sellQty)||h.quantity} buyPrice={h.buyPrice} ticker={h.ticker} fmtP={fmtP}/>
+                    )}
                     <div style={{display:"flex",gap:6}}>
                       <button onClick={()=>confirmSell(i)}
                         disabled={!sellForm.sellPrice||parseFloat(sellForm.sellPrice)<=0}
@@ -3104,83 +3120,77 @@ function PortfolioPage(){
               </div>
             </div>
           )}
-          {sellRecords.length>0&&(()=>{
-            const totalPnl=sellRecords.reduce((a,r)=>a+r.pnl,0);
-            const wins=sellRecords.filter(r=>r.pnl>0).length;
-            const winRate=sellRecords.length>0?wins/sellRecords.length*100:0;
-            return(
-              <>
-                {/* 요약 카드 */}
-                <div style={{padding:"10px 14px",borderRadius:12,marginBottom:12,
-                  background:C.cardGradient,
-                  border:`1px solid ${totalPnl>=0?C.green+"44":C.red+"44"}`}}>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,textAlign:"center"}}>
-                    <div>
-                      <div style={{color:C.muted,fontSize:9}}>총 매도 횟수</div>
-                      <div style={{color:C.text,fontSize:18,fontWeight:900}}>{sellRecords.length}</div>
+          {sellRecords.length>0&&(
+            <>
+              {/* 요약 카드 */}
+              <div style={{padding:"10px 14px",borderRadius:12,marginBottom:12,
+                background:C.cardGradient,
+                border:`1px solid ${srTotalPnl>=0?C.green+"44":C.red+"44"}`}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,textAlign:"center"}}>
+                  <div>
+                    <div style={{color:C.muted,fontSize:9}}>총 매도 횟수</div>
+                    <div style={{color:C.text,fontSize:18,fontWeight:900}}>{sellRecords.length}</div>
+                  </div>
+                  <div>
+                    <div style={{color:C.muted,fontSize:9}}>실현 손익</div>
+                    <div style={{color:srTotalPnl>=0?C.green:C.red,fontSize:15,fontWeight:900}}>
+                      {srTotalPnl>=0?"+":""}{srTotalPnl.toLocaleString(undefined,{maximumFractionDigits:0})}
                     </div>
-                    <div>
-                      <div style={{color:C.muted,fontSize:9}}>실현 손익</div>
-                      <div style={{color:totalPnl>=0?C.green:C.red,fontSize:15,fontWeight:900}}>
-                        {totalPnl>=0?"+":""}{totalPnl.toLocaleString(undefined,{maximumFractionDigits:0})}
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{color:C.muted,fontSize:9}}>승률</div>
-                      <div style={{color:winRate>=50?C.green:C.red,fontSize:18,fontWeight:900}}>
-                        {winRate.toFixed(0)}%
-                      </div>
+                  </div>
+                  <div>
+                    <div style={{color:C.muted,fontSize:9}}>승률</div>
+                    <div style={{color:srWinRate>=50?C.green:C.red,fontSize:18,fontWeight:900}}>
+                      {srWinRate.toFixed(0)}%
                     </div>
                   </div>
                 </div>
-                {/* 기록 목록 */}
-                {sellRecords.map((r,i)=>{
-                  const isKR=r.ticker.endsWith(".KS")||r.ticker.endsWith(".KQ");
-                  const win=r.pnl>=0;
-                  return(
-                    <div key={i} style={{padding:"11px 12px",borderRadius:12,marginBottom:8,
-                      background:C.cardGradient,
-                      border:`1px solid ${win?C.green+"44":C.red+"44"}`,
-                      borderLeft:`3px solid ${win?C.green:C.red}`}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-                        <div style={{display:"flex",alignItems:"center",gap:7}}>
-                          {r.flag&&<span style={{fontSize:18}}>{r.flag}</span>}
-                          <div>
-                            <div style={{color:C.text,fontSize:13,fontWeight:700}}>{r.name}</div>
-                            <div style={{color:C.muted,fontSize:10}}>{r.ticker} · {r.quantity}주</div>
-                          </div>
-                        </div>
-                        <div style={{textAlign:"right"}}>
-                          <div style={{color:win?C.green:C.red,fontSize:14,fontWeight:900}}>
-                            {r.pnlPct>=0?"+":""}{r.pnlPct.toFixed(2)}%
-                          </div>
-                          <div style={{color:C.muted,fontSize:9}}>{r.soldAt?.slice(0,10)}</div>
+              </div>
+              {/* 기록 목록 */}
+              {sellRecords.map((r,i)=>{
+                const win=(r.pnl||0)>=0;
+                return(
+                  <div key={i} style={{padding:"11px 12px",borderRadius:12,marginBottom:8,
+                    background:C.cardGradient,
+                    border:`1px solid ${win?C.green+"44":C.red+"44"}`,
+                    borderLeft:`3px solid ${win?C.green:C.red}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                      <div style={{display:"flex",alignItems:"center",gap:7}}>
+                        {r.flag&&<span style={{fontSize:18}}>{r.flag}</span>}
+                        <div>
+                          <div style={{color:C.text,fontSize:13,fontWeight:700}}>{r.name||r.ticker}</div>
+                          <div style={{color:C.muted,fontSize:10}}>{r.ticker} · {r.quantity}주</div>
                         </div>
                       </div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:4,textAlign:"center"}}>
-                        {[
-                          {label:"매수가",val:fmtP(r.buyPrice,r.ticker),color:C.text},
-                          {label:"매도가",val:fmtP(r.sellPrice,r.ticker),color:win?C.green:C.red},
-                          {label:"실현손익",val:`${r.pnl>=0?"+":""}${fmtP(r.pnl,r.ticker)}`,color:win?C.green:C.red},
-                        ].map(({label,val,color})=>(
-                          <div key={label} style={{padding:"5px 2px",borderRadius:7,
-                            background:"rgba(255,255,255,0.025)",border:`1px solid ${C.border}33`}}>
-                            <div style={{color:C.muted,fontSize:8}}>{label}</div>
-                            <div style={{color,fontSize:10,fontWeight:700}}>{val}</div>
-                          </div>
-                        ))}
+                      <div style={{textAlign:"right"}}>
+                        <div style={{color:win?C.green:C.red,fontSize:14,fontWeight:900}}>
+                          {(r.pnlPct||0)>=0?"+":""}{(r.pnlPct||0).toFixed(2)}%
+                        </div>
+                        <div style={{color:C.muted,fontSize:9}}>{(r.soldAt||"").slice(0,10)}</div>
                       </div>
                     </div>
-                  );
-                })}
-                <button onClick={()=>{if(window.confirm("매도 기록을 모두 삭제하시겠습니까?"))setSellRecords([]);}}
-                  style={{width:"100%",marginTop:8,padding:"8px",borderRadius:8,fontSize:11,fontWeight:700,
-                    cursor:"pointer",border:`1px solid ${C.border}`,background:"transparent",color:C.muted}}>
-                  🗑 기록 전체 삭제
-                </button>
-              </>
-            );
-          })()}
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:4,textAlign:"center"}}>
+                      {[
+                        {label:"매수가",val:fmtP(r.buyPrice,r.ticker),color:C.text},
+                        {label:"매도가",val:fmtP(r.sellPrice,r.ticker),color:win?C.green:C.red},
+                        {label:"실현손익",val:`${(r.pnl||0)>=0?"+":""}${fmtP(r.pnl||0,r.ticker)}`,color:win?C.green:C.red},
+                      ].map(({label,val,color})=>(
+                        <div key={label} style={{padding:"5px 2px",borderRadius:7,
+                          background:"rgba(255,255,255,0.025)",border:`1px solid ${C.border}33`}}>
+                          <div style={{color:C.muted,fontSize:8}}>{label}</div>
+                          <div style={{color,fontSize:10,fontWeight:700}}>{val}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              <button onClick={()=>{if(window.confirm("매도 기록을 모두 삭제하시겠습니까?"))setSellRecords([]);}}
+                style={{width:"100%",marginTop:8,padding:"8px",borderRadius:8,fontSize:11,fontWeight:700,
+                  cursor:"pointer",border:`1px solid ${C.border}`,background:"transparent",color:C.muted}}>
+                🗑 기록 전체 삭제
+              </button>
+            </>
+          )}
         </>
       )}
     </div>

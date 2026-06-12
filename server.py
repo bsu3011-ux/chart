@@ -2269,16 +2269,20 @@ def save_portfolio():
             if not _valid_ticker(t):
                 return jsonify({"ok": False, "error": f"잘못된 티커: {t[:20]}"}), 400
             row = {"ticker": t}
-            if "name" in item: row["name"] = str(item["name"])[:50]
-            if "memo" in item: row["memo"] = str(item["memo"])[:200]
-            if "added" in item: row["added"] = str(item["added"])[:30]
-            for nk in ("qty", "avg"):
-                if nk in item:
-                    try:
-                        row[nk] = float(item[nk])
-                    except (TypeError, ValueError):
-                        return jsonify({"ok": False, "error": f"{nk} 숫자 형식 오류"}), 400
-            # 허용 외 키는 버림
+            if "name" in item:    row["name"]     = str(item["name"])[:50]
+            if "flag" in item:    row["flag"]     = str(item["flag"])[:10]
+            if "memo" in item:    row["memo"]     = str(item["memo"])[:200]
+            # addedAt / added 둘 다 허용
+            for dk in ("addedAt", "added"):
+                if dk in item: row["addedAt"] = str(item[dk])[:30]; break
+            # quantity / qty, buyPrice / avg 둘 다 허용
+            for fn, aliases in (("quantity", ("quantity","qty")), ("buyPrice", ("buyPrice","avg"))):
+                for alias in aliases:
+                    if alias in item:
+                        try: row[fn] = float(item[alias])
+                        except (TypeError, ValueError):
+                            return jsonify({"ok": False, "error": f"{alias} 숫자 형식 오류"}), 400
+                        break
             cleaned.append(row)
         with _portfolio_lock:
             with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f:

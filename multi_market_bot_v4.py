@@ -1046,14 +1046,19 @@ def calc_position_size(price, stop, account_size=10_000_000, risk_pct=1.0):
         return None
     max_loss = account_size * (risk_pct / 100)
     shares = int(max_loss / risk_per_share)
+    # 타이트한 손절(0.5% 등)일 때 투자금이 계좌를 초과(레버리지)하던 버그 → 계좌 한도 캡
+    max_affordable = int(account_size / price) if price > 0 else 0
+    capped = shares > max_affordable
+    shares = min(shares, max_affordable)
     invest = shares * price
     return {
         "shares":      shares,
         "invest":      int(invest),
         "invest_pct":  round(invest / account_size * 100, 1),
-        "max_loss":    int(max_loss),
+        "max_loss":    int(min(max_loss, shares * risk_per_share)),
         "account":     account_size,
         "risk_pct":    risk_pct,
+        "capped":      capped,   # True면 계좌 한도로 수량 제한됨 (실효 리스크 < risk_pct)
     }
 
 
@@ -2317,100 +2322,184 @@ def _slope(series, n=5):
     v_prev = float(s.iloc[-(n + 1)])
     return (v_now - v_prev) / v_prev * 100 if v_prev != 0 else 0.0
 
+# ── 공용 신호 매핑 (초기 산출과 모든 보정 이후 재산출에서 동일하게 사용) ──
+SIG_TH = {"strong_buy": 80, "buy": 65, "sell": 35, "strong_sell": 20}
+
+def score_to_signal(score):
+    """0~100 점수(50=중립) → (signal_type, signal_text). 임계값 대칭."""
+    if score >= SIG_TH["strong_buy"]:  return "STRONG_BUY",  "🟢 강력 매수"
+    if score >= SIG_TH["buy"]:         return "BUY",         "🟢 매수"
+    if score <= SIG_TH["strong_sell"]: return "STRONG_SELL", "🔴 강력 매도"
+    if score <= SIG_TH["sell"]:        return "SELL",        "🔴 매도"
+    return "NEUTRAL", "⚪ 중립"
+
+def finalize_signal(score, gates=None):
+    """점수 → 신호 매핑 + STRONG_* 게이트 적용 (게이트 미충족 시 한 단계 강등).
+    초기 산출·KIS/DART 보정 후·서버 외부신호 보정 후 모두 이 함수로 재산출한다.
+
+    강등 시 점수도 임계 경계(79/21)로 클램핑해 반환:
+    점수 95인데 라벨은 '매수'(신뢰도 95)처럼 라벨-점수가 어긋나 보이는 문제 방지.
+    반환: (signal_type, signal_text, score)"""
+    sig, txt = score_to_signal(score)
+    g = gates or {}
+    if sig == "STRONG_BUY" and not g.get("strong_buy_ok", True):
+        sig, txt = "BUY", "🟢 매수"
+        score = min(score, SIG_TH["strong_buy"] - 1)   # 79
+    elif sig == "STRONG_SELL" and not g.get("strong_sell_ok", True):
+        sig, txt = "SELL", "🔴 매도"
+        score = max(score, SIG_TH["strong_sell"] + 1)  # 21
+    return sig, txt, int(score)
+
+def conviction_from_score(score):
+    """방향 무관 확신도(신뢰도) = max(score, 100-score).
+    매수 계열은 점수 그대로, 매도 계열은 100-점수 → '강한 매도 = 높은 신뢰도'로 표시 일관성 확보.
+    NEUTRAL은 50 근처(확신 낮음)로 자연 표현된다."""
+    s = max(0, min(100, score))
+    return int(round(max(s, 100 - s)))
+
+def _interp(x, pts):
+    """구간 선형 보간 — 임계값 절벽 제거용. pts: [(x0,y0),(x1,y1),...] x 오름차순."""
+    if x <= pts[0][0]:
+        return float(pts[0][1])
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if x <= x1:
+            return float(y0 + (y1 - y0) * (x - x0) / (x1 - x0))
+    return float(pts[-1][1])
+
 def _generate_signal(price, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
                        divergence=None, candle_pattern=None, ma50_slope=0,
                        rs_score=50, momentum_composite=50, vcp_detected=False,
-                       regime_adj=0, liquidity_adj=0, fundamental_adj=0,
-                       macro_adj=0, vol_z_adj=0):
-    """가중치 기반 신호 생성 (0~100점, 기본점수 25)
-    - MA200/MA50 추세: 30점 (장기 가장 중요)
-    - 모멘텀 (RSI/MACD): 25점 (MACD 최대 ±8점)
-    - 단기 추세 (MA20·기울기): 15점
-    - 변동성/거래량 (BB/Vol): 10점
-    - 다이버전스·캔들 보정: ±10점
-    - 상대강도(RS): ±5점 (선행)
-    - 모멘텀 복합 스코어: ±3점 (선행, 이중카운팅 축소)
-    - VCP 패턴: +5점 (선행)
-    - 시장 환경(벤치마크 추세): ±10점
-    - 유동성(거래대금): ±5점
-    - 펀더멘털(PER/ROE/EPS): ±8점
-    신호 기준: STRONG_BUY≥80, BUY≥63, SELL≤40, STRONG_SELL≤20
+                       market_env_adj=0, liquidity_adj=0, fundamental_adj=0,
+                       chg_pct=0.0):
+    """그룹 캡 기반 신호 점수 (0~100, 기준점 50 = 중립)
+
+    설계 원칙:
+      1) 상관 지표는 같은 그룹으로 묶어 합산 후 캡 → 이중카운팅 구조적 차단
+      2) 이진 분기 대신 연속 점수(선형 보간/포화) → 임계값 절벽 제거
+      3) 거래량은 단일 소스 + 당일 등락 방향 조건부 (급증·하락일은 감점)
+      4) STRONG_* 는 점수 외에 독립 그룹 동방향 확인 게이트 필요
+
+    그룹과 캡:
+      추세     ±22 : price vs MA200/50/20 거리 + MA50 기울기
+      모멘텀   ±15 : RSI(연속화, 과매도 보너스는 장기추세 생존 시에만) + MACD(가격 정규화)
+      거래량   ±6  : vol_ratio 단일 소스 × 방향
+      변동성   ±4  : 볼린저 %B
+      패턴     ±10 : RSI 다이버전스 + 캔들
+      상대강도 ±6  : RS 점수 연속화
+      선행     +7/-3 : 모멘텀 복합 극단 + VCP
+      시장환경 -12~+8 : regime+매크로 (호출부에서 합산해 전달, 여기서 캡)
+      품질     ±10 : 유동성 + 펀더멘털
+
+    신호: STRONG_BUY≥80(게이트), BUY≥65, NEUTRAL 36~64, SELL≤35, STRONG_SELL≤20(게이트)
+    반환: (signal_type, signal_text, score, breakdown)
     """
-    score = 25  # 낮은 기본점수 — 조건 충족 시만 상승
+    def _clip(v, lo, hi):
+        return max(lo, min(hi, v))
 
-    # 장기 추세 (30점)
-    if ma200 and price > ma200: score += 15
-    elif ma200:                  score -= 15
-    if price > ma50:             score += 10
-    else:                        score -= 10
-    if ma50_slope > 0.5:         score += 5
-    elif ma50_slope < -0.5:      score -= 5
+    # ── 추세 그룹 (±22): MA 대비 % 거리의 포화 선형 점수 ──
+    # 포화 거리를 넓게(10/7/4%) — 평범한 상승주가 그룹 만점을 즉시 채워
+    # 점수 분포가 양극단에 뭉치던 문제 완화 (강한 추세일수록 점진적으로 가산)
+    trend = 0.0
+    if ma200 and ma200 > 0:
+        trend += _clip((price / ma200 - 1) * 100 / 10.0, -1, 1) * 10   # ±10% 거리에서 포화
+    if ma50 and ma50 > 0:
+        trend += _clip((price / ma50 - 1) * 100 / 7.0, -1, 1) * 7
+    if ma20 and ma20 > 0:
+        trend += _clip((price / ma20 - 1) * 100 / 4.0, -1, 1) * 5
+    trend += _clip(ma50_slope / 1.5, -1, 1) * 4
+    trend = _clip(trend, -22, 22)
 
-    # 모멘텀 (25점)
-    if   50 < rsi < 70:          score += 10
-    elif rsi >= 80:              score -= 12  # 극단 과매수
-    elif rsi >= 70:              score -= 8   # 과매수 경계
-    elif rsi <= 20:              score += 7   # 극단 과매도 반등
-    elif rsi <= 30:              score += 5   # 과매도 반등 가능
-    else:                        score -= 5
-    # MACD 히스토그램: 크기 비례 점수 (최대 ±8점, 이중카운팅 방지)
-    if macd_hist != 0:
-        # 가격 대비 히스토그램 비율로 정규화 (0.5% 기준 ±6점, 최대 ±8점)
-        _macd_norm = (macd_hist / price) * 100 if price else 0
-        _macd_pts = max(-8, min(8, _macd_norm / 0.5 * 6))
-        score += int(_macd_pts)
+    # 장기추세 생존 여부 — 역추세 보너스(과매도/BB하단) 게이트
+    long_trend_ok = (price > ma200) if (ma200 and ma200 > 0) else (ma50 and price > ma50)
 
-    # 단기 추세 (15점)
-    if price > ma20:             score += 8
-    else:                        score -= 8
+    # ── 모멘텀 그룹 (±15): RSI 연속화 + MACD 히스토그램 ──
+    # 과매도 보너스는 장기추세 위에서만 (하락추세 칼받기 보상 제거 → 매수편향 완화)
+    rsi_pts = ([(20, 4), (30, 2), (45, 0), (55, 8), (65, 8), (70, -2), (80, -8), (90, -10)]
+               if long_trend_ok else
+               [(20, 0), (30, 0), (45, 0), (55, 6), (65, 8), (70, -2), (80, -8), (90, -10)])
+    mom_rsi = _interp(rsi, rsi_pts)
+    mom_macd = 0.0
+    if price and macd_hist != 0:
+        _macd_norm = (macd_hist / price) * 100          # 가격 대비 %
+        mom_macd = _clip(_macd_norm / 0.5 * 6, -7, 7)   # 0.5% ≈ ±6점, 캡 ±7
+    momentum = _clip(mom_rsi + mom_macd, -15, 15)
 
-    # 변동성/거래량 (15점)
-    if 0.3 < bb_pct_b < 0.7:     score += 5   # 중심부 = 안정
-    elif bb_pct_b > 0.9:         score -= 3   # 상단 이탈 = 단기 조정 위험
-    elif bb_pct_b < 0.1:         score += 3   # 하단 = 단기 반등 가능
-    if vol_ratio > 1.5:          score += 5   # 거래량 동반 추세
-    elif vol_ratio < 0.7:        score -= 3   # 거래량 위축 = 모멘텀 약화
+    # ── 거래량 그룹 (±6): 단일 소스 + 방향 조건부 ──
+    # (기존: vol_ratio +5와 vol_z +5가 같은 데이터로 이중 가산 → 단일화)
+    volume = 0.0
+    if vol_ratio >= 1.5:
+        v_mag = 3.0 + _clip((vol_ratio - 1.5) / 1.5, 0, 1) * 3.0   # 1.5x→3, 3x+→6
+        volume = v_mag if chg_pct >= 0 else -v_mag                 # 급증+하락 = 투매 경계
+    elif vol_ratio < 0.7:
+        volume = -2.0                                              # 거래 위축 = 모멘텀 약화
+    volume = _clip(volume, -6, 6)
 
-    # 다이버전스 보정 (±10점)
-    if divergence == "bullish":  score += 10
-    elif divergence == "bearish": score -= 10
+    # ── 변동성 그룹 (±4): 볼린저 %B ──
+    volat = 0.0
+    if 0.3 <= bb_pct_b <= 0.7:
+        volat = 2.0
+    elif bb_pct_b > 0.95:
+        volat = -4.0
+    elif bb_pct_b > 0.85:
+        volat = -2.0
+    elif bb_pct_b < 0.05 and long_trend_ok:
+        volat = 2.0   # 하단 반등 베팅도 장기추세 생존 시에만
 
-    # 캔들 패턴 보정 (±5점)
-    if candle_pattern in ("강세 장악형", "해머 (저점 반전)"):     score += 5
-    elif candle_pattern in ("약세 장악형", "슈팅스타 (고점 반전)"): score -= 5
+    # ── 패턴 그룹 (±10) ──
+    pattern = 0.0
+    if divergence == "bullish":
+        pattern += 7
+    elif divergence == "bearish":
+        pattern -= 7
+    if candle_pattern in ("강세 장악형", "해머 (저점 반전)"):
+        pattern += 4
+    elif candle_pattern in ("약세 장악형", "슈팅스타 (고점 반전)"):
+        pattern -= 4
+    pattern = _clip(pattern, -10, 10)
 
-    # ── 선행 지표 보정 ──────────────────────────────────────────
-    # 상대강도 (±5점): 시장 대비 초과 강세/약세
-    if   rs_score >= 80: score += 5
-    elif rs_score >= 65: score += 2
-    elif rs_score <= 20: score -= 5
-    elif rs_score <= 35: score -= 2
+    # ── 상대강도 (±6, 연속) ──
+    rel = _clip((rs_score - 50) / 30.0, -1, 1) * 6
 
-    # 모멘텀 복합 (±3점, 이중카운팅 축소): RSI/MACD/MA기울기와 정보 중복 → 극단값에서만 보정
-    if   momentum_composite >= 80: score += 3
-    elif momentum_composite <= 20: score -= 3
+    # ── 선행 지표 ──
+    leading = 0.0
+    if momentum_composite >= 80:
+        leading += 3
+    elif momentum_composite <= 20:
+        leading -= 3
+    if vcp_detected:
+        leading += 4
 
-    # VCP 패턴 (+5점): 변동성 수축 후 돌파 임박
-    if vcp_detected:               score += 5
+    # ── 시장환경(외부 합산) / 품질 그룹 캡 ──
+    env     = _clip(market_env_adj, -12, 8)
+    quality = _clip(liquidity_adj + fundamental_adj, -10, 10)
 
-    # ── 매크로/품질 필터 ────────────────────────────────────────
-    # 시장 환경 (±10점): 벤치마크가 약세장이면 매수 신호 약화
-    score += regime_adj
-    # 유동성 (±5점): 거래대금 부족 종목은 신호 신뢰도 하락
-    score += liquidity_adj
-    # 펀더멘털 (±8점): 저PER·고ROE·EPS성장 보너스, 적자·고PER 패널티
-    score += fundamental_adj
-    # 글로벌 매크로 (±15점): VKOSPI·금리·달러·구리
-    score += macro_adj
-    # 거래량 Z-score (±5점): 이상 거래 감지
-    score += vol_z_adj
+    score = 50 + trend + momentum + volume + volat + pattern + rel + leading + env + quality
+    score = int(round(_clip(score, 0, 100)))
 
-    score = max(0, min(100, score))
-    if score >= 80: return "STRONG_BUY",  "🟢 강력 매수", score
-    if score >= 63: return "BUY",         "🟢 매수",     score
-    if score <= 20: return "STRONG_SELL", "🔴 강력 매도", score
-    if score <= 40: return "SELL",        "🔴 매도",     score
-    return "NEUTRAL", "⚪ 중립", score
+    # ── STRONG_* 게이트 ──────────────────────────────────────────
+    # 점수만으로는 상관 지표 동시 점화 시 80을 쉽게 넘으므로, 독립 확인 요건을 추가:
+    #  STRONG_BUY:  핵심 4그룹(추세·모멘텀·거래량·상대강도) 중 3개 동방향
+    #               + 패턴 비역행 + (거래량 확인 또는 시장주도 RS≥70) ← 무거래 돌파 강등
+    #  STRONG_SELL: 3개 동방향 + 패턴 비역행 + (투매 거래량 또는 시장 대비 뚜렷한 약세)
+    core = (trend, momentum, volume, rel)
+    bull_n = sum(1 for v in core if v > 1)
+    bear_n = sum(1 for v in core if v < -1)
+    gates = {
+        "strong_buy_ok":  (bull_n >= 3 and pattern >= -3
+                           and (volume > 1 or rel >= 4)),
+        "strong_sell_ok": (bear_n >= 3 and pattern <= 3
+                           and (volume < -1 or rel <= -4)),
+    }
+    breakdown = {
+        "trend": round(trend, 1), "momentum": round(momentum, 1),
+        "volume": round(volume, 1), "volatility": round(volat, 1),
+        "pattern": round(pattern, 1), "rel_strength": round(rel, 1),
+        "leading": round(leading, 1), "market_env": round(env, 1),
+        "quality": round(quality, 1),
+        "gates": gates,
+    }
+    signal_type, signal_text, score = finalize_signal(score, gates)
+    return signal_type, signal_text, score, breakdown
 
 def _generate_analysis_text(ticker, price, chg, rsi, macd_hist, bb_pct_b,
                               ma20, ma50, ma200, signal_type, vol_spike, from_high):
@@ -2546,6 +2635,7 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
 
     def _sig(i):
         c    = float(close.iloc[i])
+        cp   = float(close.iloc[i-1]) if i > 0 else c
         m20  = float(ma20_s.iloc[i])  if not pd.isna(ma20_s.iloc[i])  else c
         m50  = float(ma50_s.iloc[i])  if not pd.isna(ma50_s.iloc[i])  else c
         m200 = float(ma200_s.iloc[i]) if not pd.isna(ma200_s.iloc[i]) else None
@@ -2554,7 +2644,9 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
         bpb  = float(bpctb_s.iloc[i]) if not pd.isna(bpctb_s.iloc[i]) else 0.5
         vr   = float(volr_s.iloc[i])  if not pd.isna(volr_s.iloc[i])  else 1.0
         s50  = float(sl50_s.iloc[i])  if not pd.isna(sl50_s.iloc[i])  else 0
-        sig, _, _ = _generate_signal(c, m20, m50, m200, rsi, mh, bpb, vr, ma50_slope=s50)
+        dchg = (c / cp - 1) * 100 if cp > 0 else 0.0
+        sig, _, _, _ = _generate_signal(c, m20, m50, m200, rsi, mh, bpb, vr,
+                                         ma50_slope=s50, chg_pct=dchg)
         return sig, m20, m50
 
     equity   = 100.0;  bnh      = 100.0
@@ -2658,10 +2750,13 @@ import time as _time_mod
 _bm_close_cache: dict = {}  # {ticker: (timestamp, Series)}
 
 def _get_benchmark_close(bm_ticker: str, period: str = "1y"):
-    """벤치마크 종가 캐시 (1시간 TTL)"""
+    """벤치마크 종가 캐시 (1시간 TTL)
+    캐시 키에 period 포함 — RS(1y)와 regime(2y)이 같은 키를 덮어써
+    regime이 1y 데이터로 계산되던 버그 수정."""
     now = _time_mod.time()
-    if bm_ticker in _bm_close_cache:
-        ts, series = _bm_close_cache[bm_ticker]
+    key = (bm_ticker, period)
+    if key in _bm_close_cache:
+        ts, series = _bm_close_cache[key]
         if now - ts < 3600:
             return series
     try:
@@ -2669,7 +2764,7 @@ def _get_benchmark_close(bm_ticker: str, period: str = "1y"):
         if df_bm.empty:
             return None
         series = df_bm['Close'].dropna()
-        _bm_close_cache[bm_ticker] = (now, series)
+        _bm_close_cache[key] = (now, series)
         return series
     except Exception:
         return None
@@ -2913,15 +3008,29 @@ def calc_fundamental_score(pe_ratio, roe, eps_growth) -> dict:
             "available": len(parts) > 0}
 
 
+_macro_cache: dict = {}
+_MACRO_TTL = 900   # 15분 — 전종목 랭킹 분석 시 종목마다 4개 심볼을 재다운로드하던 폭주 방지
+
 def calc_macro_overlay(is_korean: bool = True) -> dict:
-    """글로벌 매크로 — VKOSPI, 미국 금리(TNX), 달러(DXY), 구리(HG=F)
-    반환: score_adj (±15 캡), details
+    """글로벌 매크로 — 공포지수(한국 ^VKOSPI / 미국 ^VIX), 미국 금리(TNX), 달러(DXY), 구리(HG=F)
+    수정 사항:
+      - 시장별 캐시(15분): 종목별 호출마다 yfinance 다운로드하던 성능 문제 해결
+      - 공포지수를 시장에 맞게 분기: 기존엔 미국 종목에도 VKOSPI가 적용되던 버그
+      - 캡 -12 ~ +8 (매크로 순풍 과대가산 방지, 역풍은 더 크게 — 의도된 보수성)
+    반환: score_adj, details
     """
     import yfinance as yf, pandas as pd
+    key = "kr" if is_korean else "us"
+    now = _time_mod.time()
+    cached = _macro_cache.get(key)
+    if cached and now - cached["ts"] < _MACRO_TTL:
+        return cached["data"]
+
     score = 0
     details: dict = {}
+    fear_sym = "^VKOSPI" if is_korean else "^VIX"
     try:
-        raw = yf.download(["^VKOSPI","^TNX","DX-Y.NYB","HG=F"],
+        raw = yf.download([fear_sym, "^TNX", "DX-Y.NYB", "HG=F"],
                           period="1mo", interval="1d",
                           auto_adjust=True, progress=False, threads=True)
         if raw.empty:
@@ -2935,34 +3044,39 @@ def calc_macro_overlay(is_korean: bool = True) -> dict:
             except Exception:
                 return None
 
-        # VKOSPI (한국 공포지수)
-        s = _s("^VKOSPI")
+        # 공포지수 (한국=VKOSPI 15/25/35, 미국=VIX 13/20/30 밴딩)
+        s = _s(fear_sym)
         if s is not None:
-            v = float(s.iloc[-1]); details["vkospi"] = round(v,1)
-            if   v < 15: score += 3;  details["vkospi_label"] = "안정"
-            elif v < 25: score += 0;  details["vkospi_label"] = "보통"
-            elif v < 35: score -= 4;  details["vkospi_label"] = "불안"
-            else:        score -= 10; details["vkospi_label"] = "공포"
+            v = float(s.iloc[-1])
+            lo, mid, hi = (15, 25, 35) if is_korean else (13, 20, 30)
+            details["fear_index"] = round(v, 1)
+            details["fear_symbol"] = fear_sym
+            # 하위 호환 키 (기존 프론트가 vkospi 키를 읽음)
+            details["vkospi"] = round(v, 1)
+            if   v < lo:  score += 3;  details["vkospi_label"] = "안정"
+            elif v < mid: score += 0;  details["vkospi_label"] = "보통"
+            elif v < hi:  score -= 4;  details["vkospi_label"] = "불안"
+            else:         score -= 10; details["vkospi_label"] = "공포"
 
         # 미국 10년물 금리
         s = _s("^TNX")
         if s is not None and len(s) >= 10:
-            now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
-            chg = round(now - d10, 2)
-            details["tnx"] = round(now, 2); details["tnx_chg"] = chg
+            now_v, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+            chg = round(now_v - d10, 2)
+            details["tnx"] = round(now_v, 2); details["tnx_chg"] = chg
             if   chg >  0.20: score -= 5; details["tnx_label"] = "급등↑"
             elif chg >  0.10: score -= 2; details["tnx_label"] = "상승"
             elif chg < -0.20: score += 3; details["tnx_label"] = "급락↓"
             elif chg < -0.10: score += 1; details["tnx_label"] = "하락"
             else:                          details["tnx_label"] = "보합"
 
-        # 달러 인덱스 — 한국 종목 외국인 영향
+        # 달러 인덱스 — 한국 종목 외국인 수급 영향 (한국 한정)
         if is_korean:
             s = _s("DX-Y.NYB")
             if s is not None and len(s) >= 10:
-                now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
-                pct = round((now-d10)/d10*100, 1)
-                details["dxy"] = round(now, 1); details["dxy_pct"] = pct
+                now_v, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+                pct = round((now_v - d10) / d10 * 100, 1)
+                details["dxy"] = round(now_v, 1); details["dxy_pct"] = pct
                 if   pct >  1.0: score -= 4; details["dxy_label"] = "강세(외인매도↑)"
                 elif pct >  0.4: score -= 2; details["dxy_label"] = "소폭강세"
                 elif pct < -1.0: score += 3; details["dxy_label"] = "약세(외인유입↑)"
@@ -2972,9 +3086,9 @@ def calc_macro_overlay(is_korean: bool = True) -> dict:
         # 구리 선물 (경기선행)
         s = _s("HG=F")
         if s is not None and len(s) >= 10:
-            now, d10 = float(s.iloc[-1]), float(s.iloc[-10])
-            pct = round((now-d10)/d10*100, 1)
-            details["copper"] = round(now, 2); details["copper_pct"] = pct
+            now_v, d10 = float(s.iloc[-1]), float(s.iloc[-10])
+            pct = round((now_v - d10) / d10 * 100, 1)
+            details["copper"] = round(now_v, 2); details["copper_pct"] = pct
             if   pct >  2.5: score += 2; details["copper_label"] = "급등(경기확장)"
             elif pct >  0.8: score += 1; details["copper_label"] = "상승"
             elif pct < -2.5: score -= 3; details["copper_label"] = "급락(경기우려)"
@@ -2982,7 +3096,10 @@ def calc_macro_overlay(is_korean: bool = True) -> dict:
             else:                         details["copper_label"] = "보합"
     except Exception:
         pass
-    return {"score_adj": max(-15, min(8, score)), "details": details}
+
+    data = {"score_adj": max(-12, min(8, score)), "details": details}
+    _macro_cache[key] = {"ts": now, "data": data}
+    return data
 
 
 def calc_volume_zscore(volume_series) -> dict:
@@ -3009,6 +3126,9 @@ def calc_volume_zscore(volume_series) -> dict:
 # ════════════════════════════════════════════════════════════════
 # 주식 검색 분석 — 메인 함수
 # ════════════════════════════════════════════════════════════════
+_fund_cache: dict = {}
+_FUND_TTL = 21600   # 6시간 — yf.Ticker().info는 호출당 수 초 소요, 랭킹 전종목 분석 병목
+
 def analyze_stock(ticker: str) -> dict:
     """
     개별 주식 기술적 분석 (한국/미국 모두 지원)
@@ -3019,27 +3139,36 @@ def analyze_stock(ticker: str) -> dict:
     if df.empty or len(df) < 30:
         raise ValueError(f"데이터를 불러올 수 없습니다: {ticker}")
 
-    # 펀더멘털 (PER, 시총, 배당, 베타, ROE, EPS성장)
+    # 펀더멘털 (PER, 시총, 배당, 베타, ROE, EPS성장) — 6시간 캐시
     pe_ratio = None;  market_cap = None;  dividend_yield = None
     beta = None;      roe = None;         eps_growth = None
-    try:
-        t_obj = yf.Ticker(ticker)
-        fi = t_obj.fast_info
-        market_cap = getattr(fi, 'market_cap', None)
-        full_info  = t_obj.info or {}
-        pe_ratio   = full_info.get('trailingPE') or full_info.get('forwardPE')
-        if pe_ratio and (pe_ratio < 0 or pe_ratio > 1000): pe_ratio = None
-        dy = full_info.get('dividendYield')
-        if dy and 0 < dy < 1:  dividend_yield = round(dy * 100, 2)  # 비율 → %
-        elif dy and dy >= 1:   dividend_yield = round(dy, 2)        # 이미 % 형식
-        beta = full_info.get('beta')
-        if beta is not None: beta = round(float(beta), 2)
-        roe_raw = full_info.get('returnOnEquity')
-        if roe_raw: roe = round(float(roe_raw) * 100, 2)
-        eg = full_info.get('earningsGrowth')
-        if eg is not None: eps_growth = round(float(eg) * 100, 1)
-    except Exception:
-        pass
+    _fc = _fund_cache.get(ticker)
+    if _fc and _time_mod.time() - _fc["ts"] < _FUND_TTL:
+        f = _fc["data"]
+        pe_ratio, market_cap, dividend_yield = f["pe"], f["mc"], f["dy"]
+        beta, roe, eps_growth = f["beta"], f["roe"], f["eg"]
+    else:
+        try:
+            t_obj = yf.Ticker(ticker)
+            fi = t_obj.fast_info
+            market_cap = getattr(fi, 'market_cap', None)
+            full_info  = t_obj.info or {}
+            pe_ratio   = full_info.get('trailingPE') or full_info.get('forwardPE')
+            if pe_ratio and (pe_ratio < 0 or pe_ratio > 1000): pe_ratio = None
+            dy = full_info.get('dividendYield')
+            if dy and 0 < dy < 1:  dividend_yield = round(dy * 100, 2)  # 비율 → %
+            elif dy and dy >= 1:   dividend_yield = round(dy, 2)        # 이미 % 형식
+            beta = full_info.get('beta')
+            if beta is not None: beta = round(float(beta), 2)
+            roe_raw = full_info.get('returnOnEquity')
+            if roe_raw: roe = round(float(roe_raw) * 100, 2)
+            eg = full_info.get('earningsGrowth')
+            if eg is not None: eps_growth = round(float(eg) * 100, 1)
+            _fund_cache[ticker] = {"ts": _time_mod.time(), "data": {
+                "pe": pe_ratio, "mc": market_cap, "dy": dividend_yield,
+                "beta": beta, "roe": roe, "eg": eps_growth}}
+        except Exception:
+            pass
 
     close = df['Close']
     high  = df['High']
@@ -3111,25 +3240,27 @@ def analyze_stock(ticker: str) -> dict:
     macro       = calc_macro_overlay(is_korean)
     vol_z       = calc_volume_zscore(df["Volume"].values)
 
-    # 신호 생성 (가중치 + 다이버전스 + 캔들 + 선행지표 + 매크로 + 품질)
-    signal_type, signal_text, confidence = _generate_signal(
+    # 시장환경 = regime + 매크로 합산 (한 그룹으로 캡 → 같은 '시장 상황'의 중복 가산 차단)
+    market_env_adj = (regime["score_adj"] or 0) + (macro["score_adj"] or 0)
+
+    # 신호 생성 (그룹 캡 점수 엔진) — vol_z는 점수에서 제외(표시용만), 거래량은 방향 조건부 단일 반영
+    signal_type, signal_text, score, score_breakdown = _generate_signal(
         current, ma20, ma50, ma200, rsi, macd_hist, bb_pct_b, vol_ratio,
         divergence=divergence, candle_pattern=candle_pattern, ma50_slope=ma50_slope,
         rs_score=rs_score, momentum_composite=momentum["composite"],
         vcp_detected=vcp["detected"],
-        regime_adj=regime["score_adj"],
+        market_env_adj=market_env_adj,
         liquidity_adj=liquidity["score_adj"],
         fundamental_adj=fundamental["score_adj"],
-        macro_adj=macro["score_adj"],
-        vol_z_adj=vol_z["score_adj"],
+        chg_pct=change_pct,
     )
 
     # ── KIS Open API: 외국인·기관 순매수 + 체결강도 (한국 종목만) ──
-    # 점수 가중치는 *비대칭*: 양의 보정은 +4 캡(과도 가산 방지), 음의 페널티는 -12까지
-    # 이미 기술/펀더멘털로 높은 점수를 받은 종목에 KIS가 추가로 큰 가산점 주는 걸 막음
+    # 보정은 *점수(매수-매도 축)* 에 적용 — 신호와 신뢰도는 모든 보정 후 마지막에 한 번 재산출.
+    # 비대칭 유지: 양의 보정은 +4 캡(과대평가 방지), 음의 페널티는 -12까지 (약점 발견용)
     kis_investor: dict = {}
     kis_trade:    dict = {}
-    kis_conf_adj_raw: int = 0   # 원시 보정치 (양·음 모두 포함)
+    kis_score_adj: int = 0   # 점수 보정치 (양·음 모두 포함)
     if is_korean:
         try:
             from kis_api import get_investor_trend, get_trade_strength, is_available as _kis_ok
@@ -3139,37 +3270,27 @@ def analyze_stock(ticker: str) -> dict:
                 kis_trade    = get_trade_strength(krx_code)
                 # 외국인·기관 신호 보정 (양 +4 / 음 -8)
                 sig = kis_investor.get("signal", "neutral")
-                if   sig == "strong_buy":  kis_conf_adj_raw += 4    # 동반 매수: 확인 정도만 가산
-                elif sig == "buy":         kis_conf_adj_raw += 2
-                elif sig == "sell":        kis_conf_adj_raw -= 5
-                elif sig == "strong_sell": kis_conf_adj_raw -= 8    # 동반 매도: 강한 경고 신호
+                if   sig == "strong_buy":  kis_score_adj += 4    # 동반 매수: 확인 정도만 가산
+                elif sig == "buy":         kis_score_adj += 2
+                elif sig == "sell":        kis_score_adj -= 5
+                elif sig == "strong_sell": kis_score_adj -= 8    # 동반 매도: 강한 경고 신호
                 # 체결강도 보정 (양 +2 / 음 -4)
                 cttr = kis_trade.get("cttr", 0)
-                if   cttr >= 80: kis_conf_adj_raw += 2
-                elif cttr >= 65: kis_conf_adj_raw += 1
-                elif cttr <= 20: kis_conf_adj_raw -= 4
-                elif cttr <= 35: kis_conf_adj_raw -= 2
-                # 양의 가산은 캡 적용 — 이미 점수가 높은 종목 과대평가 방지
-                # 70점 이상 종목은 KIS 양보너스를 절반만 반영, 90점 이상은 무시
-                if kis_conf_adj_raw > 0:
-                    if   confidence >= 90: kis_conf_adj_raw = 0
-                    elif confidence >= 70: kis_conf_adj_raw = min(kis_conf_adj_raw, 3) // 2
-                    else:                  kis_conf_adj_raw = min(kis_conf_adj_raw, 5)
-                # 음의 페널티는 그대로 (약점 발견용 — 풀로 반영)
-                confidence = max(0, min(100, confidence + kis_conf_adj_raw))
+                if   cttr >= 80: kis_score_adj += 2
+                elif cttr >= 65: kis_score_adj += 1
+                elif cttr <= 20: kis_score_adj -= 4
+                elif cttr <= 35: kis_score_adj -= 2
+                # 양의 가산은 캡 — 이미 점수가 높은 종목 과대평가 방지
+                if kis_score_adj > 0:
+                    if   score >= 90: kis_score_adj = 0
+                    elif score >= 70: kis_score_adj = min(kis_score_adj, 3) // 2
+                    else:             kis_score_adj = min(kis_score_adj, 5)
+                score = max(0, min(100, score + kis_score_adj))
         except ImportError:
             pass
         except Exception:
             pass
-    kis_conf_adj = kis_conf_adj_raw   # 출력용 별칭
-
-    # 손절/목표/R:R (기술적 지지선 + MA + 스윙로우/하이 전달)
-    targets = calc_position_targets(
-        current, atr_val, support, resistance, signal_type,
-        ma20=ma20, ma50=ma50, low_10d=low_10d, high_10d=high_10d
-    )
-    # 포지션 사이즈 (계좌 1천만원, 1% 리스크 가정 기본값)
-    position = calc_position_size(current, targets["stop"], 10_000_000, 1.0) if targets else None
+    kis_conf_adj = kis_score_adj   # 출력용 별칭 (하위 호환)
 
     # 분석 텍스트
     analysis_text = _generate_analysis_text(
@@ -3210,13 +3331,27 @@ def analyze_stock(ticker: str) -> dict:
                 krx_code = ticker.split(".")[0]
                 dart_insider     = get_insider_trades(krx_code)
                 dart_disclosures = get_recent_disclosures(krx_code)
-                # 임원 매매 신뢰도 보정 (비대칭: 양 +6 캡, 음 -6 풀)
+                # 임원 매매 점수 보정 (비대칭: 양 +6 캡, 음 -6 풀)
                 insider_adj = dart_insider.get("score_adj", 0)
-                if insider_adj > 0 and confidence >= 80:
+                if insider_adj > 0 and score >= 80:
                     insider_adj = 0   # 이미 높은 종목 과대평가 방지
-                confidence = max(0, min(100, confidence + insider_adj))
+                score = max(0, min(100, score + insider_adj))
         except Exception:
             pass
+
+    # ── 최종 신호·신뢰도 확정 ──────────────────────────────────
+    # 모든 보정(KIS/DART)이 점수에 반영된 뒤 *한 번만* 신호를 재산출.
+    # (기존: 보정으로 신뢰도만 바뀌고 신호 라벨은 그대로 → "강력매수 · 신뢰도 25" 모순 발생)
+    signal_type, signal_text, score = finalize_signal(score, score_breakdown.get("gates"))
+    confidence = conviction_from_score(score)   # 방향 무관 확신도 (매도도 강하면 높게 표시)
+
+    # 손절/목표/R:R — 최종 신호 기준으로 산출 (기술적 지지선 + MA + 스윙로우/하이)
+    targets = calc_position_targets(
+        current, atr_val, support, resistance, signal_type,
+        ma20=ma20, ma50=ma50, low_10d=low_10d, high_10d=high_10d
+    )
+    # 포지션 사이즈 (계좌 1천만원, 1% 리스크 가정 기본값)
+    position = calc_position_size(current, targets["stop"], 10_000_000, 1.0) if targets else None
 
     # 거래량 Z-score extras
     if vol_z["score_adj"] >= 3:
@@ -3307,7 +3442,9 @@ def analyze_stock(ticker: str) -> dict:
         "resistance": round(resistance, 2),
         "signal_type": signal_type,
         "signal_text": signal_text,
-        "confidence": confidence,
+        "score": score,                       # 매수-매도 축 점수 (0~100, 50=중립)
+        "score_breakdown": score_breakdown,   # 그룹별 기여도 + STRONG_* 게이트
+        "confidence": confidence,             # 방향 무관 확신도 = max(score, 100-score)
         "analysis_text": analysis_text,
         "forecasts": forecasts,
         "risk": risk,
@@ -3461,3 +3598,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+

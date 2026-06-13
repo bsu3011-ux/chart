@@ -690,6 +690,26 @@ function ChartModal({market,onClose}){
     chartRef.current=chart;csRef.current=cs;vsRef.current=vs;
     ma20Ref.current=ma20s;ma50Ref.current=ma50s;ma200Ref.current=ma200s;
 
+    // 매수/매도 마커 — localStorage 에서 직접 읽어 차트 초기화 시 1회 로드
+    const tradeMarkers=[];
+    try{
+      const isKR2=market.ticker.endsWith('.KS')||market.ticker.endsWith('.KQ');
+      const fmtMark=v=>isKR2?Math.round(v).toLocaleString('ko-KR')+'원':'$'+Number(v).toFixed(2);
+      const pf=JSON.parse(localStorage.getItem('trading_bot_portfolio')||'[]');
+      pf.filter(h=>h.ticker===market.ticker&&h.addedAt&&(h.buyPrice>0))
+        .forEach(h=>tradeMarkers.push({
+          time:h.addedAt.slice(0,10),position:'belowBar',
+          color:'#22c55e',shape:'arrowUp',text:'매수 '+fmtMark(h.buyPrice),size:1,
+        }));
+      const sr=JSON.parse(localStorage.getItem('trading_bot_sell_records')||'[]');
+      sr.filter(r=>r.ticker===market.ticker&&r.soldAt&&(r.sellPrice>0))
+        .forEach(r=>tradeMarkers.push({
+          time:r.soldAt.slice(0,10),position:'aboveBar',
+          color:'#ef4444',shape:'arrowDown',text:'매도 '+fmtMark(r.sellPrice),size:1,
+        }));
+      tradeMarkers.sort((a,b)=>a.time.localeCompare(b.time));
+    }catch(e){}
+
     const loadData=async(ivl)=>{
       setLoading(true);setError(null);
       try{
@@ -706,6 +726,20 @@ function ChartModal({market,onClose}){
         ma200s.setData(cands.length>=200?calcMAforChart(cands,200):[]);
         chart.timeScale().fitContent();
         setLastCandle(cands[cands.length-1]);
+        // 매수/매도 마커 적용
+        if(tradeMarkers.length){
+          const sortedCands=[...cands].sort((a,b)=>a.time.localeCompare(b.time));
+          const timesSet=new Set(cands.map(c=>c.time));
+          const snapped=[];
+          tradeMarkers.forEach(m=>{
+            if(timesSet.has(m.time)){snapped.push(m);}
+            else{const nx=sortedCands.find(c=>c.time>=m.time);if(nx)snapped.push({...m,time:nx.time});}
+          });
+          // 같은 날짜+위치 중복 제거
+          const seen=new Map();
+          const deduped=snapped.filter(m=>{const k=m.time+m.position;if(seen.has(k))return false;seen.set(k,true);return true;});
+          if(deduped.length) cs.setMarkers(deduped.sort((a,b)=>a.time.localeCompare(b.time)));
+        }
         // RSI/MACD 차트 업데이트
         if(rsiChartRef.current){
           const rsiSeries=rsiChartRef.current._rsiSeries;
@@ -3313,6 +3347,26 @@ function HoldingsMonitorPage(){
 
   const srTotalPnl=sellRecords.reduce((a,r)=>a+(r.pnl||0),0);
   const srWinRate=sellRecords.length>0?sellRecords.filter(r=>(r.pnl||0)>0).length/sellRecords.length*100:0;
+  const [srPrices,setSrPrices]=useState({});
+  const [srLoadingPrices,setSrLoadingPrices]=useState(false);
+  const fetchSrPrices=useCallback(async()=>{
+    const tickers=[...new Set(sellRecords.map(r=>r.ticker))];
+    if(!tickers.length) return;
+    setSrLoadingPrices(true);
+    const prices={};
+    await Promise.all(tickers.map(async t=>{
+      try{
+        const r=await fetch(`${API_BASE}/api/chart?ticker=${encodeURIComponent(t)}&interval=1d`);
+        const d=await r.json();
+        const c=d.candles||[];
+        if(c.length) prices[t]=c[c.length-1].close;
+      }catch(e){}
+    }));
+    setSrPrices(prices);setSrLoadingPrices(false);
+  },[sellRecords]);
+  useEffect(()=>{
+    if(monitorTab==="sells"&&sellRecords.length>0&&Object.keys(srPrices).length===0)fetchSrPrices();
+  },[monitorTab]);
 
   const [tgMsg,setTgMsg]=useState("");
   const triggerCheck=async()=>{
@@ -3830,14 +3884,26 @@ function HoldingsMonitorPage(){
                   </div>
                 </div>
               </div>
+              {/* 현재가 조회 버튼 */}
+              <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+                <button onClick={fetchSrPrices} disabled={srLoadingPrices}
+                  style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${C.cyan}44`,
+                    background:C.cyan+"12",color:srLoadingPrices?C.muted:C.cyan,
+                    fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                  {srLoadingPrices?"⟳ 조회 중...":"🔄 현재가 조회"}
+                </button>
+              </div>
               {sellRecords.map((r,i)=>{
                 const win=(r.pnl||0)>=0;
+                const curPrice=srPrices[r.ticker];
+                const postChgPct=curPrice&&r.sellPrice>0?(curPrice-r.sellPrice)/r.sellPrice*100:null;
+                const postWin=postChgPct!=null&&postChgPct<0; // 매도 후 하락 = 잘 판 것
                 return(
                   <div key={i} style={{padding:"11px 12px",borderRadius:12,marginBottom:8,
                     background:C.cardGradient,
                     border:`1px solid ${win?C.green+"44":C.red+"44"}`,
                     borderLeft:`3px solid ${win?C.green:C.red}`}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                       <div style={{display:"flex",alignItems:"center",gap:7}}>
                         {r.flag&&<span style={{fontSize:18}}>{r.flag}</span>}
                         <div>
@@ -3852,10 +3918,12 @@ function HoldingsMonitorPage(){
                         <div style={{color:C.muted,fontSize:9}}>{(r.soldAt||"").slice(0,10)}</div>
                       </div>
                     </div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:4,textAlign:"center"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:4,textAlign:"center"}}>
                       {[
                         {label:"매수가",val:fmtP(r.buyPrice,r.ticker),color:C.text},
                         {label:"매도가",val:fmtP(r.sellPrice,r.ticker),color:win?C.green:C.red},
+                        {label:"현재가",val:curPrice?fmtP(curPrice,r.ticker):srLoadingPrices?"⟳":"-",
+                          color:curPrice?(curPrice>r.sellPrice?C.red:C.green):C.muted},
                         {label:"실현손익",val:`${(r.pnl||0)>=0?"+":""}${fmtP(r.pnl||0,r.ticker)}`,color:win?C.green:C.red},
                       ].map(({label,val,color})=>(
                         <div key={label} style={{padding:"5px 2px",borderRadius:7,
@@ -3865,6 +3933,16 @@ function HoldingsMonitorPage(){
                         </div>
                       ))}
                     </div>
+                    {postChgPct!=null&&(
+                      <div style={{marginTop:6,padding:"4px 8px",borderRadius:6,textAlign:"center",
+                        background:postWin?"rgba(34,197,94,0.07)":"rgba(239,68,68,0.07)",
+                        border:`1px solid ${postWin?C.green:C.red}22`}}>
+                        <span style={{color:postWin?C.green:C.red,fontSize:9,fontWeight:700}}>
+                          {postWin?"✅ 매도 후":"⚠️ 매도 후"} {postChgPct>=0?"+":""}{postChgPct.toFixed(2)}%
+                          {postWin?" 하락 (잘 팔았음)":" 상승 (추가 상승 여지)"}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               })}

@@ -2399,27 +2399,41 @@ def index():
 # 배포 시크릿은 반드시 환경변수로 주입. 소스에 하드코딩 시 저장소 열람만으로
 # HMAC 위조 → git pull + 서버 강제 재시작이 가능했음 (치명적).
 DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "")
+_deploy_log: list = []   # 최근 10건 메모리 보관
+
+@app.route('/deploy/log')
+def deploy_log():
+    """최근 배포 로그 조회 (디버그용)"""
+    return jsonify({"log": _deploy_log[-10:]})
 
 @app.route('/deploy', methods=['POST'])
 def deploy():
     """GitHub push → 자동 git pull & 서버 재시작 (DEPLOY_SECRET 환경변수 필수)"""
+    ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     if not DEPLOY_SECRET:
+        _deploy_log.append({"ts": ts, "result": "ERROR: DEPLOY_SECRET 미설정"})
         return jsonify({"error": "deploy disabled (DEPLOY_SECRET 미설정)"}), 503
     sig = request.headers.get('X-Hub-Signature-256', '')
     body = request.get_data()
     expected = 'sha256=' + hmac.new(DEPLOY_SECRET.encode(), body, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
+        _deploy_log.append({"ts": ts, "result": f"ERROR: 서명 불일치 (received={sig[:20]})"})
         return jsonify({"error": "invalid signature"}), 403
 
     def do_deploy():
         import time
         time.sleep(0.5)
         try:
-            subprocess.run(['git', 'pull', 'origin', 'main'], cwd=BASE_DIR, timeout=30)
+            res = subprocess.run(
+                ['git', 'pull', 'origin', 'main'],
+                cwd=BASE_DIR, timeout=30, capture_output=True, text=True
+            )
+            out = (res.stdout + res.stderr).strip()
+            _deploy_log.append({"ts": ts, "result": f"OK: {out[:200]}"})
+            print(f"[deploy] git pull 결과: {out}")
         except Exception as e:
+            _deploy_log.append({"ts": ts, "result": f"ERROR: git pull 실패 — {e}"})
             print(f"[deploy] git pull error: {e}")
-        # run.sh 루프가 서버를 감시하므로 pkill만 하면 자동 재시작됨
-        # (재시작 후 서버가 뜨면서 _run_bot_background가 자동 실행됨)
         subprocess.Popen(
             'sleep 2 && pkill -f "python3 server.py"',
             shell=True,
@@ -2427,6 +2441,7 @@ def deploy():
         )
 
     threading.Thread(target=do_deploy, daemon=True).start()
+    _deploy_log.append({"ts": ts, "result": "STARTED: 배포 시작됨"})
     return jsonify({"status": "배포 시작됨", "message": "git pull 후 서버 재시작 중..."})
 
 

@@ -3196,7 +3196,10 @@ function PortfolioPage(){
                         </div>
                       </div>
                       <div style={{textAlign:"right"}}>
-                        <div style={{color:win?C.green:C.red,fontSize:14,fontWeight:900}}>
+                        <div style={{color:win?C.green:C.red,fontSize:15,fontWeight:900}}>
+                          {fmtP(r.sellPrice,r.ticker)}
+                        </div>
+                        <div style={{color:win?C.green:C.red,fontSize:11}}>
                           {(r.pnlPct||0)>=0?"+":""}{(r.pnlPct||0).toFixed(2)}%
                         </div>
                         <div style={{color:C.muted,fontSize:9}}>{(r.soldAt||"").slice(0,10)}</div>
@@ -3912,7 +3915,10 @@ function HoldingsMonitorPage(){
                         </div>
                       </div>
                       <div style={{textAlign:"right"}}>
-                        <div style={{color:win?C.green:C.red,fontSize:14,fontWeight:900}}>
+                        <div style={{color:win?C.green:C.red,fontSize:15,fontWeight:900}}>
+                          {fmtP(r.sellPrice,r.ticker)}
+                        </div>
+                        <div style={{color:win?C.green:C.red,fontSize:11}}>
                           {(r.pnlPct||0)>=0?"+":""}{(r.pnlPct||0).toFixed(2)}%
                         </div>
                         <div style={{color:C.muted,fontSize:9}}>{(r.soldAt||"").slice(0,10)}</div>

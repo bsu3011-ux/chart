@@ -10,36 +10,25 @@
 """
 
 import os, json, math, asyncio, datetime, threading, urllib.request, hmac, hashlib, subprocess
-
-def _load_dotenv_fallback(path):
-    """python-dotenv 없어도 .env 파일을 직접 파싱해 환경변수에 주입"""
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, val = line.partition("=")
-                key = key.strip()
-                val = val.strip().strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = val
-    except Exception:
-        pass
-
-_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-_env_loaded = os.path.exists(_env_path)
-try:
-    from dotenv import load_dotenv
-    load_dotenv(_env_path)
-except ImportError:
-    pass
-# python-dotenv 가 경로/포맷 문제로 못 읽는 경우 대비해 항상 수동 파서도 실행
-# (이미 존재하는 환경변수는 건드리지 않음 → 중복/충돌 없음)
-_load_dotenv_fallback(_env_path)
-
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
+
+# ── .env 파일 로드 (python-dotenv 없이) ──
+def _load_dotenv():
+    _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.exists(_env_path):
+        return
+    with open(_env_path, encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line:
+                continue
+            _k, _, _v = _line.partition("=")
+            _k = _k.strip()
+            _v = _v.strip().strip('"').strip("'")
+            if _k and _k not in os.environ:  # 환경변수 우선, .env는 폴백
+                os.environ[_k] = _v
+_load_dotenv()
 
 def _clean(obj):
     """NaN/Infinity → None + numpy 타입 → 파이썬 기본형 (JSON 직렬화 안전)"""
@@ -66,6 +55,8 @@ import time, re as _re
 from multi_market_bot_v4 import (
     main as run_bot, MARKETS, load_data, analyze_market, save_json,
     analyze_stock, POPULAR_STOCKS, backtest_strategy, backtest_stock,
+    finalize_signal, conviction_from_score, score_to_signal,
+    calc_position_targets, calc_position_size,
 )
 
 # ── 외부 충격/뉴스 캐시 ──
@@ -382,9 +373,21 @@ def _build_market_signal_context(
     mkt: dict,
     sec: dict,
     is_kosdaq: bool = False,
+    is_korean: bool = True,
 ) -> dict:
-    """종목 등락을 시장·섹터와 비교 → 원인 분류 + 신뢰도 조정값 반환"""
-    ref_chg = (mkt.get("kosdaq_chg") if is_kosdaq else mkt.get("kospi_chg")) or 0
+    """종목 등락을 시장·섹터와 비교 → 원인 분류 + *점수* 조정값 반환
+
+    수정 사항:
+      - 미국 종목 기준지수: 기존엔 무조건 KOSPI와 비교하던 버그 → S&P500(spx_chg) 사용
+      - `or 0` 으로 None 가드가 무력화되던 버그 수정
+      - conf_adj 의 의미를 '매수-매도 축 점수' 보정으로 통일:
+        매도 신호 확인(시장 전반 하락) → 점수 *하향*(-) = 매도 확신 강화
+        (기존엔 +5로 점수를 중립 쪽으로 올려 신호를 오히려 약화시키는 방향 모순)
+    """
+    if is_korean:
+        ref_chg = mkt.get("kosdaq_chg") if is_kosdaq else mkt.get("kospi_chg")
+    else:
+        ref_chg = mkt.get("spx_chg")
     sec_chg = sec.get("avg_chg")
 
     vs_market = round(stock_chg - ref_chg, 2) if ref_chg is not None else None
@@ -405,17 +408,17 @@ def _build_market_signal_context(
         else:
             cause = "market_driven"; cause_label = f"시장 전반 영향 (vs시장 {vs_market:+.1f}p)"
 
-    # 신뢰도 조정
+    # 점수 조정 (매수-매도 축: 음수 = 약세 방향)
     adj = 0
     mkt_state = mkt.get("market_state","unknown")
     if signal_type in ("STRONG_BUY","BUY"):
         if mkt_state == "crash":  adj -= 20
         elif mkt_state == "bear": adj -= 10
-        if cause == "stock_specific": adj -= 10   # 시장보다 훨씬 나쁘면 매수 신뢰도↓
-        if cause == "stock_strong":   adj += 5    # 시장보다 강하면 매수 신뢰도↑
+        if cause == "stock_specific": adj -= 10   # 시장보다 훨씬 나쁘면 매수 점수↓
+        if cause == "stock_strong":   adj += 5    # 시장보다 강하면 매수 점수↑
     elif signal_type in ("SELL","STRONG_SELL"):
-        if cause == "market_driven":  adj += 5    # 시장 전반 하락이면 매도 신호 신뢰도↑ (확인)
-        if mkt_state in ("bull","surge") and cause == "stable": adj -= 10  # 강세장 속 보합은 매도 신호 경계
+        if cause == "market_driven":  adj -= 5    # 시장 전반 하락 = 매도 확인 → 점수 추가 하향
+        if mkt_state in ("bull","surge") and cause == "stable": adj += 10  # 강세장 속 보합 → 매도 약화
 
     note_parts = []
     if mkt.get("kospi_chg") is not None or mkt.get("kosdaq_chg") is not None:
@@ -442,23 +445,21 @@ BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 app = Flask(__name__, static_folder=STATIC_DIR)
-CORS(app)  # 모든 도메인 허용
+# CORS: 기본은 모든 도메인 허용(하위 호환). 운영 시 CORS_ORIGINS="https://mydomain.com" 으로 제한 권장
+_cors_origins = os.environ.get("CORS_ORIGINS", "*")
+CORS(app, origins=[o.strip() for o in _cors_origins.split(",")] if _cors_origins != "*" else "*")
 
-# ── 응답 gzip 압축 + 정적 라이브러리 장기 캐시 ──────────────────
-# 라이브러리를 CDN 대신 로컬 서빙하므로 압축이 없으면 첫 로딩이 수 MB.
-# gzip으로 babel(3MB)→~700KB, index.html(235KB)→~40KB 수준으로 감소.
+# ── [patch_perf] 응답 gzip 압축 + 정적 라이브러리 장기 캐시 ──────────
 import gzip as _gzip
 
 _GZ_TYPES = ("text/html", "text/css", "application/json",
              "application/javascript", "text/javascript", "image/svg+xml")
-_gz_lib_cache: dict = {}   # {경로: (mtime, gz_bytes)} — /static/lib 파일 압축 결과 재사용
+_gz_lib_cache: dict = {}   # {경로: (mtime, gz_bytes)}
 
 @app.after_request
 def _compress_and_cache(resp):
-    # 1) /static/lib/* 는 불변 파일 → 브라우저 7일 캐시 (재방문 시 재다운로드 없음)
     if request.path.startswith("/static/lib/"):
         resp.headers["Cache-Control"] = "public, max-age=604800"
-    # 2) gzip 압축 (클라이언트 지원 + 텍스트 계열 + 1KB 이상일 때만)
     try:
         if resp.status_code != 200:
             return resp
@@ -468,7 +469,6 @@ def _compress_and_cache(resp):
         if ctype not in _GZ_TYPES:
             return resp
         if resp.direct_passthrough:
-            # send_from_directory 등 스트리밍 응답 → 메모리로 올려 압축
             data = b"".join(resp.response) if not isinstance(resp.response, (bytes, str)) else resp.response
             if isinstance(data, str):
                 data = data.encode("utf-8")
@@ -476,7 +476,6 @@ def _compress_and_cache(resp):
             data = resp.get_data()
         if len(data) < 1024:
             return resp
-        # /static/lib 파일은 압축 결과를 메모리에 캐시 (매 요청 재압축 방지)
         if request.path.startswith("/static/lib/"):
             fpath = os.path.join(BASE_DIR, request.path.lstrip("/"))
             try:
@@ -499,15 +498,37 @@ def _compress_and_cache(resp):
         resp.headers["Content-Length"] = str(len(gz))
         resp.headers.setdefault("Vary", "Accept-Encoding")
     except Exception:
-        pass   # 압축 실패 시 원본 그대로 반환 (서비스 영향 없음)
+        pass
     return resp
+
+
+# ── 입력 검증 / 관리자 인증 ──────────────────────────────────
+_TICKER_RE = _re.compile(r'^[A-Za-z0-9.\-^=]{1,15}$')
+
+def _valid_ticker(t: str) -> bool:
+    """yfinance 티커 형식만 허용 — 임의 문자열로 인한 리소스 낭비·로그 오염 차단"""
+    return bool(t) and bool(_TICKER_RE.match(t))
+
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+
+def _is_admin() -> bool:
+    """무거운 작업(전체 분석, 공시 생성, 텔레그램 발송 등) 트리거 보호.
+    ADMIN_TOKEN 설정 시: X-Admin-Token 헤더 또는 ?token= 일치 필요.
+    미설정 시: 모두 허용 (개인용 기본 동작 유지 — 휴대폰 등 원격에서 버튼이 막히지 않도록).
+    ※ 서버가 공인 IP에 노출돼 있다면 반드시 .env에 ADMIN_TOKEN을 설정하고
+      앱 설정 탭에 같은 값을 입력하세요."""
+    if ADMIN_TOKEN:
+        tok = request.headers.get("X-Admin-Token") or request.args.get("token", "")
+        return hmac.compare_digest(tok, ADMIN_TOKEN)
+    return True
 
 OUTPUT_DIR           = os.environ.get("OUTPUT_DIR", os.path.join(BASE_DIR, "output"))
 SIGNALS_FILE         = os.path.join(OUTPUT_DIR, "signals_v4.json")
 SIGNAL_HISTORY_FILE  = os.path.join(OUTPUT_DIR, "signal_history.json")
-BACKTEST_CACHE_FILE  = os.path.join(OUTPUT_DIR, "backtest_cache_v2.json")  # v2: stop/target 전략 반영
+BACKTEST_CACHE_FILE  = os.path.join(OUTPUT_DIR, "backtest_cache_v3.json")  # v3: T1 부분익절+트레일링 스탑 반영
 PORTFOLIO_FILE         = os.path.join(OUTPUT_DIR, "portfolio.json")
 PORTFOLIO_SIGNALS_FILE = os.path.join(OUTPUT_DIR, "portfolio_signals.json")
+SELL_RECORDS_FILE      = os.path.join(OUTPUT_DIR, "sell_records.json")
 DART_CORP_CACHE_FILE   = os.path.join(OUTPUT_DIR, "dart_corp_cache.json")
 os.makedirs(OUTPUT_DIR,   exist_ok=True)
 
@@ -618,12 +639,8 @@ def _build_krx_cache():
             if code_col is None or name_col is None:
                 continue
             for _, row in df.iterrows():
-                code = str(row[code_col]).strip().lstrip("$").zfill(6)
-                if not code.isdigit() or len(code) != 6:
-                    continue
-                name = str(row[name_col]).strip()
-                if not name or name.isdigit():
-                    continue
+                code = str(row[code_col]).zfill(6)
+                name = str(row[name_col])
                 stocks[code + suffix] = {"name": name, "market": market, "krx_code": code}
         print(f"[KRX] FDR 성공: {len(stocks)}개")
     except Exception as e1:
@@ -785,10 +802,7 @@ _DART_IMPORTANT = {"A", "B", "D", "I"}
 
 
 def _dart_api_key() -> str:
-    # 다양한 키 이름 허용 (DART_API_KEY / DART_KEY / OPENDART_API_KEY)
-    return (os.environ.get("DART_API_KEY")
-            or os.environ.get("DART_KEY")
-            or os.environ.get("OPENDART_API_KEY", ""))
+    return os.environ.get("DART_API_KEY", "")
 
 
 def _dart_get(path: str, params: dict, timeout: int = 10) -> dict:
@@ -988,8 +1002,22 @@ def _build_dart_report(force: bool = False):
         lines.append(f'  🔗 dart.fss.or.kr → {code6}')
         sections.append("\n".join(lines))
 
+    def _save_dart_report(sections_plain, header_plain, total):
+        try:
+            with open(DART_REPORT_FILE, "w", encoding="utf-8") as f:
+                json.dump({
+                    "updated": datetime.datetime.now().isoformat(timespec="seconds"),
+                    "header": header_plain,
+                    "sections": sections_plain,
+                    "total": total,
+                    "message": "" if sections_plain else "최근 7일 보유종목 공시가 없습니다.",
+                }, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"[DART] 보고서 파일 저장 실패: {e}")
+
     if not sections:
-        print("[DART] 공시 내용 없음 — 메시지 생략")
+        print("[DART] 공시 내용 없음 — 보고서 파일만 갱신")
+        _save_dart_report([], "보유종목 공시 보고", 0)
         return
 
     ts  = datetime.datetime.now().strftime("%m/%d %H:%M")
@@ -1006,6 +1034,10 @@ def _build_dart_report(force: bool = False):
 
     if len(body) > 4000:
         body = body[:4000] + "\n…(이하 생략)"
+
+    # 앱 내 열람용 파일 저장 (HTML 태그 제거한 평문)
+    _strip = lambda s: s.replace("<b>", "").replace("</b>", "")
+    _save_dart_report([_strip(s) for s in sections], _strip(header), total_cnt)
 
     send_telegram(body)
     print(f"[DART] 보고서 전송 완료: {len(sections)}개 종목, {total_cnt}건 공시")
@@ -1059,6 +1091,13 @@ def _check_portfolio_signals():
 
                 prev_sig = _portfolio_sig_prev.get(ticker)
                 _portfolio_sig_prev[ticker] = new_sig  # 갱신
+
+                # 과거 신호 타임라인 적재 (변경 시에만 기록됨)
+                try:
+                    _append_stock_sig_history(ticker, h.get("name", ticker), new_sig,
+                                              res.get("score"), new_conf, new_price)
+                except Exception:
+                    pass
 
                 if prev_sig is None:
                     continue   # 첫 체크 — 기준값만 저장, 알림 없음
@@ -1235,24 +1274,38 @@ def get_signals():
         return jsonify({"error": "아직 분석 결과가 없습니다. /api/run 으로 실행하세요."}), 404
 
 
+_manual_run_lock = threading.Lock()
+_manual_run_busy = False
+
 @app.route('/api/run')
 def run_analysis():
-    """수동으로 봇 실행"""
-    try:
-        # 비동기 함수를 동기로 실행
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_bot())
-        loop.close()
-        
-        if os.path.exists(SIGNALS_FILE):
-            with open(SIGNALS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            return jsonify({"status": "success", "data": data})
-        else:
-            return jsonify({"status": "error", "message": "분석 완료했지만 파일 생성 실패"}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    """수동으로 봇 실행 (관리자 전용, 백그라운드)
+    기존 문제: 무인증 + 동기 실행(수 분간 워커 점유) → 누구나 호출 가능한 DoS 벡터,
+    동시 호출 시 signals_v4.json 동시 쓰기 충돌 가능."""
+    global _manual_run_busy
+    if not _is_admin():
+        return jsonify({"status": "forbidden",
+                        "message": "관리자 토큰 필요 (X-Admin-Token 헤더 또는 ?token=)"}), 403
+    with _manual_run_lock:
+        if _manual_run_busy:
+            return jsonify({"status": "busy", "message": "이미 분석이 진행 중입니다"}), 409
+        _manual_run_busy = True
+
+    def _bg_run():
+        global _manual_run_busy
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(run_bot())
+            loop.close()
+        except Exception as e:
+            print(f"[run] 수동 실행 오류: {e}")
+        finally:
+            _manual_run_busy = False
+
+    threading.Thread(target=_bg_run, daemon=True).start()
+    return jsonify({"status": "started",
+                    "message": "분석을 백그라운드에서 시작했습니다. /api/signals 로 결과 확인"}), 202
 
 
 @app.route('/api/signal_history')
@@ -1267,7 +1320,9 @@ def get_signal_history():
 
 @app.route('/api/telegram_test')
 def telegram_test():
-    """텔레그램 연결 테스트"""
+    """텔레그램 연결 테스트 (관리자 전용 — 무인증 시 외부인이 알림 스팸 가능)"""
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "관리자 토큰 필요"}), 403
     ok = send_telegram("✅ 멀티마켓 봇 텔레그램 연결 테스트 성공!")
     return jsonify({"ok": ok, "token_set": bool(TELEGRAM_TOKEN), "chat_id_set": bool(TELEGRAM_CHAT_ID)})
 
@@ -1288,126 +1343,13 @@ def status():
         commit = "unknown"
 
     import kis_api as _ka
-    import dart_api as _da
     return jsonify({
         "status": "running",
-        "version": "4.1",
+        "version": "4.2",
         "commit": commit,
         "markets": len(MARKETS),
         "last_updated": last_updated,
-        "signals_file": SIGNALS_FILE,
         "kis_available": _ka.is_available(),
-        "dart_available": _da.is_available(),
-    })
-
-
-@app.route('/api/env_diag')
-def env_diag():
-    """환경변수/.env 로딩 진단 (값은 노출하지 않고 존재 여부·길이만)
-    GET /api/env_diag
-    """
-    def _mask(name):
-        v = os.environ.get(name, "")
-        if not v:
-            return {"set": False}
-        return {"set": True, "len": len(v), "head": v[:3] + "…"}
-
-    # .env 파일에 적힌 키 목록 (값 제외)
-    env_file_keys = []
-    try:
-        if os.path.exists(_env_path):
-            with open(_env_path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        env_file_keys.append(line.partition("=")[0].strip())
-    except Exception:
-        pass
-
-    return jsonify({
-        "env_file_path":   _env_path,
-        "env_file_exists": os.path.exists(_env_path),
-        "env_file_keys":   env_file_keys,   # .env 안에 실제로 적힌 키 이름들
-        "checked": {
-            "DART_API_KEY":     _mask("DART_API_KEY"),
-            "DART_KEY":         _mask("DART_KEY"),
-            "OPENDART_API_KEY": _mask("OPENDART_API_KEY"),
-            "KIS_APP_KEY":      _mask("KIS_APP_KEY"),
-            "KIS_APP_SECRET":   _mask("KIS_APP_SECRET"),
-            "TELEGRAM_TOKEN":   _mask("TELEGRAM_TOKEN"),
-        },
-        "dart_available": __import__("dart_api").is_available(),
-    })
-
-
-@app.route('/api/clear_krx_cache')
-def clear_krx_cache():
-    """KRX 캐시 초기화 → 재빌드 트리거"""
-    global _krx_cache
-    _krx_cache = {}
-    try:
-        if os.path.exists(KRX_CACHE_FILE):
-            os.remove(KRX_CACHE_FILE)
-    except Exception:
-        pass
-    threading.Thread(target=_build_krx_cache, daemon=True).start()
-    return jsonify({"status": "ok", "message": "KRX 캐시 초기화 및 재빌드 시작"})
-
-
-@app.route('/api/dart_detail')
-def dart_detail():
-    """DART 공시 상세: 재무요약 + 분류 공시 + 임원 거래 내역
-    GET /api/dart_detail?ticker=403870.KQ
-    """
-    ticker = request.args.get('ticker', '').strip().upper()
-    if not ticker:
-        return jsonify({"error": "ticker 필요"}), 400
-    if not _dart_api_key():
-        return jsonify({"error": "DART API 미설정"}), 503
-
-    code6 = ticker.split(".")[0]
-    if not code6.isdigit():
-        return jsonify({"error": "한국 종목만 지원"}), 400
-
-    corp = _get_dart_corp(code6)
-    if not corp:
-        return jsonify({"error": f"{code6} 기업 정보 없음"}), 404
-
-    corp_code = corp["corp_code"]
-    corp_name = corp.get("corp_name") or corp.get("stock_name") or code6
-
-    # 1) 공시 목록 (최근 30일, 최대 7건)
-    raw_discs = _get_dart_disclosures(corp_code, days=30)
-    disclosures = []
-    for d in raw_discs[:7]:
-        ptype    = d.get("pblntf_ty", "")
-        title    = d.get("report_nm", "")
-        raw_dt   = (d.get("rcept_dt") or "")[:8]
-        date_fmt = f"{raw_dt[4:6]}/{raw_dt[6:]}" if len(raw_dt) == 8 else raw_dt
-        disclosures.append({
-            "title":     title[:40],
-            "date":      date_fmt,
-            "type":      _DART_PBLNTF_LABEL.get(ptype, "기타"),
-            "important": ptype in _DART_IMPORTANT,
-        })
-
-    # 2) 재무 요약 (최근 분기)
-    fin_raw = _get_dart_financial_summary(corp_code)
-    fin_fmt = {k: _fmt_dart_amount(v) for k, v in fin_raw.items()}
-
-    # 3) 임원 매매 (60일, 상세 포함)
-    try:
-        from dart_api import get_insider_trades
-        insider = get_insider_trades(code6, days=60)
-    except Exception:
-        insider = {}
-
-    return jsonify({
-        "corp_name":   corp_name,
-        "code6":       code6,
-        "disclosures": disclosures,
-        "financial":   fin_fmt,
-        "insider":     insider,
     })
 
 
@@ -1425,26 +1367,76 @@ def get_stock_analysis():
     if ticker.isdigit() and len(ticker) == 6:
         ticker = ticker + ".KS"
 
+    if not _valid_ticker(ticker):
+        return jsonify({"error": "유효하지 않은 티커 형식입니다"}), 400
+
     try:
         result = analyze_stock(ticker)
 
-        # 한국 종목 이름이 숫자/티커뿐이면 네이버에서 한글명 보완
-        is_kr = ticker.endswith(".KS") or ticker.endswith(".KQ")
-        if is_kr and ticker not in POPULAR_STOCKS:
-            _nm = result.get("name") or ""
-            if (not _nm) or _nm.replace(".", "").replace("-", "").isdigit() or _nm == ticker:
-                kr_nm = _resolve_kr_name(ticker)
-                if kr_nm:
-                    result["name"] = kr_nm
+        # ── 외부 충격/뉴스 + 시장/섹터 컨텍스트를 *점수*에 통합 ─────────
+        # 원칙: 모든 보정은 매수-매도 축 점수에 적용 → 마지막에 신호·신뢰도 한 번만 재산출.
+        # (기존: 신뢰도만 사후 변경되고 신호 라벨은 그대로 → 라벨-점수 모순,
+        #  매도 확인 보정이 점수를 중립 쪽으로 올리는 방향 모순, 기록은 보정 전 값 사용)
+        name = result.get("name") or POPULAR_STOCKS.get(ticker, {}).get("name", "")
+        ext  = _get_external_signals(ticker, name)
+        result["ext"] = _clean(ext)
 
-        # Background: record non-neutral signals for accuracy tracking
+        mkt    = _get_market_context()
+        sector = result.get("sector") or POPULAR_STOCKS.get(ticker, {}).get("sector", "")
+        sec    = _get_sector_context(sector) if sector else {}
+        is_kq  = ticker.endswith(".KQ")
+        is_kr  = bool(result.get("is_korean"))
+        pre_sig = result.get("signal_type", "NEUTRAL")
+        ctx    = _build_market_signal_context(
+            result.get("change_pct") or 0, pre_sig,
+            result.get("confidence") or 0, mkt, sec, is_kq, is_korean=is_kr,
+        )
+
+        score     = result.get("score")
+        gates     = (result.get("score_breakdown") or {}).get("gates")
+        if score is not None:
+            ext_adj = ext.get("confidence_adj", 0) or 0
+            ctx_adj = ctx.get("conf_adj", 0) or 0
+            # 이벤트 그룹 캡: 쇼크·뉴스·시장상태는 같은 '오늘의 사건'에서 파생 →
+            # 합산 후 -35 ~ +10 으로 제한 (3중 중복 감점 방지)
+            event_adj = max(-35, min(10, ext_adj + ctx_adj))
+            new_score = max(0, min(100, score + event_adj))
+            result["score"] = new_score
+            result["event_adj"] = event_adj
+
+            # 최종 신호·신뢰도 재산출 (게이트 강등 시 점수도 79/21로 클램핑되어 반환)
+            new_sig, new_txt, new_score = finalize_signal(new_score, gates)
+            result["score"] = new_score
+            result["signal_type"] = new_sig
+            result["signal_text"] = new_txt
+            result["confidence"]  = conviction_from_score(new_score)
+            if ext_adj < 0:
+                result["confidence_adj_reason"] = _build_adj_reason(ext)
+
+            # 보정으로 방향이 바뀌었으면 진입/청산 전략 재계산 (롱↔숏↔무방향)
+            def _direction(s):
+                if s in ("STRONG_BUY", "BUY"): return "long"
+                if s in ("STRONG_SELL", "SELL"): return "short"
+                return "none"
+            if _direction(new_sig) != _direction(pre_sig):
+                tg = calc_position_targets(
+                    result.get("price") or 0, result.get("atr"),
+                    result.get("support"), result.get("resistance"), new_sig,
+                    ma20=result.get("ma20"), ma50=result.get("ma50"),
+                ) if result.get("atr") else None
+                result["targets"]  = tg
+                result["position"] = (calc_position_size(result.get("price") or 0, tg["stop"])
+                                       if tg else None)
+
+        # ── 신호 기록은 *최종* 값으로 (적중률 캘리브레이션이 사용자 표시값과 일치하도록) ──
         sig_type = result.get("signal_type", "")
         if sig_type in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL"):
             _price  = result.get("price") or 0
             _conf   = result.get("confidence") or 0
+            _score  = result.get("score")
             _name   = result.get("name") or POPULAR_STOCKS.get(ticker, {}).get("name") or ticker
             _indic  = {"rsi": result.get("rsi"), "macd_hist": result.get("macd_hist"),
-                       "rs_score": result.get("rs_score")}
+                       "rs_score": result.get("rs_score"), "score": _score}
             def _bg_record(t=ticker, st=sig_type, c=_conf, p=_price, i=_indic, n=_name):
                 try:
                     from signal_tracker import record_signal
@@ -1453,33 +1445,15 @@ def get_stock_analysis():
                     pass
             threading.Thread(target=_bg_record, daemon=True).start()
 
-        # 외부 충격/뉴스 신호 통합
-        name = result.get("name") or POPULAR_STOCKS.get(ticker, {}).get("name", "")
-        ext = _get_external_signals(ticker, name)
-        sig_type = result.get("signal_type", "NEUTRAL")
-        raw_conf = result.get("confidence") or 0
-        adj = ext.get("confidence_adj", 0)
-        # 매수 시그널에 부정적 외부신호 → 신뢰도 하향
-        if sig_type in ("STRONG_BUY", "BUY") and adj < 0:
-            result["confidence"] = max(0, raw_conf + adj)
-            result["confidence_adj_reason"] = _build_adj_reason(ext)
-        # 매도 시그널에 쇼크 감지 → 신뢰도 상향 (쇼크가 매도 확인)
-        elif sig_type in ("SELL", "STRONG_SELL") and ext.get("shock_level") in ("major","severe") and (ext.get("price_chg_1d") or 0) < -3:
-            result["confidence"] = min(100, raw_conf + 10)
-        result["ext"] = _clean(ext)
+        # 종목별 신호 이력 적재 (변경 시에만 기록 — '과거 매수/매도' 타임라인용)
+        try:
+            _append_stock_sig_history(
+                ticker, result.get("name") or ticker,
+                result.get("signal_type") or "NEUTRAL",
+                result.get("score"), result.get("confidence"), result.get("price"))
+        except Exception:
+            pass
 
-        # 시장/섹터 컨텍스트
-        mkt    = _get_market_context()
-        sector = result.get("sector") or POPULAR_STOCKS.get(ticker, {}).get("sector", "")
-        sec    = _get_sector_context(sector) if sector else {}
-        is_kq  = ticker.endswith(".KQ")
-        ctx    = _build_market_signal_context(
-            result.get("change_pct") or 0, sig_type,
-            result.get("confidence") or 0, mkt, sec, is_kq,
-        )
-        # 시장 컨텍스트 기반 신뢰도 재조정
-        if ctx["conf_adj"] != 0:
-            result["confidence"] = max(0, min(100, (result.get("confidence") or 0) + ctx["conf_adj"]))
         result["market_context"] = _clean({
             "market_label":  mkt.get("market_label"),
             "market_state":  mkt.get("market_state"),
@@ -1585,11 +1559,6 @@ def search_stocks():
             if ticker in seen:
                 continue
             name = info.get("name", "")
-            # 이름이 숫자(종목코드)인 경우 제외
-            if name.replace("-","").replace(".","").isdigit():
-                name = ""
-            if not name:
-                continue
             krx_code = info.get("krx_code", "")
             if q in ticker.lower() or q in name.lower() or q in krx_code:
                 results.append({
@@ -1622,6 +1591,8 @@ def get_chart_data():
     interval = request.args.get('interval', '1d')
     if not ticker:
         return jsonify({"error": "ticker 파라미터 필요"}), 400
+    if not _valid_ticker(ticker):
+        return jsonify({"error": "유효하지 않은 티커 형식입니다"}), 400
 
     period_map = {'1d': '2y', '1wk': '5y', '1mo': 'max'}
     if interval not in period_map:
@@ -1661,7 +1632,8 @@ def get_chart_data():
 
         return jsonify({"ticker": ticker, "interval": interval, "candles": candles})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"[chart] {ticker} 오류: {e}")
+        return jsonify({"error": "차트 데이터를 불러오지 못했습니다"}), 500
 
 
 @app.route('/api/fear_greed')
@@ -2071,70 +2043,6 @@ RANKING_CACHE_FILE = os.path.join(OUTPUT_DIR, "ranking_cache.json")
 _ranking_in_progress = False
 _ranking_lock = threading.Lock()
 
-# ── 한국 종목 한글명 해석기 (네이버 증권 + 영구 캐시) ──
-KR_NAME_CACHE_FILE = os.path.join(OUTPUT_DIR, "kr_names.json")
-_kr_name_cache: dict = {}   # code6 → 한글명
-
-def _load_kr_name_cache():
-    global _kr_name_cache
-    try:
-        if os.path.exists(KR_NAME_CACHE_FILE):
-            with open(KR_NAME_CACHE_FILE, encoding="utf-8") as f:
-                raw = json.load(f)
-            # 빈 문자열이나 숫자 코드로 저장된 잘못된 항목 제거
-            _kr_name_cache = {k: v for k, v in raw.items() if v and not v.isdigit()}
-    except Exception:
-        _kr_name_cache = {}
-
-def _save_kr_name_cache():
-    try:
-        with open(KR_NAME_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(_kr_name_cache, f, ensure_ascii=False)
-    except Exception:
-        pass
-
-def _lookup_kr_name(code6: str) -> str:
-    """6자리 코드 → 한글 종목명 (네이버 증권 모바일 API, 영구 캐시).
-    실패 시 빈 문자열."""
-    if not code6 or not code6.isdigit():
-        return ""
-    if code6 in _kr_name_cache:
-        return _kr_name_cache[code6]
-    name = ""
-    # ① 네이버 실시간 폴링 API (가장 단순/안정)
-    try:
-        url = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{code6}"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            data = json.loads(resp.read())
-        datas = data.get("datas") or []
-        if datas:
-            name = datas[0].get("stockName") or datas[0].get("stockNameEng") or ""
-    except Exception:
-        name = ""
-    # ② 모바일 통합 API 폴백
-    if not name:
-        try:
-            url = f"https://m.stock.naver.com/api/stock/{code6}/integration"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=6) as resp:
-                data = json.loads(resp.read())
-            name = data.get("stockName") or ""
-        except Exception:
-            name = ""
-    # 성공한 결과만 캐시 (빈 문자열은 캐시 안 함 → 다음 번에 재시도)
-    if name:
-        _kr_name_cache[code6] = name
-        _save_kr_name_cache()
-    return name
-
-
-def _resolve_kr_name(ticker: str, fallback: str = "") -> str:
-    """KR 티커의 한글명 우선 반환 (캐시/네이버), 없으면 fallback."""
-    code6 = ticker.split(".")[0]
-    nm = _lookup_kr_name(code6)
-    return nm or fallback
-
 
 def _analyze_for_ranking(ticker: str):
     """랭킹용 단일 종목 분석 — 실패 시 None"""
@@ -2145,26 +2053,16 @@ def _analyze_for_ranking(ticker: str):
         info = POPULAR_STOCKS.get(ticker, {})
         krx  = _krx_cache.get(ticker, {})
         is_kr = ticker.endswith(".KS") or ticker.endswith(".KQ")
-        _r_name = r.get("name") or ""
-        if _r_name.replace(",", "").replace(".", "").isdigit():
-            _r_name = ""
-        _info_name = info.get("name") or ""
-        _krx_name  = krx.get("name") or ""
-        # KRX 캐시 이름이 숫자 코드면 무효 처리
-        if _krx_name.replace(",", "").replace(".", "").isdigit():
-            _krx_name = ""
-        # 한국 종목인데 유효한 이름이 없으면 네이버에서 한글명 조회
-        if is_kr and not (_info_name or _krx_name or _r_name):
-            _r_name = _resolve_kr_name(ticker, "")
         return {
             "ticker":     ticker,
-            "name":       _info_name or _krx_name or _r_name or ticker,
+            "name":       info.get("name") or krx.get("name") or r.get("name", ticker),
             "name_en":    info.get("name_en", ""),
             "sector":     info.get("sector") or krx.get("market", ""),
             "flag":       info.get("flag") or ("🇰🇷" if is_kr else "🌐"),
             "price":      r.get("price"),
             "change_pct": r.get("change_pct"),
             "confidence": r.get("confidence"),
+            "score":      r.get("score"),
             "signal_type": r.get("signal_type"),
             "signal_text": r.get("signal_text"),
             "rs_score":   r.get("rs_score"),
@@ -2194,32 +2092,34 @@ def _build_ranking_cache():
 
     try:
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        import random
-        # POPULAR_STOCKS 우선, KRX는 최대 400개로 제한 (속도)
-        pop_tickers = set(POPULAR_STOCKS.keys())
-        krx_tickers = [t for t in _krx_cache.keys() if t not in pop_tickers]
-        if len(krx_tickers) > 400:
-            krx_tickers = random.sample(krx_tickers, 400)
-        tickers = list(pop_tickers) + krx_tickers
+        # POPULAR_STOCKS(미국 포함) + KRX 전종목 합집합 (중복 제거)
+        tickers = set(POPULAR_STOCKS.keys())
+        if _krx_cache:
+            tickers.update(_krx_cache.keys())
+        tickers = list(tickers)
         results = []
         print(f"[ranking] 분석 시작: {len(tickers)}개 종목 "
-              f"(POPULAR {len(pop_tickers)} + KRX {len(krx_tickers)}개)")
+              f"(POPULAR {len(POPULAR_STOCKS)} + KRX {len(_krx_cache)} 합집합)")
 
-        with ThreadPoolExecutor(max_workers=30) as ex:
+        # KRX 전종목 분석은 시간이 오래 걸리므로 워커 수↑, 타임아웃↑
+        with ThreadPoolExecutor(max_workers=20) as ex:
             futures = {ex.submit(_analyze_for_ranking, t): t for t in tickers}
-            for fut in as_completed(futures, timeout=600):
+            for fut in as_completed(futures, timeout=1800):
                 try:
-                    r = fut.result(timeout=20)
+                    r = fut.result(timeout=45)
                     if r and r.get("confidence") is not None:
                         results.append(r)
                 except Exception:
                     pass
 
-        results.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+        # 정렬: 매수-매도 축 점수 기준 (confidence는 이제 방향 무관 확신도라
+        # 강한 매도도 높게 나옴 → 랭킹은 '강세 순' 의미를 유지하기 위해 score 사용)
+        results.sort(key=lambda x: (x.get("score") if x.get("score") is not None
+                                     else x.get("confidence", 0)), reverse=True)
         cache = {
             "updated": datetime.datetime.now().isoformat(),
             "total_analyzed": len(results),
-            "ranking": results[:200],
+            "ranking": results[:200],   # 상위 200개 저장 (전종목 확장)
         }
         with open(RANKING_CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(_clean(cache), f, ensure_ascii=False)
@@ -2240,7 +2140,8 @@ def get_top_stocks():
     """
     n             = min(int(request.args.get("n", 10)), 100)
     signal_filter = request.args.get("signal", "")
-    refresh       = request.args.get("refresh", "0") == "1"
+    # 강제 재분석(전종목 5~10분, yfinance 수천 호출)은 관리자만 — 무인증 DoS·IP밴 방지
+    refresh       = request.args.get("refresh", "0") == "1" and _is_admin()
     cache_ttl     = 7200  # 2시간 (전종목 분석은 5~10분 소요되므로 캐시 수명 연장)
 
     cache_data = None
@@ -2256,21 +2157,29 @@ def get_top_stocks():
             cache_data = None
 
     if cache_data is None or refresh:
-        if not _ranking_in_progress:
-            threading.Thread(target=_build_ranking_cache, daemon=True).start()
+        threading.Thread(target=_build_ranking_cache, daemon=True).start()
         if cache_data is None:
-            # 캐시 파일 자체가 없을 때만 빈 결과 (첫 실행)
+            total_count = len(POPULAR_STOCKS) + len(_krx_cache)
             return jsonify({
                 "status":  "analyzing",
-                "message": f"첫 분석 중... 잠시 후 새로고침해주세요",
+                "message": f"코스피·코스닥 전종목 포함 {total_count}개 분석 중... (약 5~10분 소요)",
                 "ranking": [],
                 "total_analyzed": 0,
-                "analyzing": True,
             })
-        # 캐시가 있으면 만료돼도 일단 반환 (백그라운드 갱신 중 표시)
-        cache_data["analyzing"] = True
 
     ranking = cache_data.get("ranking", [])
+
+    # 서빙 시점 정렬 보정: 캐시가 구버전(신뢰도순 정렬, score 필드 없음)이어도
+    # 매도 신호가 상위에 섞이지 않도록 score를 유도해 재정렬
+    def _eff_score(r):
+        s = r.get("score")
+        if s is not None:
+            return s
+        conf = r.get("confidence") or 0
+        sig  = r.get("signal_type") or ""
+        return (100 - conf) if "SELL" in sig else conf
+    ranking = sorted(ranking, key=_eff_score, reverse=True)
+
     if signal_filter:
         ranking = [r for r in ranking if signal_filter.upper() in (r.get("signal_type") or "")]
 
@@ -2299,6 +2208,96 @@ def get_signal_accuracy():
 
 _portfolio_lock = threading.Lock()
 
+# ════════════════════════════════════════════
+# 종목별 과거 신호 이력 (매수/매도 신호 변경 기록)
+# ════════════════════════════════════════════
+STOCK_SIG_HISTORY_FILE = os.path.join(OUTPUT_DIR, "stock_signal_history.json")
+DART_REPORT_FILE       = os.path.join(OUTPUT_DIR, "dart_report.json")
+_sig_hist_lock = threading.Lock()
+_sig_hist = None   # {ticker: [event...oldest→newest]}, 지연 로드
+
+def _sig_hist_load_locked():
+    global _sig_hist
+    if _sig_hist is not None:
+        return
+    try:
+        with open(STOCK_SIG_HISTORY_FILE, encoding="utf-8") as f:
+            _sig_hist = json.load(f)
+        if not isinstance(_sig_hist, dict):
+            _sig_hist = {}
+    except Exception:
+        _sig_hist = {}
+
+def _append_stock_sig_history(ticker, name, sig, score, conf, price):
+    """신호 *변경* 시에만 기록 (같은 신호 반복 분석은 24시간당 1회 스냅샷).
+    종목당 최근 60건, 전체 500종목 한도 — 파일 무한 증식 방지.
+    분석 API 호출·보유종목 자동 점검 양쪽에서 호출돼 이력이 자연 적재됨."""
+    if not sig or not ticker:
+        return
+    now = datetime.datetime.now()
+    with _sig_hist_lock:
+        _sig_hist_load_locked()
+        evts = _sig_hist.get(ticker) or []
+        last = evts[-1] if evts else None
+        if last and last.get("signal_type") == sig:
+            try:
+                last_ts = datetime.datetime.fromisoformat(last.get("ts", ""))
+                if (now - last_ts).total_seconds() < 86400:
+                    return   # 동일 신호 24h 내 재분석 — 기록 생략
+            except Exception:
+                return
+        evts.append({
+            "ts": now.isoformat(timespec="seconds"),
+            "name": name,
+            "signal_type": sig,
+            "score": score,
+            "confidence": conf,
+            "price": price,
+            "prev": (last or {}).get("signal_type"),
+        })
+        _sig_hist[ticker] = evts[-60:]
+        if len(_sig_hist) > 500:
+            try:
+                oldest = sorted(_sig_hist.items(),
+                                key=lambda kv: (kv[1][-1].get("ts", "") if kv[1] else ""))
+                for k, _ in oldest[:len(_sig_hist) - 500]:
+                    _sig_hist.pop(k, None)
+            except Exception:
+                pass
+        try:
+            with open(STOCK_SIG_HISTORY_FILE, "w", encoding="utf-8") as f:
+                json.dump(_sig_hist, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"[sig_hist] 저장 실패: {e}")
+
+@app.route('/api/stock_signal_history')
+def stock_signal_history():
+    """종목별 과거 매수/매도 신호 이력 (최신순 40건)"""
+    ticker = request.args.get("ticker", "").strip().upper()
+    if ticker.isdigit() and len(ticker) == 6:
+        ticker += ".KS"
+    if not _valid_ticker(ticker):
+        return jsonify({"error": "유효하지 않은 티커"}), 400
+    with _sig_hist_lock:
+        _sig_hist_load_locked()
+        evts = list(_sig_hist.get(ticker) or [])
+        if not evts and ticker.endswith(".KS"):
+            evts = list(_sig_hist.get(ticker[:-3] + ".KQ") or [])
+    return jsonify({"ticker": ticker, "events": list(reversed(evts))[:40]})
+
+@app.route('/api/portfolio/dart_report')
+def get_dart_report():
+    """마지막 생성된 DART 공시 보고서 열람 (앱 내 표시용)"""
+    try:
+        if os.path.exists(DART_REPORT_FILE):
+            with open(DART_REPORT_FILE, encoding="utf-8") as f:
+                return jsonify(json.load(f))
+    except Exception:
+        pass
+    return jsonify({"status": "none",
+                    "message": "아직 생성된 보고서가 없습니다. '새 보고서 생성'을 눌러주세요."})
+
+
 @app.route('/api/portfolio', methods=['GET'])
 def get_portfolio():
     """보유종목 불러오기"""
@@ -2311,31 +2310,120 @@ def get_portfolio():
             pass
     return jsonify([])
 
+_PF_ALLOWED_KEYS = {"ticker", "name", "qty", "avg", "memo", "added"}
+_PF_MAX_ITEMS    = 100
+
 @app.route('/api/portfolio', methods=['POST'])
 def save_portfolio():
-    """보유종목 저장"""
+    """보유종목 저장 — 스키마 검증 추가
+    기존 문제: 임의 JSON을 무제한 크기로 디스크에 저장(디스크 고갈 DoS) +
+    저장된 문자열이 텔레그램 보고서에 그대로 들어감(주입 벡터)."""
     try:
         data = request.get_json(force=True)
         if not isinstance(data, list):
             return jsonify({"ok": False, "error": "array expected"}), 400
+        if len(data) > _PF_MAX_ITEMS:
+            return jsonify({"ok": False, "error": f"종목은 최대 {_PF_MAX_ITEMS}개까지"}), 400
+        cleaned = []
+        for item in data:
+            if not isinstance(item, dict):
+                return jsonify({"ok": False, "error": "항목 형식 오류"}), 400
+            t = str(item.get("ticker", "")).strip().upper()
+            if not _valid_ticker(t):
+                return jsonify({"ok": False, "error": f"잘못된 티커: {t[:20]}"}), 400
+            row = {"ticker": t}
+            if "name" in item:    row["name"]     = str(item["name"])[:50]
+            if "flag" in item:    row["flag"]     = str(item["flag"])[:10]
+            if "memo" in item:    row["memo"]     = str(item["memo"])[:200]
+            # addedAt / added 둘 다 허용
+            for dk in ("addedAt", "added"):
+                if dk in item: row["addedAt"] = str(item[dk])[:30]; break
+            # quantity / qty, buyPrice / avg 둘 다 허용
+            for fn, aliases in (("quantity", ("quantity","qty")), ("buyPrice", ("buyPrice","avg"))):
+                for alias in aliases:
+                    if alias in item:
+                        try: row[fn] = float(item[alias])
+                        except (TypeError, ValueError):
+                            return jsonify({"ok": False, "error": f"{alias} 숫자 형식 오류"}), 400
+                        break
+            cleaned.append(row)
         with _portfolio_lock:
             with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False)
-        return jsonify({"ok": True, "count": len(data)})
+                json.dump(cleaned, f, ensure_ascii=False)
+        return jsonify({"ok": True, "count": len(cleaned)})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        print(f"[portfolio] 저장 오류: {e}")
+        return jsonify({"ok": False, "error": "저장 실패"}), 500
+
+
+_sell_records_lock = threading.Lock()
+_SR_MAX_ITEMS = 500
+
+@app.route('/api/sell_records', methods=['GET'])
+def get_sell_records():
+    """매도 기록 불러오기"""
+    with _sell_records_lock:
+        try:
+            if os.path.exists(SELL_RECORDS_FILE):
+                with open(SELL_RECORDS_FILE, encoding='utf-8') as f:
+                    return jsonify(json.load(f))
+        except Exception:
+            pass
+    return jsonify([])
+
+@app.route('/api/sell_records', methods=['POST'])
+def save_sell_records():
+    """매도 기록 저장"""
+    try:
+        data = request.get_json(force=True)
+        if not isinstance(data, list):
+            return jsonify({"ok": False, "error": "array expected"}), 400
+        if len(data) > _SR_MAX_ITEMS:
+            return jsonify({"ok": False, "error": f"기록은 최대 {_SR_MAX_ITEMS}개까지"}), 400
+        cleaned = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            t = str(item.get("ticker", "")).strip().upper()
+            if not t:
+                continue
+            row = {
+                "ticker":    t,
+                "name":      str(item.get("name", t))[:50],
+                "flag":      str(item.get("flag", ""))[:10],
+                "quantity":  float(item.get("quantity", 0)),
+                "buyPrice":  float(item.get("buyPrice", 0)),
+                "sellPrice": float(item.get("sellPrice", 0)),
+                "soldAt":    str(item.get("soldAt", ""))[:30],
+                "pnl":       float(item.get("pnl", 0)),
+                "pnlPct":    float(item.get("pnlPct", 0)),
+            }
+            if "memo" in item:
+                row["memo"] = str(item["memo"])[:200]
+            cleaned.append(row)
+        with _sell_records_lock:
+            with open(SELL_RECORDS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(cleaned, f, ensure_ascii=False)
+        return jsonify({"ok": True, "count": len(cleaned)})
+    except Exception as e:
+        print(f"[sell_records] 저장 오류: {e}")
+        return jsonify({"ok": False, "error": "저장 실패"}), 500
 
 
 @app.route('/api/portfolio/check')
 def portfolio_check_now():
-    """보유종목 신호 즉시 점검 + 텔레그램 알림 (수동 트리거)"""
+    """보유종목 신호 즉시 점검 + 텔레그램 알림 (관리자 전용 수동 트리거)"""
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "관리자 토큰 필요"}), 403
     threading.Thread(target=_check_portfolio_signals, daemon=True).start()
     return jsonify({"ok": True, "message": "보유종목 신호 점검 시작됨 (백그라운드)"})
 
 
 @app.route('/api/portfolio/dart')
 def portfolio_dart_now():
-    """보유종목 DART 공시 보고서 즉시 생성 → 텔레그램 발송 (수동 트리거)"""
+    """보유종목 DART 공시 보고서 즉시 생성 → 텔레그램 발송 (관리자 전용)"""
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "관리자 토큰 필요"}), 403
     dart_ok = bool(_dart_api_key())
     if not dart_ok:
         return jsonify({"ok": False, "message": "DART_API_KEY 미설정 (.env에 추가 필요)"}), 400
@@ -2371,29 +2459,52 @@ def index():
 # ════════════════════════════════════════════
 # GitHub 자동 배포 Webhook
 # ════════════════════════════════════════════
-DEPLOY_SECRET = "stockbot-deploy-2024"
+# 배포 시크릿은 반드시 환경변수로 주입. 소스에 하드코딩 시 저장소 열람만으로
+# HMAC 위조 → git pull + 서버 강제 재시작이 가능했음 (치명적).
+DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "")
+_deploy_log: list = []   # 최근 10건 메모리 보관
+
+@app.route('/deploy/log')
+def deploy_log():
+    """최근 배포 로그 조회 (디버그용)"""
+    return jsonify({"log": _deploy_log[-10:]})
 
 @app.route('/deploy', methods=['POST'])
 def deploy():
-    """GitHub push → 자동 git pull & 서버 재시작"""
+    """GitHub push → 자동 git pull & 서버 재시작 (DEPLOY_SECRET 환경변수 필수)"""
+    ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if not DEPLOY_SECRET:
+        _deploy_log.append({"ts": ts, "result": "ERROR: DEPLOY_SECRET 미설정"})
+        return jsonify({"error": "deploy disabled (DEPLOY_SECRET 미설정)"}), 503
     sig = request.headers.get('X-Hub-Signature-256', '')
     body = request.get_data()
     expected = 'sha256=' + hmac.new(DEPLOY_SECRET.encode(), body, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
+        _deploy_log.append({"ts": ts, "result": f"ERROR: 서명 불일치 (received={sig[:20]})"})
         return jsonify({"error": "invalid signature"}), 403
 
     def do_deploy():
-        import time, signal as _sig
+        import time
         time.sleep(0.5)
         try:
-            subprocess.run(['git', 'pull', 'origin', 'main'], cwd=BASE_DIR, timeout=30)
+            res = subprocess.run(
+                ['git', 'pull', 'origin', 'main'],
+                cwd=BASE_DIR, timeout=30, capture_output=True, text=True
+            )
+            out = (res.stdout + res.stderr).strip()
+            _deploy_log.append({"ts": ts, "result": f"OK: {out[:200]}"})
+            print(f"[deploy] git pull 결과: {out}")
         except Exception as e:
+            _deploy_log.append({"ts": ts, "result": f"ERROR: git pull 실패 — {e}"})
             print(f"[deploy] git pull error: {e}")
-        # 응답 반환 후 자기 PID에만 SIGTERM (run.sh 루프가 재시작)
-        time.sleep(2)
-        os.kill(os.getpid(), _sig.SIGTERM)
+        subprocess.Popen(
+            'sleep 2 && pkill -f "python3 server.py"',
+            shell=True,
+            start_new_session=True
+        )
 
     threading.Thread(target=do_deploy, daemon=True).start()
+    _deploy_log.append({"ts": ts, "result": "STARTED: 배포 시작됨"})
     return jsonify({"status": "배포 시작됨", "message": "git pull 후 서버 재시작 중..."})
 
 
@@ -2401,25 +2512,20 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     print(f"\n  🚀 멀티마켓 봇 API 서버 시작")
     print(f"  http://localhost:{port}")
-    print(f"  텔레그램: {'설정됨' if TELEGRAM_TOKEN else '미설정 (TELEGRAM_TOKEN 환경변수 필요)'}\n")
+    print(f"  텔레그램: {'설정됨' if TELEGRAM_TOKEN else '미설정 (TELEGRAM_TOKEN 환경변수 필요)'}")
+    if not ADMIN_TOKEN:
+        print("  ⚠️ ADMIN_TOKEN 미설정 — 관리자 기능이 모두에게 열려 있습니다."
+              " 공개 서버라면 .env에 ADMIN_TOKEN을 설정하고 앱 설정 탭에 입력하세요.\n")
+    else:
+        print("  관리자 토큰: 설정됨\n")
     # 일일 스케줄러 (KST 08:00, 16:00) — 시작 시 자동 분석은 하지 않음
     threading.Thread(target=_daily_scheduler, daemon=True).start()
     # 보유종목 이전 신호 로드 + 감시 스레드 시작
     _load_portfolio_sig_prev()
     _load_dart_corp_cache()
-    _load_kr_name_cache()
     threading.Thread(target=_portfolio_watcher, daemon=True).start()
-    # signals_v4.json 없으면 시작 즉시 분석 실행
-    if not os.path.exists(SIGNALS_FILE):
-        print("  ⚡ signals_v4.json 없음 → 즉시 분석 실행")
-        _run_bot_background()
     # KRX 전종목 캐시 초기화 (없거나 7일 초과면 백그라운드 갱신)
     _init_krx_cache()
-    # waitress 사용 (미설치 시 Flask 개발서버 폴백)
-    try:
-        from waitress import serve
-        print(f"  ✅ waitress WSGI 서버로 구동 (threads=8)")
-        serve(app, host='0.0.0.0', port=port, threads=8)
-    except ImportError:
-        print(f"  ⚠️  waitress 미설치 → Flask 개발서버 사용 (pip install waitress 권장)")
-        app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+

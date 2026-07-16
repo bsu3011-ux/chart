@@ -85,22 +85,28 @@ def record_signal(ticker: str, signal_type: str, confidence: int,
 
 
 def evaluate_pending(max_eval: int = 50) -> int:
-    """7일(≥5 거래일) 이상 된 미평가 신호 결과 자동 계산
-    - exit_price: 진입 후 5거래일 종가
-    - verdict: correct / wrong / neutral (±2% 기준)
-    반환: 평가된 건수
+    """미평가 신호 결과 자동 계산 (5거래일 단기 + 20거래일 장기)
+    - outcome   : 진입 후 5거래일 종가 기준, verdict correct/wrong/neutral (±2%)
+    - outcome20 : 진입 후 20거래일 종가 기준 (전략의 실제 보유기간에 가까운 평가)
+    반환: 평가된 건수 (5일·20일 합산)
     """
     import yfinance as yf
     import pandas as pd
 
-    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=7)).isoformat()
+    now      = datetime.datetime.utcnow()
+    cutoff5  = (now - datetime.timedelta(days=7)).isoformat()
+    cutoff20 = (now - datetime.timedelta(days=30)).isoformat()
 
     with _lock:
         data = _load()
         sigs = data.get("signals", [])
-        to_eval = [s for s in sigs
-                   if s.get("outcome") is None
-                   and s.get("timestamp", "") <= cutoff][:max_eval]
+        need5  = [s for s in sigs
+                  if s.get("outcome") is None
+                  and s.get("timestamp", "") <= cutoff5]
+        need20 = [s for s in sigs
+                  if s.get("outcome20") is None
+                  and s.get("timestamp", "") <= cutoff20]
+        to_eval = (need5 + [s for s in need20 if s not in need5])[:max_eval]
 
         if not to_eval:
             return 0
@@ -113,7 +119,7 @@ def evaluate_pending(max_eval: int = 50) -> int:
         evaluated = 0
         for ticker, entries in by_ticker.items():
             try:
-                hist = yf.download(ticker, period="3mo", interval="1d",
+                hist = yf.download(ticker, period="4mo", interval="1d",
                                    auto_adjust=True, progress=False, threads=False)
                 if hist is None or hist.empty:
                     continue
@@ -128,31 +134,47 @@ def evaluate_pending(max_eval: int = 50) -> int:
                         entry_dt    = datetime.datetime.fromisoformat(s["timestamp"])
                         entry_price = float(s["price"])
                         future      = close[close.index > entry_dt]
-                        if len(future) < 5:
-                            continue
-                        exit_price = float(future.iloc[4])
-                        ret        = (exit_price - entry_price) / entry_price * 100
-
                         is_long = s["signal_type"] in ("BUY", "STRONG_BUY")
-                        if   is_long  and ret >=  2.0: verdict = "correct"
-                        elif is_long  and ret <= -2.0: verdict = "wrong"
-                        elif not is_long and ret <= -2.0: verdict = "correct"
-                        elif not is_long and ret >=  2.0: verdict = "wrong"
-                        else:                              verdict = "neutral"
 
-                        s["outcome"] = {
-                            "exit_price":  round(exit_price, 2),
-                            "return_pct":  round(ret, 2),
-                            "verdict":     verdict,
-                            "evaluated_at": datetime.datetime.utcnow().isoformat(),
-                        }
-                        evaluated += 1
+                        # ── 5거래일 단기 평가 ──
+                        if s.get("outcome") is None and len(future) >= 5:
+                            exit_price = float(future.iloc[4])
+                            ret        = (exit_price - entry_price) / entry_price * 100
+                            if   is_long  and ret >=  2.0: verdict = "correct"
+                            elif is_long  and ret <= -2.0: verdict = "wrong"
+                            elif not is_long and ret <= -2.0: verdict = "correct"
+                            elif not is_long and ret >=  2.0: verdict = "wrong"
+                            else:                              verdict = "neutral"
+                            s["outcome"] = {
+                                "exit_price":  round(exit_price, 2),
+                                "return_pct":  round(ret, 2),
+                                "verdict":     verdict,
+                                "evaluated_at": now.isoformat(),
+                            }
+                            evaluated += 1
+
+                        # ── 20거래일 장기 평가 (±4% 기준 — 기간에 비례해 완화) ──
+                        if s.get("outcome20") is None and len(future) >= 20:
+                            exit20 = float(future.iloc[19])
+                            ret20  = (exit20 - entry_price) / entry_price * 100
+                            if   is_long  and ret20 >=  4.0: v20 = "correct"
+                            elif is_long  and ret20 <= -4.0: v20 = "wrong"
+                            elif not is_long and ret20 <= -4.0: v20 = "correct"
+                            elif not is_long and ret20 >=  4.0: v20 = "wrong"
+                            else:                               v20 = "neutral"
+                            s["outcome20"] = {
+                                "exit_price":  round(exit20, 2),
+                                "return_pct":  round(ret20, 2),
+                                "verdict":     v20,
+                                "evaluated_at": now.isoformat(),
+                            }
+                            evaluated += 1
                     except Exception:
                         continue
             except Exception:
                 continue
 
-        data["last_evaluated"] = datetime.datetime.utcnow().isoformat()
+        data["last_evaluated"] = now.isoformat()
         _save(data)
 
     return evaluated
@@ -193,6 +215,14 @@ def get_accuracy_stats() -> dict:
             sum(s["outcome"]["return_pct"] for s in evaluated
                 if s["signal_type"] == st) / t, 2
         ) if t > 0 else 0
+        # 20거래일 장기 평가 (있는 신호만)
+        ev20 = [s for s in evaluated
+                if s["signal_type"] == st and s.get("outcome20")]
+        if ev20:
+            d["total20"]      = len(ev20)
+            d["accuracy20"]   = round(sum(1 for s in ev20
+                                          if s["outcome20"]["verdict"] == "correct") / len(ev20), 3)
+            d["avg_return20"] = round(sum(s["outcome20"]["return_pct"] for s in ev20) / len(ev20), 2)
 
     # ── 신뢰도 구간별 ────────────────────────────────────────────
     bands_def = [("90-100", 90, 101), ("70-89", 70, 90),
@@ -204,6 +234,7 @@ def get_accuracy_stats() -> dict:
         t = len(bucket)
         c = sum(1 for s in bucket if s["outcome"]["verdict"] == "correct")
         w = sum(1 for s in bucket if s["outcome"]["verdict"] == "wrong")
+        b20 = [s for s in bucket if s.get("outcome20")]
         by_band[label] = {
             "total":    t,
             "correct":  c,
@@ -213,6 +244,10 @@ def get_accuracy_stats() -> dict:
             "avg_return": round(
                 sum(s["outcome"]["return_pct"] for s in bucket) / t, 2
             ) if t > 0 else None,
+            "total20":      len(b20) or None,
+            "avg_return20": round(
+                sum(s["outcome20"]["return_pct"] for s in b20) / len(b20), 2
+            ) if b20 else None,
         }
 
     # ── 최근 신호 20개 ────────────────────────────────────────────

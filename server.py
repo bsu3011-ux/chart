@@ -1263,12 +1263,90 @@ def _daily_scheduler():
         time.sleep(60)
 
 
+# ── 지수 실시간 가격 오버레이 ─────────────────────────────────────
+# signals_v4.json은 하루 2회(08/16시) 분석 시점의 가격이라 장중엔 옛값.
+# 신호는 그대로 두고 price/change_pct만 3분 캐시 배치 다운로드로 갱신한다.
+_sig_px_cache: dict = {"ts": 0.0, "prices": {}}
+_SIG_PX_TTL = 180
+_sig_px_lock = threading.Lock()
+
+def _fetch_signal_prices(tickers: list) -> dict:
+    """전체 지수 티커 최신 종가/등락률 배치 조회 → {ticker: (price, chg_pct)}"""
+    import yfinance as yf
+    prices = {}
+    try:
+        df = yf.download(tickers, period="5d", interval="1d",
+                         auto_adjust=True, progress=False, threads=True)
+        if df is None or df.empty:
+            return prices
+        closes = df["Close"]
+        if not isinstance(closes, __import__("pandas").DataFrame):
+            closes = closes.to_frame(name=tickers[0])
+        for t in tickers:
+            try:
+                s = closes[t].dropna()
+                if len(s) >= 2:
+                    cur, prev = float(s.iloc[-1]), float(s.iloc[-2])
+                    if cur > 0 and prev > 0:
+                        prices[t] = (cur, (cur / prev - 1) * 100)
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"[signals] 실시간 가격 조회 실패: {e}")
+    return prices
+
+def _get_signal_prices(tickers: list) -> dict:
+    """3분 캐시. 만료 시: 캐시가 있으면 즉시 반환+백그라운드 갱신, 없으면 동기 조회"""
+    now = time.time()
+    with _sig_px_lock:
+        fresh   = now - _sig_px_cache["ts"] < _SIG_PX_TTL
+        has_any = bool(_sig_px_cache["prices"])
+    if fresh and has_any:
+        return _sig_px_cache["prices"]
+    if has_any:
+        # 스테일 즉시 반환 + 백그라운드 갱신 (요청을 수 초씩 잡지 않음)
+        def _bg():
+            p = _fetch_signal_prices(tickers)
+            if p:
+                with _sig_px_lock:
+                    _sig_px_cache["ts"] = time.time()
+                    _sig_px_cache["prices"] = p
+        with _sig_px_lock:
+            if now - _sig_px_cache.get("bg_ts", 0) > 30:   # 중복 스레드 방지
+                _sig_px_cache["bg_ts"] = now
+                threading.Thread(target=_bg, daemon=True).start()
+        return _sig_px_cache["prices"]
+    # 첫 요청 (서버 기동 직후): 동기 조회
+    p = _fetch_signal_prices(tickers)
+    if p:
+        with _sig_px_lock:
+            _sig_px_cache["ts"] = time.time()
+            _sig_px_cache["prices"] = p
+    return p
+
 @app.route('/api/signals')
 def get_signals():
-    """현재 시그널 JSON 반환"""
+    """현재 시그널 JSON 반환 (지수 가격은 실시간 오버레이)"""
     if os.path.exists(SIGNALS_FILE):
         with open(SIGNALS_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
+        # 장중 실시간 가격 덮어쓰기 — 신호/지표는 분석 시점 그대로 유지
+        try:
+            mkts = data.get("markets", [])
+            tickers = [m.get("ticker") for m in mkts if m.get("ticker")]
+            if tickers:
+                prices = _get_signal_prices(tickers)
+                for m in mkts:
+                    p = prices.get(m.get("ticker"))
+                    if p:
+                        m["price"]      = round(p[0], 2)
+                        m["change_pct"] = round(p[1], 2)
+                        m["price_live"] = True
+                if prices:
+                    data["price_updated_at"] = datetime.datetime.fromtimestamp(
+                        _sig_px_cache["ts"]).isoformat()
+        except Exception as e:
+            print(f"[signals] 가격 오버레이 오류: {e}")
         return jsonify(data)
     else:
         return jsonify({"error": "아직 분석 결과가 없습니다. /api/run 으로 실행하세요."}), 404

@@ -47,6 +47,7 @@ import time
 from multi_market_bot_v4 import (
     main as run_bot, MARKETS, load_data, analyze_market, save_json,
     analyze_stock, POPULAR_STOCKS, backtest_strategy, backtest_stock,
+    backtest_recent,
 )
 
 # ── 절대 경로 기준 설정 ──
@@ -796,6 +797,30 @@ def get_backtest():
         pass
 
     return jsonify(result)
+
+
+@app.route('/api/backtest_recent')
+def get_backtest_recent():
+    """GET /api/backtest_recent?ticker=^GSPC&days=30
+    최근 N영업일(기본 30) 전략 시뮬레이션. 일별 로그·거래내역 반환.
+    캐시 없음(실시간 조회)."""
+    ticker = request.args.get('ticker', '').strip().upper()
+    try:
+        days = int(request.args.get('days', '30'))
+    except Exception:
+        days = 30
+    days = max(5, min(120, days))
+    if not ticker:
+        return jsonify({"error": "ticker 필요"}), 400
+    if ticker.isdigit() and len(ticker) == 6:
+        ticker = ticker + ".KS"
+    try:
+        r = backtest_recent(ticker, days=days)
+        if r is None:
+            return jsonify({"error": "데이터 부족 (최소 210일 필요)"}), 200
+        return jsonify(_clean(r))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ════════════════════════════════════════════

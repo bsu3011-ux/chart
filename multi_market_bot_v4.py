@@ -2611,6 +2611,190 @@ def backtest_stock(ticker: str, period: str = "10y") -> dict | None:
 
 
 # ════════════════════════════════════════════════════════════════
+# 최근 N일 백테스트 (일별 로그 포함)
+# ════════════════════════════════════════════════════════════════
+def backtest_recent(ticker: str, days: int = 30) -> dict | None:
+    """최근 N영업일 전략 시뮬레이션.
+    지표 계산을 위해 1년치 데이터를 로드하지만, 실제 매매 시뮬레이션은 마지막 N일만.
+    반환: {strategy, days, start/end date, equity_pct, bnh_pct, alpha, trades, log[]}
+    """
+    _sector = POPULAR_STOCKS.get(ticker, {}).get("sector", "")
+    preset = get_strategy_preset(ticker=ticker, sector=_sector)
+
+    df = load_data(ticker, period="1y")
+    if df is None or len(df) < 210:
+        return None
+    df = df.dropna(subset=['Close', 'High', 'Low', 'Open', 'Volume'])
+    if len(df) < 210:
+        return None
+
+    close, high, low = df['Close'], df['High'], df['Low']
+    n = len(close)
+
+    # 지표
+    ma20_s  = close.rolling(20).mean()
+    ma50_s  = close.rolling(50).mean()
+    ma200_s = close.rolling(200).mean()
+    rsi_s   = calc_rsi(close)
+    ema12   = close.ewm(span=12, adjust=False).mean()
+    ema26   = close.ewm(span=26, adjust=False).mean()
+    _macd   = ema12 - ema26
+    mhist_s = _macd - _macd.ewm(span=9, adjust=False).mean()
+    bb_std  = close.rolling(20).std()
+    bb_l    = close.rolling(20).mean() - 2 * bb_std
+    bb_u    = close.rolling(20).mean() + 2 * bb_std
+    bpctb_s = (close - bb_l) / (bb_u - bb_l).replace(0, np.nan)
+    volr_s  = df['Volume'] / df['Volume'].rolling(20).mean().replace(0, np.nan)
+    sl50_s  = (ma50_s - ma50_s.shift(5)) / ma50_s.shift(5).replace(0, np.nan) * 100
+    atr_s   = calc_atr(df)
+    low10_s = low.rolling(10).min()
+    low20_s = low.rolling(20).min()
+    high20_s= high.rolling(20).max()
+
+    def _sig(i):
+        c = float(close.iloc[i])
+        m20  = float(ma20_s.iloc[i])  if not pd.isna(ma20_s.iloc[i])  else c
+        m50  = float(ma50_s.iloc[i])  if not pd.isna(ma50_s.iloc[i])  else c
+        m200 = float(ma200_s.iloc[i]) if not pd.isna(ma200_s.iloc[i]) else None
+        rsi  = float(rsi_s.iloc[i])   if not pd.isna(rsi_s.iloc[i])   else 50
+        mh   = float(mhist_s.iloc[i]) if not pd.isna(mhist_s.iloc[i]) else 0
+        bpb  = float(bpctb_s.iloc[i]) if not pd.isna(bpctb_s.iloc[i]) else 0.5
+        vr   = float(volr_s.iloc[i])  if not pd.isna(volr_s.iloc[i])  else 1.0
+        s50  = float(sl50_s.iloc[i])  if not pd.isna(sl50_s.iloc[i])  else 0
+        sig, txt, _ = _generate_signal(c, m20, m50, m200, rsi, mh, bpb, vr,
+                                       ma50_slope=s50, preset=preset)
+        return sig, m20, m50, m200
+
+    start_i = max(210, n - days)   # 마지막 N일 시뮬레이션
+    equity = 100.0
+    bnh    = 100.0
+    in_pos = False
+    stop_p = 0.0
+    target_p = 0.0
+    entry_eq = 0.0
+    FEE = 0.0015
+
+    log = []
+    trades = []
+    open_trade = None
+
+    for i in range(start_i, n):
+        c      = float(close.iloc[i])
+        c_hi   = float(high.iloc[i])
+        c_lo   = float(low.iloc[i])
+        c_prev = float(close.iloc[i-1]) if i > 0 else c
+        dr     = (c - c_prev) / c_prev if c_prev > 0 else 0
+        date   = df.index[i].strftime("%Y-%m-%d")
+
+        bnh *= (1 + dr)
+        sig, m20, m50, m200 = _sig(i)
+        above_ma200 = bool(m200 and c > m200)
+        pr = 0.0
+        action = ""
+
+        if in_pos:
+            if c_lo <= stop_p:
+                pr = (stop_p / c_prev - 1) - FEE
+                action = f"손절 청산 @{stop_p:.2f}"
+                in_pos = False
+                if open_trade:
+                    open_trade["exit_date"] = date
+                    open_trade["exit_price"] = round(stop_p, 2)
+                    open_trade["result_pct"] = round((stop_p/open_trade["entry_price"]-1)*100-0.3, 2)
+                    open_trade["outcome"] = "손절"
+                    trades.append(open_trade); open_trade = None
+            elif c_hi >= target_p:
+                pr = (target_p / c_prev - 1) - FEE
+                action = f"목표 청산 @{target_p:.2f}"
+                in_pos = False
+                if open_trade:
+                    open_trade["exit_date"] = date
+                    open_trade["exit_price"] = round(target_p, 2)
+                    open_trade["result_pct"] = round((target_p/open_trade["entry_price"]-1)*100-0.3, 2)
+                    open_trade["outcome"] = "목표달성"
+                    trades.append(open_trade); open_trade = None
+            elif sig in ("SELL", "STRONG_SELL"):
+                if preset["key"] == "value" and sig == "SELL":
+                    pr = dr; action = "보유(가치전략, SELL 무시)"
+                elif above_ma200 and sig == "SELL":
+                    pr = dr; action = "보유(MA200위, 눌림목 필터)"
+                else:
+                    pr = dr - FEE
+                    action = f"시그널 청산 ({sig})"
+                    in_pos = False
+                    if open_trade:
+                        open_trade["exit_date"] = date
+                        open_trade["exit_price"] = round(c, 2)
+                        open_trade["result_pct"] = round((c/open_trade["entry_price"]-1)*100-0.3, 2)
+                        open_trade["outcome"] = sig
+                        trades.append(open_trade); open_trade = None
+            else:
+                pr = dr; action = "보유"
+        else:
+            if sig in ("BUY", "STRONG_BUY"):
+                atr  = float(atr_s.iloc[i])   if not pd.isna(atr_s.iloc[i])   else c * 0.02
+                l10  = float(low10_s.iloc[i])  if not pd.isna(low10_s.iloc[i])  else c * 0.97
+                l20  = float(low20_s.iloc[i])  if not pd.isna(low20_s.iloc[i])  else c * 0.95
+                h20  = float(high20_s.iloc[i]) if not pd.isna(high20_s.iloc[i]) else c * 1.05
+                tgts = calc_position_targets(c, atr, l20, h20, sig,
+                                              ma20=m20, ma50=m50, low_10d=l10, preset=preset)
+                if tgts and 0 < tgts["stop"] < c < tgts["t2"]:
+                    in_pos = True; stop_p = tgts["stop"]; target_p = tgts["t2"]
+                    entry_eq = equity
+                    pr = -FEE
+                    action = f"{sig} 진입 @{c:.2f} (stop {tgts['stop']:.2f}, T2 {tgts['t2']:.2f})"
+                    open_trade = {
+                        "entry_date":  date,
+                        "entry_price": round(c, 2),
+                        "signal":      sig,
+                        "stop":        round(tgts["stop"], 2),
+                        "target":      round(tgts["t2"], 2),
+                    }
+                else:
+                    action = f"{sig} 신호 발생, 진입조건 불충족 → 현금"
+            else:
+                action = f"{sig} → 현금 유지"
+
+        equity *= (1 + pr)
+        log.append({
+            "date":     date,
+            "close":    round(c, 2),
+            "sig":      sig,
+            "action":   action,
+            "equity":   round(equity, 2),
+            "bnh":      round(bnh, 2),
+        })
+
+    # 아직 포지션 열려있으면 마지막가로 마감
+    if in_pos and open_trade:
+        c_last = float(close.iloc[-1])
+        open_trade["exit_date"]  = df.index[-1].strftime("%Y-%m-%d")
+        open_trade["exit_price"] = round(c_last, 2)
+        open_trade["result_pct"] = round((c_last/open_trade["entry_price"]-1)*100-0.15, 2)  # 진입만
+        open_trade["outcome"]    = "보유중"
+        trades.append(open_trade)
+
+    return {
+        "ticker":       ticker,
+        "days":         days,
+        "start_date":   log[0]["date"] if log else "",
+        "end_date":     log[-1]["date"] if log else "",
+        "equity_pct":   round(equity - 100, 2),
+        "bnh_pct":      round(bnh    - 100, 2),
+        "alpha_pct":    round(equity - bnh, 2),
+        "trade_count":  len([t for t in trades if t.get("outcome") != "보유중"]),
+        "open_position": in_pos,
+        "trades":       trades,
+        "log":          log,
+        "strategy": {
+            "key":  preset["key"],
+            "name": preset["name"],
+            "icon": preset["icon"],
+        },
+    }
+
+
+# ════════════════════════════════════════════════════════════════
 # 주식 검색 분석 — 메인 함수
 # ════════════════════════════════════════════════════════════════
 def analyze_stock(ticker: str) -> dict:
